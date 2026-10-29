@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>天窗天幕 CRM</title>
+  <meta name="description" content="天窗天幕 · 客户档案 / 商机管道 / 跟进记录 / 看板统计">
+
+  <!-- PWA：添加到主屏幕（图标 + manifest；service worker 只做静态壳缓存） -->
+  <link rel="manifest" href="/crm/manifest.json">
+  <meta name="theme-color" content="#1f6feb">
+  <link rel="icon" type="image/png" sizes="192x192" href="/crm/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/crm/icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="天幕CRM">
+
+  <link rel="stylesheet" href="/crm/app.css">
+</head>
+<body>
+
+<!-- ===== 顶栏（登录后才显示）===== -->
+<header id="topbar" class="topbar" hidden>
+  <div class="brand">天窗天幕 CRM</div>
+  <nav id="nav" class="nav">
+    <a href="#/dashboard" data-view="dashboard">看板</a>
+    <a href="#/customers" data-view="customers">客户</a>
+    <a href="#/deals" data-view="deals">商机</a>
+    <a href="#/followups" data-view="followups">跟进</a>
+    <a href="#/stats" data-view="stats">统计</a>
+    <a href="#/import" data-view="import">导入</a>
+  </nav>
+  <div class="who">
+    <span id="whoami"></span>
+    <button type="button" id="logoutBtn" class="btn-link">退出</button>
+  </div>
+</header>
+
+<!-- ===== 登录页 =====
+     需求：电脑端不允许保存密码。
+     - 表单 autocomplete="off" 是基础；
+     - 密码框必须 autocomplete="new-password"（普通 off 在密码框会被 Chrome/Edge 忽略，
+       这个值才会让浏览器不弹「保存密码」）；
+     - 密码只存在于这个 input 里，登录成功后立刻清空，绝不写 localStorage/sessionStorage。 -->
+<section id="loginView" class="login-wrap" hidden>
+  <div class="login-card">
+    <h1>天窗天幕 CRM</h1>
+    <p class="sub">内网使用 · 登录后 12 小时自动失效</p>
+    <form id="loginForm" autocomplete="off" novalidate>
+      <div class="field">
+        <label for="loginUser">账号</label>
+        <input id="loginUser" name="username" type="text" autocomplete="off"
+               autocapitalize="off" autocorrect="off" spellcheck="false"
+               inputmode="text" required maxlength="64">
+      </div>
+      <div class="field">
+        <label for="loginPass">密码</label>
+        <input id="loginPass" name="password" type="password" autocomplete="new-password"
+               required maxlength="256">
+      </div>
+      <button type="submit" id="loginBtn" class="btn btn-primary">登录</button>
+      <p id="loginErr" class="err" hidden></p>
+    </form>
+  </div>
+</section>
+
+<!-- ===== 单页壳：所有视图渲染到这里 ===== -->
+<main id="app" hidden></main>
+
+<div id="toast" class="toast" hidden></div>
+
+<noscript>
+  <div class="login-wrap"><div class="login-card">这个页面需要启用 JavaScript 才能使用。</div></div>
+</noscript>
+
+<script src="/crm/app.js"></script>
+</body>
+</html>
