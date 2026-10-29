@@ -1,0 +1,64 @@
+"""密码校验（零依赖：只用 stdlib）。
+
+存储格式：``$pbkdf2$<iters>$<salt_hex>$<hash_hex>``
+- 算法：PBKDF2-HMAC-SHA256
+- 迭代：200000（本机没有 bcrypt，这是项目已拍板的方案）
+
+会话 token / 过期时间的工具在 T2 加进来（同一个模块，认证域的东西放一起）。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import secrets
+from datetime import datetime, timezone
+
+from app.config.settings import settings  # noqa: F401  —— 供 T2 的会话 TTL 使用
+
+PBKDF2_ITERATIONS = 200_000
+_HASH_ALGO = "sha256"
+_SALT_BYTES = 16
+
+
+def hash_password(password: str, iterations: int = PBKDF2_ITERATIONS) -> str:
+    """生成 ``$pbkdf2$200000$<salt>$<hash>``。每次调用都用新的随机盐。"""
+    if not password:
+        raise ValueError("password 不能为空")
+    salt = secrets.token_bytes(_SALT_BYTES)
+    digest = hashlib.pbkdf2_hmac(_HASH_ALGO, password.encode("utf-8"), salt, iterations)
+    return f"$pbkdf2${iterations}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """校验密码；任何格式异常都返回 False（不抛异常，避免登录接口 500）。"""
+    if not isinstance(stored, str):
+        return False
+    try:
+        scheme, iterations, salt_hex, hash_hex = stored.split("$")[1:]
+        if scheme != "pbkdf2":
+            return False
+        digest = hashlib.pbkdf2_hmac(
+            _HASH_ALGO,
+            (password or "").encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iterations),
+        )
+    except (ValueError, TypeError):
+        return False
+    # 定长比较，避免时序侧信道
+    return secrets.compare_digest(digest.hex(), hash_hex)
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def to_iso(dt: datetime) -> str:
+    """统一成 ``2026-10-29T09:00:00Z``；固定格式才能用字符串比较时间先后。"""
+    return (
+        dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
+
+
+def now_iso() -> str:
+    return to_iso(utc_now())
