@@ -71,7 +71,7 @@ ENSURE_SQL: list[str] = [
     CREATE TABLE IF NOT EXISTS attachments (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       follow_up_id  INTEGER NOT NULL REFERENCES follow_ups(id) ON DELETE CASCADE,
-      storage_key   TEXT NOT NULL,            -- uploads/YYYY/MM/DD/<uuid>.<ext>（相对路径）
+      storage_key   TEXT NOT NULL,            -- YYYY/MM/DD/<uuid>.<ext>（相对 CRM_UPLOADS 根）
       file_name     TEXT,
       mime_type     TEXT,
       size          INTEGER NOT NULL DEFAULT 0,

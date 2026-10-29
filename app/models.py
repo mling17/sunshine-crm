@@ -149,6 +149,30 @@ class FollowUpOut(BaseModel):
     created_at: str
 
 
+class AttachmentOut(BaseModel):
+    """一张照片的元数据；``url`` 是**后端**路径（前端拼 ``/crm`` 前缀即可）。"""
+
+    id: int
+    follow_up_id: int | None = None
+    file_name: str | None = None
+    mime_type: str | None = None
+    size: int = 0
+    url: str
+
+
+class FollowUpItemOut(FollowUpOut):
+    """跟进列表项：带客户名 / 商机阶段 / 照片（列表页要显示“📷 N”）。"""
+
+    customer_name: str | None = None
+    deal_stage: str | None = None
+    photo_count: int = 0
+    photos: list[AttachmentOut] = Field(default_factory=list)
+
+
+#: 一条跟进最多几张照片（应用层上限，DDL 里没有 CHECK 约束）
+MAX_PHOTOS = 3
+
+
 class CustomerDetailOut(CustomerOut):
     """客户详情：档案 + 其下商机 + 最近跟进（T5 之后跟进会变多，只回最近 20 条）。"""
 

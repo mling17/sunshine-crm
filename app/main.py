@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
 from app.db import db_conn
-from app.routers import auth, customers, deals
+from app.routers import attachments, auth, customers, deals, followups
 from app.schema import ensure_schema
 from app.security import hash_password, now_iso
 
@@ -82,3 +82,5 @@ def health() -> dict:
 app.include_router(auth.router)
 app.include_router(customers.router)
 app.include_router(deals.router)
+app.include_router(followups.router)
+app.include_router(attachments.router)
