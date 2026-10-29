@@ -154,3 +154,31 @@ class CustomerDetailOut(CustomerOut):
 
     deals: list[DealOut] = Field(default_factory=list)
     follow_ups: list[FollowUpOut] = Field(default_factory=list)
+
+
+# ---------------- 商机入参 ----------------
+
+
+class DealIn(BaseModel):
+    """新建商机。``amount`` 必填，deposit/balance 先只写不用，默认 0。"""
+
+    customer_id: int = Field(gt=0)
+    product_type: OptionalText = Field(default=None, max_length=32)
+    model: OptionalText = Field(default=None, max_length=64)
+    spec: OptionalText = Field(default=None, max_length=200)
+    amount: float = Field(ge=0)
+    deposit: float = Field(default=0, ge=0)
+    balance: float = Field(default=0, ge=0)
+    stage: str = Field(default=DEFAULT_STAGE, max_length=32)
+
+
+class DealUpdate(BaseModel):
+    """改商机：只改传来的字段。``amount``/``stage`` 显式传 null 会在路由层被 400 拒绝。"""
+
+    product_type: OptionalText = Field(default=None, max_length=32)
+    model: OptionalText = Field(default=None, max_length=64)
+    spec: OptionalText = Field(default=None, max_length=200)
+    amount: float | None = Field(default=None, ge=0)
+    deposit: float | None = Field(default=None, ge=0)
+    balance: float | None = Field(default=None, ge=0)
+    stage: str | None = Field(default=None, max_length=32)

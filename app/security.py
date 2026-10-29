@@ -75,3 +75,13 @@ def new_session_token() -> str:
 def session_expires_at(now: datetime | None = None) -> datetime:
     """固定 12h（settings.SESSION_TTL_HOURS），不随请求滑动 → 每天重登一次。"""
     return (now or utc_now()) + timedelta(hours=settings.SESSION_TTL_HOURS)
+
+
+def now_local_iso() -> str:
+    """服务器本地时间 ``YYYY-MM-DDTHH:MM:SS``（**刻意不带 Z、不带时区偏移**）。
+
+    ``deals.closed_at`` 用它：T6 的「本月成交」按
+    ``strftime('%Y-%m', closed_at)`` 与 ``'now','localtime'`` 比较，
+    带 +08:00 偏移的字符串会被 SQLite 先转成 UTC，跨月零点就会算错月份。
+    """
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
