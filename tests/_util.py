@@ -27,6 +27,7 @@ def reset_data() -> None:
         conn.execute("DELETE FROM customers")
         conn.execute("DELETE FROM tags")
         conn.execute("DELETE FROM sessions")
+        conn.execute("DELETE FROM import_log")
 
 
 def login(client: TestClient, password: str = ADMIN["password"]) -> TestClient:

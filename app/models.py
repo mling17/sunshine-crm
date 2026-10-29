@@ -242,3 +242,51 @@ class DashboardOut(BaseModel):
     today_followups: list[TodayFollowUpOut] = Field(default_factory=list)
     month_won: MonthWonOut = Field(default_factory=MonthWonOut)
     stats: DashboardStatsOut = Field(default_factory=DashboardStatsOut)
+
+
+# ---------------- CSV 导入 ----------------
+
+
+class ImportFieldOut(BaseModel):
+    """系统可接收的字段（前端映射下拉用）。"""
+
+    key: str
+    label: str
+    required: bool = False
+
+
+class ImportPreviewOut(BaseModel):
+    ok: bool = True
+    #: csv = 解析成功；xlsx_unsupported = 收到 Excel，提示先另存为 CSV（不报错）
+    kind: str = "csv"
+    file_name: str = ""
+    #: 预览缓存 token，commit 时回传（file_ref），免二次上传
+    file_ref: str | None = None
+    encoding: str | None = None
+    delimiter: str | None = None
+    headers: list[str] = Field(default_factory=list)
+    preview: list[dict[str, str]] = Field(default_factory=list)
+    total_rows: int = 0
+    suggested_mapping: dict[str, str] = Field(default_factory=dict)
+    last_mapping: dict[str, str] | None = None
+    system_fields: list[ImportFieldOut] = Field(default_factory=list)
+    message: str = ""
+
+
+class ImportCommitIn(BaseModel):
+    """JSON 方式的 commit（multipart 方式由路由单独解析）。"""
+
+    file_ref: str | None = None
+    column_mapping: dict[str, str] | None = None
+    source_name: str | None = None
+
+
+class ImportCommitOut(BaseModel):
+    ok: bool = True
+    imported: int = 0
+    skipped: int = 0
+    total_rows: int = 0
+    import_log_id: int
+    mapping_used: dict[str, str] = Field(default_factory=dict)
+    mapping_reused: bool = False
+    source_name: str = ""

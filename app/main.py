@@ -16,7 +16,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
 from app.db import db_conn
-from app.routers import attachments, auth, customers, dashboard, deals, followups
+from app.routers import (
+    attachments,
+    auth,
+    csvimport,
+    customers,
+    dashboard,
+    deals,
+    followups,
+)
 from app.schema import ensure_schema
 from app.security import hash_password, now_iso
 
@@ -85,3 +93,4 @@ app.include_router(deals.router)
 app.include_router(followups.router)
 app.include_router(attachments.router)
 app.include_router(dashboard.router)
+app.include_router(csvimport.router)
