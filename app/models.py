@@ -206,3 +206,39 @@ class DealUpdate(BaseModel):
     deposit: float | None = Field(default=None, ge=0)
     balance: float | None = Field(default=None, ge=0)
     stage: str | None = Field(default=None, max_length=32)
+
+
+# ---------------- 看板 / 统计 ----------------
+
+
+class TodayFollowUpOut(BaseModel):
+    """今日待跟进的一条（``days_overdue`` 由 SQL 按天差算，0=今天到期）。"""
+
+    id: int
+    customer_id: int
+    customer_name: str
+    deal_id: int | None = None
+    deal_stage: str | None = None
+    deal_stage_label: str | None = None
+    content: str
+    next_date: str
+    days_overdue: int = 0
+
+
+class MonthWonOut(BaseModel):
+    count: int = 0
+    amount: float = 0.0
+
+
+class DashboardStatsOut(BaseModel):
+    customers_total: int = 0
+    deals_by_stage: dict[str, int] = Field(default_factory=dict)
+    month_new_customers: int = 0
+    repeat_customers: int = 0
+    month_won: MonthWonOut = Field(default_factory=MonthWonOut)
+
+
+class DashboardOut(BaseModel):
+    today_followups: list[TodayFollowUpOut] = Field(default_factory=list)
+    month_won: MonthWonOut = Field(default_factory=MonthWonOut)
+    stats: DashboardStatsOut = Field(default_factory=DashboardStatsOut)
