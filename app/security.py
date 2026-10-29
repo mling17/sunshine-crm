@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from app.config.settings import settings  # noqa: F401  —— 供 T2 的会话 TTL 使用
+from app.config.settings import settings
 
 PBKDF2_ITERATIONS = 200_000
 _HASH_ALGO = "sha256"
@@ -62,3 +62,16 @@ def to_iso(dt: datetime) -> str:
 
 def now_iso() -> str:
     return to_iso(utc_now())
+
+
+# ------------------------- 会话 -------------------------
+
+
+def new_session_token() -> str:
+    """会话 token：32 字节随机数 = 64 位 hex，不可猜。"""
+    return secrets.token_hex(32)
+
+
+def session_expires_at(now: datetime | None = None) -> datetime:
+    """固定 12h（settings.SESSION_TTL_HOURS），不随请求滑动 → 每天重登一次。"""
+    return (now or utc_now()) + timedelta(hours=settings.SESSION_TTL_HOURS)
