@@ -240,6 +240,9 @@ def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
     has_tags = "tags" in fields
     tags_payload = fields.pop("tags", None)
     columns = {key: value for key, value in fields.items() if key in _UPDATABLE_COLUMNS}
+    # name 是 NOT NULL：显式 null 必须 400，否则 SQL 约束会抛 500
+    if "name" in columns and columns["name"] is None:
+        raise HTTPException(status_code=400, detail="name 不能为空")
 
     with db_conn() as conn:
         exists = conn.execute(

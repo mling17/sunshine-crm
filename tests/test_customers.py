@@ -142,6 +142,15 @@ class CustomersTest(ApiTestCase):
                 "客户的 follow_ups 必须被级联删除",
             )
 
+    def test_update_null_name_rejected(self):
+        """name 是 NOT NULL：显式 null 应 400，不能变成 500。"""
+        c = self.create_customer(name="张伟")
+        resp = self.client.put(f"/api/crm/customers/{c['id']}", json={"name": None})
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(
+            self.client.get(f"/api/crm/customers/{c['id']}").json()["name"], "张伟"
+        )
+
     # ---------- 404 / 422 ----------
     def test_missing_customer_returns_404(self):
         self.assertEqual(self.client.get("/api/crm/customers/9999").status_code, 404)
