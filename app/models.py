@@ -51,6 +51,10 @@ def _blank_to_none(value: object) -> object:
 
 CleanName = Annotated[str, BeforeValidator(_strip_name)]
 OptionalText = Annotated[Optional[str], BeforeValidator(_blank_to_none)]
+TagName = Annotated[str, Field(max_length=32)]
+
+#: 标签数量上限（防止误粘贴一长串）
+MAX_TAGS = 20
 
 
 # ---------------- 客户 ----------------
@@ -64,6 +68,7 @@ class CustomerIn(BaseModel):
     wechat: OptionalText = Field(default=None, max_length=64)
     location: OptionalText = Field(default=None, max_length=200)
     house_note: OptionalText = Field(default=None, max_length=500)
+    tags: list[TagName] = Field(default_factory=list, max_length=MAX_TAGS)
 
 
 class CustomerUpdate(BaseModel):
@@ -74,6 +79,8 @@ class CustomerUpdate(BaseModel):
     wechat: OptionalText = Field(default=None, max_length=64)
     location: OptionalText = Field(default=None, max_length=200)
     house_note: OptionalText = Field(default=None, max_length=500)
+    # None = 不改标签；[] = 清空标签
+    tags: Optional[list[TagName]] = Field(default=None, max_length=MAX_TAGS)
 
 
 class CustomerOut(BaseModel):
@@ -85,9 +92,17 @@ class CustomerOut(BaseModel):
     house_note: str | None = None
     created_at: str
     updated_at: str
+    tags: list[str] = Field(default_factory=list)
     # 复购口径（只展示，不自动写标签）
     deals_total: int = 0
     total_closed_amount: float = 0.0
+    is_repeat: bool = False
+
+    @model_validator(mode="after")
+    def _fill_is_repeat(self) -> "CustomerOut":
+        """老客口径：名下累计 ≥2 单（不论成交与否），只做展示、不写 tag。"""
+        self.is_repeat = self.deals_total >= 2
+        return self
 
 
 class CustomerListOut(BaseModel):
