@@ -1,0 +1,50 @@
+[Unit]
+Description=CRM V1 API (天窗天幕客户关系管理)
+# 不依赖 8001/8002，互相独立；nginx 在 docker 里，反向代理到 127.0.0.1:8010
+After=network-online.target
+Wants=network-online.target
+# 5 分钟内崩 10 次就停手，别无限重启把机器拖死（必须放在 [Unit] 段，放 [Service] 会被忽略）
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/data/crm
+
+# 关键：显式指定 PYTHONPATH 为项目目录。
+# 教训——本机 shell 曾把某个 python3.14 venv 的 site-packages 塞进 PYTHONPATH，
+# 导致 /usr/bin/python3 导入 pydantic_core 直接失败。systemd 不继承登录 shell 的
+# PYTHONPATH，这里再显式钉死一次，杜绝"手工能跑、服务起不来"。
+Environment=PYTHONPATH=/opt/data/crm
+Environment=PYTHONUNBUFFERED=1
+Environment=CRM_DB=/opt/data/crm/crm.db
+Environment=CRM_UPLOADS=/opt/data/crm/uploads
+
+# 单进程：本机 free 常年在 1G 以下、swap 已吃满，多 worker 只会加速 OOM
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app \
+    --host 0.0.0.0 --port 8010 --workers 1 \
+    --proxy-headers --forwarded-allow-ips=127.0.0.1,172.16.0.0/12
+
+# 内存护栏：超过 512M 开始回收，硬顶 1G；OOM 时优先杀本服务，
+# 保住 8001(learning_kb) 和 8002(platform) 这两个更成熟的服务。
+MemoryHigh=512M
+MemoryMax=1G
+OOMScoreAdjust=500
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=crm-api
+
+# 最小权限收敛：只允许写自己的数据目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/data/crm
+
+[Install]
+WantedBy=multi-user.target

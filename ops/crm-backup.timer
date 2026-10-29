@@ -1,0 +1,13 @@
+[Unit]
+Description=CRM V1 每日备份定时器（每日 03:10）
+
+[Timer]
+# 03:10 而非 03:00：避开整点常见的其它定时任务，减少 IO 撞车
+OnCalendar=*-*-* 03:10:00
+# 机器关机错过执行点，下次启动补跑一次
+Persistent=true
+RandomizedDelaySec=120
+Unit=crm-backup.service
+
+[Install]
+WantedBy=timers.target

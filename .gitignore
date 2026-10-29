@@ -1,0 +1,29 @@
+# ---- 运行时数据（绝不入库）----
+crm.db
+crm.db-journal
+crm.db-wal
+crm.db-shm
+uploads/
+backups/
+logs/
+
+# ---- 密钥 / 环境 ----
+.env
+ops/backup.env
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- 工具/编辑器 ----
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+.idea/
+.vscode/
+
+# ---- 规划/代理工作目录（过程产物，不入交付库）----
+.hermes/
