@@ -36,8 +36,14 @@ class FollowUpsTest(ApiTestCase):
         filename: str = "site.png",
         mime: str = "image/png",
         payload: bytes = PNG_BYTES,
+        object_type: str = "customer",
+        object_id: int | None = None,
     ):
-        data: dict[str, str] = {"customer_id": str(customer_id), "content": content}
+        data: dict[str, str] = {
+            "object_type": object_type,
+            "object_id": str(object_id or customer_id),
+            "content": content
+        }
         if deal_id is not None:
             data["deal_id"] = str(deal_id)
         if next_date is not None:
@@ -280,7 +286,7 @@ class FollowUpsTest(ApiTestCase):
         self.assertEqual(
             anon.post(
                 "/api/crm/follow-ups",
-                data={"customer_id": str(c["id"]), "content": "x"},
+                data={"object_type": "customer", "object_id": str(c["id"]), "content": "x"},
             ).status_code,
             401,
         )

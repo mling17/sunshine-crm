@@ -62,6 +62,20 @@ def row_count(conn: sqlite3.Connection, table: str) -> int:
     return int(conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
 
 
+def _customers_migrated(conn: sqlite3.Connection) -> bool:
+    """customers 表已完成 house_note→note 重建则跳过（幂等）。"""
+    return has_column(conn, "customers", "note") and not has_column(conn, "customers", "house_note")
+
+
+def _clear_done(conn: sqlite3.Connection) -> bool:
+    """Q2 存量清空已执行过则跳过（幂等，中断重跑安全）。"""
+    if not table_exists(conn, "migration_clear_guard"):
+        return False
+    return conn.execute(
+        "SELECT 1 FROM migration_clear_guard WHERE version = 'v2_001_cleared'"
+    ).fetchone() is not None
+
+
 def backup_db(db_path: Path) -> Path:
     """在线一致性备份（sqlite3 备份 API，不受并发写影响）。"""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -430,14 +444,14 @@ STATEMENTS: list[tuple[str, object, str]] = [
       updated_at       TEXT NOT NULL
     )
     """),
-    ("customers copy", None, """
-    INSERT INTO customers_new (id, name, phone, wechat, location, note, customer_type, source, source_other, intent_level, company_name, owner, created_at, updated_at)
+    ("customers copy", _customers_migrated, """
+    INSERT OR REPLACE INTO customers_new (id, name, phone, wechat, location, note, customer_type, source, source_other, intent_level, company_name, owner, created_at, updated_at)
     SELECT id, name, phone, wechat, location, house_note, customer_type, source, source_other, intent_level, company_name, owner, created_at, updated_at
     FROM customers
     """),
-    ("customers drop old", None, "DROP TABLE customers"),
-    ("customers rename", None, "ALTER TABLE customers_new RENAME TO customers"),
-    ("customers cleanup", None, "DROP TABLE IF EXISTS customers_new"),
+    ("customers drop old", _customers_migrated, "DROP TABLE customers"),
+    ("customers rename", _customers_migrated, "ALTER TABLE customers_new RENAME TO customers"),
+    ("customers cleanup", _customers_migrated, "DROP TABLE IF EXISTS customers_new"),
     # ---------- 12. 清空存量数据（Q2）----------
     # 用 schema_migrations 版本号门控只执行一次
     ("clear_data_guard", None, """
@@ -445,16 +459,14 @@ STATEMENTS: list[tuple[str, object, str]] = [
         version TEXT PRIMARY KEY DEFAULT 'v2_001_cleared'
     )
     """),
-    ("clear_data", None, """
-    INSERT OR IGNORE INTO migration_clear_guard (version) VALUES ('v2_001_cleared');
-    DELETE FROM customers WHERE id > 0;
-    DELETE FROM deals WHERE id > 0;
-    DELETE FROM follow_ups WHERE id > 0;
-    DELETE FROM attachments WHERE id > 0;
-    DELETE FROM tags WHERE id > 0;
-    DELETE FROM customer_tags WHERE id > 0;
-    DELETE FROM import_log WHERE id > 0;
-    """),
+    # Q2：存量清空（逐表、单条语句、_clear_done 幂等；中断重跑安全）
+    *[
+        (f"clear_{_t}", _clear_done, f"DELETE FROM {_t}")
+        for _t in ("customers", "deals", "follow_ups", "attachments",
+                   "tags", "customer_tags", "import_log")
+    ],
+    ("clear_data_mark", None,
+     "INSERT OR IGNORE INTO migration_clear_guard (version) VALUES ('v2_001_cleared')"),
     # ---------- 13. 版本落账 ----------
     ("schema_migrations v2_001", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
@@ -493,6 +505,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
     conn.execute("PRAGMA foreign_keys=OFF")
     conn.execute("PRAGMA busy_timeout=10000")
 
+    cleared_before = _clear_done(conn)
     before = {t: row_count(conn, t) for t in COUNT_STABLE_TABLES}
     applied = skipped = 0
     try:
@@ -502,12 +515,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
                 skipped += 1
                 continue
             try:
-                # 逐条执行 SQL，避免一次执行多条语句的错误
-                statements = sql.split(';')
-                for stmt in statements:
-                    stmt = stmt.strip()
-                    if stmt:
-                        conn.execute(stmt)
+                conn.execute(sql)
             except sqlite3.Error as exc:  # 带语句名报错，定位快
                 raise RuntimeError(f"迁移语句失败 [{label}]: {exc}\nSQL: {sql.strip()[:200]}") from exc
             applied += 1
@@ -523,10 +531,15 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
 
     # ---------- 验收 ----------
     after = {t: row_count(conn, t) for t in COUNT_STABLE_TABLES}
-    for table in COUNT_STABLE_TABLES:
-        assert before[table] == after[table], (
-            f"行数变化 {table}: {before[table]} → {after[table]}（数据保护红线）"
-        )
+    if not cleared_before and _clear_done(conn):
+        # Q2（用户拍板）：本次迁移执行了存量清空，行数保护不适用；断言清空结果
+        for table in COUNT_STABLE_TABLES:
+            assert after[table] == 0, f"Q2 清空后 {table} 应为空，实际 {after[table]} 行"
+    else:
+        for table in COUNT_STABLE_TABLES:
+            assert before[table] == after[table], (
+                f"行数变化 {table}: {before[table]} → {after[table]}（数据保护红线）"
+            )
 
     # 检查必要表是否存在
     required_tables = (

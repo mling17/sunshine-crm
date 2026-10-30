@@ -132,7 +132,7 @@ class DashboardTest(ApiTestCase):
     def test_stats_shape_and_values(self):
         c1 = self.create_customer(name="老客甲")
         self.create_deal(c1["id"], amount=100.0)
-        self.create_deal(c1["id"], amount=200.0, stage="quoted")
+        self.create_deal(c1["id"], amount=200.0, stage="quote")
         c2 = self.create_customer(name="新客乙")
         deal = self.create_deal(c2["id"], amount=5000.0)
         self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
@@ -140,7 +140,7 @@ class DashboardTest(ApiTestCase):
         stats = self.dashboard()["stats"]
         self.assertEqual(stats["customers_total"], 2)
         self.assertEqual(set(stats["deals_by_stage"]), set(STAGES), "阶段键要全，缺的补 0")
-        self.assertEqual(stats["deals_by_stage"]["quoted"], 1)
+        self.assertEqual(stats["deals_by_stage"]["quote"], 1)
         self.assertEqual(stats["deals_by_stage"]["won"], 1)
         self.assertEqual(stats["deals_by_stage"]["lead"], 1)
         self.assertEqual(stats["deals_by_stage"]["lost"], 0)

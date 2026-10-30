@@ -170,7 +170,7 @@ class CsvImportTest(ApiTestCase):
         preview = self.preview().json()
         resp = self.commit_json(
             file_ref=preview["file_ref"],
-            column_mapping={"姓名": "name", "电话": "wechat", "楼盘": "house_note"},
+            column_mapping={"姓名": "name", "电话": "wechat", "楼盘": "note"},
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertFalse(resp.json()["mapping_reused"])

@@ -53,7 +53,7 @@ FIELD_LABELS: dict[str, str] = {
     "phone": "电话",
     "wechat": "微信",
     "location": "楼盘/安装地址",
-    "house_note": "户型/备注",
+    "note": "备注",
 }
 SYSTEM_FIELDS = [
     ImportFieldOut(key=key, label=label, required=(key == "name"))
@@ -81,10 +81,10 @@ HEADER_ALIASES: dict[str, str] = {
     "项目": "location",
     "安装地址": "location",
     "location": "location",
-    "户型": "house_note",
-    "备注": "house_note",
-    "说明": "house_note",
-    "house_note": "house_note",
+    "户型": "note",
+    "备注": "note",
+    "说明": "note",
+    "house_note": "note",
 }
 
 PREVIEW_ROWS = 5
@@ -423,7 +423,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
             }
             conn.execute(
                 """
-                INSERT INTO customers (name, phone, wechat, location, house_note, created_at, updated_at)
+                INSERT INTO customers (name, phone, wechat, location, note, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -431,7 +431,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     values.get("phone"),
                     values.get("wechat"),
                     values.get("location"),
-                    values.get("house_note"),
+                    values.get("note"),
                     now,
                     now,
                 ),

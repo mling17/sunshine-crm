@@ -9,19 +9,21 @@
 - 删跟进只删 ``follow_ups``（外键级联清 ``attachments`` 行）；物理文件留给备份清理，
   不做逐张删除 —— 单用户量小，误删还能从备份里捞回来。
 """
-
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from app.db import db_conn
+from app.errors import ApiError
 from app.models import (
     MAX_PHOTOS,
     STAGES,
     AttachmentOut,
     FollowUpItemOut,
+    FollowUpOut,
 )
 from app.routers.auth import require_auth
 from app.security import now_iso, now_local_iso
@@ -189,59 +191,176 @@ def _apply_stage(conn, deal_id: int, old_stage: str, new_stage: str) -> None:
         )
 
 
+# ---------------- 跟进对象类型校验 ----------------
+
+
+def _validate_object_type(object_type: str) -> None:
+    """校验对象类型是否合法"""
+    valid_types = ["lead", "customer", "deal", "order", "aftersale"]
+    if object_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"非法对象类型 {object_type!r}")
+
+
+def _check_deal_frozen(conn, deal_id: int) -> None:
+    """检查商机是否被冻结"""
+    deal = conn.execute(
+        "SELECT stage FROM deals WHERE id = ?",
+        (deal_id,),
+    ).fetchone()
+    if deal is None:
+        raise HTTPException(status_code=404, detail="商机不存在")
+    
+    # 检查是否为冻结状态
+    if deal["stage"] in ("won", "lost"):
+        raise ApiError(
+            status_code=409,
+            code="deal_frozen",
+            message="商机已赢单或已流失，无法添加跟进"
+        )
+
+
 # ---------------- 路由 ----------------
 
 
 @router.post("/follow-ups", response_model=FollowUpItemOut)
 async def create_follow_up(
-    customer_id: str = Form(..., description="客户 id"),
+    object_type: str = Form(..., description="对象类型"),
+    object_id: str = Form(..., description="对象ID"),
     content: str = Form(..., description="跟进内容"),
-    deal_id: str | None = Form(default=None),
+    method: str | None = Form(default=None),
     next_date: str | None = Form(default=None),
+    intent_level: str | None = Form(default=None),
     stage: str | None = Form(default=None),
     photos: list[UploadFile] = File(default=[]),
 ) -> FollowUpItemOut:
-    """建跟进（multipart）。照片 0~3 张；带 stage+deal_id 顺手改阶段。"""
-    customer_id_value = _clean_optional_int(customer_id, "customer_id")
-    if customer_id_value is None:
-        raise HTTPException(status_code=400, detail="customer_id 必填")
-    deal_id_value = _clean_optional_int(deal_id, "deal_id")
+    """建跟进（multipart）。照片 0~3 张；带 stage+deal_id 顺手改阶段。
+
+    支持多种对象类型挂载：线索/客户/商机/订单/售后
+    """
+    # 校验对象类型
+    _validate_object_type(object_type)
+    
+    # 清洗参数
+    object_id_value = _clean_optional_int(object_id, "object_id")
+    if object_id_value is None:
+        raise HTTPException(status_code=400, detail="object_id 必填")
+    
     content_value = _clean_content(content)
     next_date_value = _clean_next_date(next_date)
     stage_value = _clean_stage(stage)
+    method_value = (method or "").strip()
+    intent_level_value = (intent_level or "").strip()
+    
+    # 验证对象类型和ID的合法性
+    with db_conn() as conn:
+        if object_type == "lead":
+            # 检查线索是否存在
+            lead = conn.execute(
+                "SELECT status FROM leads WHERE id = ?",
+                (object_id_value,),
+            ).fetchone()
+            if lead is None:
+                raise HTTPException(status_code=404, detail="线索不存在")
+            # 检查线索是否已终结
+            if lead["status"] in ("converted", "invalid"):
+                raise ApiError(
+                    status_code=409,
+                    code="lead_closed",
+                    message="线索已转化或已失效，无法添加跟进"
+                )
+        elif object_type == "customer":
+            # 检查客户是否存在
+            customer = conn.execute(
+                "SELECT id FROM customers WHERE id = ?",
+                (object_id_value,),
+            ).fetchone()
+            if customer is None:
+                raise HTTPException(status_code=404, detail="客户不存在")
+        elif object_type == "deal":
+            # 检查商机是否存在
+            deal = conn.execute(
+                "SELECT id, stage FROM deals WHERE id = ?",
+                (object_id_value,),
+            ).fetchone()
+            if deal is None:
+                raise HTTPException(status_code=404, detail="商机不存在")
+            # 检查商机是否被冻结
+            if deal["stage"] in ("won", "lost"):
+                raise ApiError(
+                    status_code=409,
+                    code="deal_frozen",
+                    message="商机已赢单或已流失，无法添加跟进"
+                )
+        elif object_type == "order":
+            # 检查订单是否存在
+            order = conn.execute(
+                "SELECT id FROM orders WHERE id = ?",
+                (object_id_value,),
+            ).fetchone()
+            if order is None:
+                raise HTTPException(status_code=404, detail="订单不存在")
+        elif object_type == "aftersale":
+            # 检查售后单是否存在
+            aftersale = conn.execute(
+                "SELECT id FROM aftersales WHERE id = ?",
+                (object_id_value,),
+            ).fetchone()
+            if aftersale is None:
+                raise HTTPException(status_code=404, detail="售后单不存在")
 
     prepared = await _read_photos(photos)
 
     created_at = now_iso()
     with db_conn() as conn:
-        customer = conn.execute(
-            "SELECT id, name FROM customers WHERE id = ?", (customer_id_value,)
-        ).fetchone()
-        if customer is None:
-            raise HTTPException(status_code=404, detail="客户不存在")
-
-        old_stage: str | None = None
-        if deal_id_value is not None:
+        # 先获取客户ID（用于兼容V1参数）
+        customer_id_value = None
+        deal_id_value = None
+        
+        # 根据对象类型获取客户ID和商机ID
+        if object_type == "lead":
+            # 线索不需要customer_id，但可以获取相关信息
+            pass
+        elif object_type == "customer":
+            customer_id_value = object_id_value
+        elif object_type == "deal":
+            # 获取商机对应的客户ID
             deal = conn.execute(
-                "SELECT id, customer_id, stage FROM deals WHERE id = ?",
-                (deal_id_value,),
+                "SELECT customer_id FROM deals WHERE id = ?",
+                (object_id_value,),
             ).fetchone()
-            if deal is None:
-                raise HTTPException(status_code=404, detail="商机不存在")
-            if deal["customer_id"] != customer_id_value:
-                raise HTTPException(
-                    status_code=400, detail="商机不属于该客户"
-                )
-            old_stage = deal["stage"]
+            if deal:
+                customer_id_value = deal["customer_id"]
+            deal_id_value = object_id_value
+        elif object_type == "order":
+            # 获取订单对应的客户ID
+            order = conn.execute(
+                "SELECT customer_id FROM orders WHERE id = ?",
+                (object_id_value,),
+            ).fetchone()
+            if order:
+                customer_id_value = order["customer_id"]
+        elif object_type == "aftersale":
+            # 获取售后单对应的客户ID
+            aftersale = conn.execute(
+                "SELECT customer_id FROM aftersales WHERE id = ?",
+                (object_id_value,),
+            ).fetchone()
+            if aftersale:
+                customer_id_value = aftersale["customer_id"]
 
+        # 插入跟进记录
         cur = conn.execute(
             """
-            INSERT INTO follow_ups (customer_id, deal_id, content, next_date, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO follow_ups 
+                (object_type, object_id, customer_id, deal_id, method, content, next_date, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                object_type,
+                object_id_value,
                 customer_id_value,
                 deal_id_value,
+                method_value,
                 content_value,
                 next_date_value,
                 created_at,
@@ -249,20 +368,43 @@ async def create_follow_up(
         )
         follow_up_id = int(cur.lastrowid or 0)
 
+        # 处理照片
         for file_name, mime, ext, data in prepared:
             storage_key = new_storage_key(ext)
             save_photo(storage_key, data)
             conn.execute(
                 """
                 INSERT INTO attachments
-                    (follow_up_id, storage_key, file_name, mime_type, size, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (object_type, object_id, follow_up_id, storage_key, file_name, mime_type, size, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (follow_up_id, storage_key, file_name, mime, len(data), created_at),
+                (object_type, object_id_value, follow_up_id, storage_key, file_name, mime, len(data), created_at),
             )
 
+        # 如果有意图等级，则更新对应对象
+        if intent_level_value:
+            if object_type == "lead" or object_type == "customer":
+                # 更新线索或客户意图等级
+                if object_type == "lead":
+                    conn.execute(
+                        "UPDATE leads SET intent_level = ?, updated_at = ? WHERE id = ?",
+                        (intent_level_value, created_at, object_id_value),
+                    )
+                elif object_type == "customer":
+                    conn.execute(
+                        "UPDATE customers SET intent_level = ?, updated_at = ? WHERE id = ?",
+                        (intent_level_value, created_at, object_id_value),
+                    )
+
+        # 如果有阶段并且是商机，更新阶段
         if stage_value and deal_id_value is not None:
-            _apply_stage(conn, deal_id_value, old_stage or "", stage_value)
+            # 获取商机原始阶段
+            deal = conn.execute(
+                "SELECT stage FROM deals WHERE id = ?",
+                (deal_id_value,),
+            ).fetchone()
+            old_stage = deal["stage"] if deal else ""
+            _apply_stage(conn, deal_id_value, old_stage, stage_value)
 
         item = _fetch_item(conn, follow_up_id)
 
@@ -273,23 +415,32 @@ async def create_follow_up(
 def list_follow_ups(
     customer_id: int | None = Query(default=None, gt=0),
     deal_id: int | None = Query(default=None, gt=0),
+    object_type: str | None = Query(default=None),
+    object_id: int | None = Query(default=None, gt=0),
 ) -> list[FollowUpItemOut]:
-    """按客户/商机过滤；不带过滤=全量（新的在前），每条带照片数与照片列表。"""
+    """按客户/商机/对象类型/对象ID过滤；不带过滤=全量（新的在前），每条带照片数与照片列表。"""
     where_parts: list[str] = []
     params: list[object] = []
+    
     if customer_id is not None:
         where_parts.append("fu.customer_id = ?")
         params.append(customer_id)
     if deal_id is not None:
         where_parts.append("fu.deal_id = ?")
         params.append(deal_id)
+    if object_type is not None:
+        where_parts.append("fu.object_type = ?")
+        params.append(object_type)
+    if object_id is not None:
+        where_parts.append("fu.object_id = ?")
+        params.append(object_id)
 
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     with db_conn() as conn:
         rows = conn.execute(
             f"""
             SELECT fu.id, fu.customer_id, fu.deal_id, fu.content, fu.next_date, fu.created_at,
-                   c.name AS customer_name, d.stage AS deal_stage
+                   fu.object_type, fu.object_id, c.name AS customer_name, d.stage AS deal_stage
             FROM follow_ups fu
             JOIN customers c ON c.id = fu.customer_id
             LEFT JOIN deals d ON d.id = fu.deal_id
@@ -311,7 +462,8 @@ def delete_follow_up(follow_up_id: int) -> dict:
     """删跟进；``attachments`` 行由外键级联清掉，磁盘文件留给备份清理。"""
     with db_conn() as conn:
         exists = conn.execute(
-            "SELECT 1 FROM follow_ups WHERE id = ?", (follow_up_id,)
+            "SELECT 1 FROM follow_ups WHERE id = ?",
+            (follow_up_id,),
         ).fetchone()
         if exists is None:
             raise HTTPException(status_code=404, detail="跟进记录不存在")

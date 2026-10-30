@@ -36,7 +36,7 @@ router = APIRouter(
 
 #: 客户出参的固定列（含两个复购口径子查询）；拼 JOIN / WHERE 时直接接在后面
 _CUSTOMER_SELECT = """
-SELECT c.id, c.name, c.phone, c.wechat, c.location, c.house_note,
+SELECT c.id, c.name, c.phone, c.wechat, c.location, c.note,
        c.created_at, c.updated_at,
        (SELECT COUNT(*) FROM deals d WHERE d.customer_id = c.id) AS deals_total,
        (SELECT COALESCE(SUM(d.amount), 0) FROM deals d
@@ -51,7 +51,7 @@ _TAG_JOIN = (
 )
 
 #: PUT 允许改的列（白名单：列名会拼进 SQL，绝不能用客户端传来的 key 直接拼）
-_UPDATABLE_COLUMNS = ("name", "phone", "wechat", "location", "house_note")
+_UPDATABLE_COLUMNS = ("name", "phone", "wechat", "location", "note")
 
 _RECENT_FOLLOW_UPS_LIMIT = 20
 
@@ -184,7 +184,7 @@ def create_customer(payload: CustomerIn) -> CustomerOut:
     with db_conn() as conn:
         cur = conn.execute(
             """
-            INSERT INTO customers (name, phone, wechat, location, house_note, created_at, updated_at)
+            INSERT INTO customers (name, phone, wechat, location, note, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -192,7 +192,7 @@ def create_customer(payload: CustomerIn) -> CustomerOut:
                 payload.phone,
                 payload.wechat,
                 payload.location,
-                payload.house_note,
+                payload.note,
                 now,
                 now,
             ),
@@ -267,15 +267,34 @@ def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
     return _to_out(row, tags)
 
 
-@router.delete("/customers/{customer_id}")
-def delete_customer(customer_id: int) -> dict:
-    """删客户；其 deals / follow_ups / customer_tags 由外键级联清掉。"""
+@router.get("/customers/{customer_id}/360", response_model=CustomerDetailOut)
+def get_customer_360(customer_id: int) -> CustomerDetailOut:
+    """获取客户360度视图"""
     with db_conn() as conn:
-        exists = conn.execute(
-            "SELECT 1 FROM customers WHERE id = ?", (customer_id,)
-        ).fetchone()
-        if exists is None:
+        row = conn.execute(f"{_CUSTOMER_SELECT} WHERE c.id = ?", (customer_id,)).fetchone()
+        if row is None:
             raise _not_found()
-        conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
-
-    return {"ok": True, "id": customer_id}
+        
+        # 获取客户的所有商机
+        deal_rows = conn.execute(
+            "SELECT * FROM deals WHERE customer_id = ? ORDER BY id DESC", (customer_id,)
+        ).fetchall()
+        
+        # 获取客户的所有跟进记录
+        follow_rows = conn.execute(
+            """
+            SELECT id, customer_id, deal_id, content, next_date, created_at
+            FROM follow_ups WHERE customer_id = ?
+            ORDER BY created_at DESC, id DESC LIMIT ?
+            """,
+            (customer_id, _RECENT_FOLLOW_UPS_LIMIT),
+        ).fetchall()
+        
+        tags = _tags_for(conn, [customer_id]).get(customer_id, [])
+    
+    out = _to_out(row, tags)
+    return CustomerDetailOut(
+        **out.model_dump(),
+        deals=[DealOut(**dict(r)) for r in deal_rows],
+        follow_ups=[FollowUpOut(**dict(r)) for r in follow_rows],
+    )

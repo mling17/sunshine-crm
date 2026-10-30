@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
@@ -89,7 +89,7 @@ class CustomerIn(BaseModel):
     phone: OptionalText = Field(default=None, max_length=32)
     wechat: OptionalText = Field(default=None, max_length=64)
     location: OptionalText = Field(default=None, max_length=200)
-    house_note: OptionalText = Field(default=None, max_length=500)
+    note: OptionalText = Field(default=None, max_length=500)
     tags: list[TagName] = Field(default_factory=list, max_length=MAX_TAGS)
 
 
@@ -100,7 +100,7 @@ class CustomerUpdate(BaseModel):
     phone: OptionalText = Field(default=None, max_length=32)
     wechat: OptionalText = Field(default=None, max_length=64)
     location: OptionalText = Field(default=None, max_length=200)
-    house_note: OptionalText = Field(default=None, max_length=500)
+    note: OptionalText = Field(default=None, max_length=500)
     # None = 不改标签；[] = 清空标签
     tags: Optional[list[TagName]] = Field(default=None, max_length=MAX_TAGS)
 
@@ -111,7 +111,7 @@ class CustomerOut(BaseModel):
     phone: str | None = None
     wechat: str | None = None
     location: str | None = None
-    house_note: str | None = None
+    note: str | None = None
     created_at: str
     updated_at: str
     tags: list[str] = Field(default_factory=list)
@@ -157,6 +157,13 @@ class DealOut(BaseModel):
         if self.stage_label is None:
             self.stage_label = STAGE_LABELS.get(self.stage)
         return self
+
+
+class DealDetailOut(DealOut):
+    """商机详情，包含客户名称和订单信息"""
+    customer_name: str | None = None
+    order_id: int | None = None
+    order_no: str | None = None
 
 
 # ---------------- 跟进 ----------------
@@ -258,6 +265,9 @@ class DashboardStatsOut(BaseModel):
     month_new_customers: int = 0
     repeat_customers: int = 0
     month_won: MonthWonOut = Field(default_factory=MonthWonOut)
+    orders_by_status: dict[str, dict[str, int | float]] = Field(default_factory=dict)
+    recent_orders: list[dict] = Field(default_factory=list)
+    aftersale_sla_alerts: list[dict] = Field(default_factory=list)
 
 
 class DashboardOut(BaseModel):
@@ -312,3 +322,253 @@ class ImportCommitOut(BaseModel):
     mapping_used: dict[str, str] = Field(default_factory=dict)
     mapping_reused: bool = False
     source_name: str = ""
+
+
+# ---------------- 线索 ----------------
+
+
+class LeadIn(BaseModel):
+    """新建线索。"""
+
+    name: Optional[CleanName] = Field(default=None, max_length=64)
+    phone: OptionalText = Field(default=None, max_length=32)
+    wechat: OptionalText = Field(default=None, max_length=64)
+    lead_type: CUSTOMER_TYPE = Field(default="personal")
+    company_name: OptionalText = Field(default=None, max_length=100)
+    source: SOURCE
+    source_other: OptionalText = Field(default=None, max_length=100)
+    location: OptionalText = Field(default=None, max_length=200)
+    note: OptionalText = Field(default=None, max_length=500)
+    intent_level: INTENT_LEVEL | None = None
+    tags: list[TagName] = Field(default_factory=list, max_length=MAX_TAGS)
+
+
+class LeadUpdate(BaseModel):
+    """改线索：只改传来的字段（其余保持原值）。"""
+
+    name: Optional[CleanName] = Field(default=None, max_length=64)
+    phone: OptionalText = Field(default=None, max_length=32)
+    wechat: OptionalText = Field(default=None, max_length=64)
+    lead_type: CUSTOMER_TYPE | None = None
+    company_name: OptionalText = Field(default=None, max_length=100)
+    source: SOURCE | None = None
+    source_other: OptionalText = Field(default=None, max_length=100)
+    location: OptionalText = Field(default=None, max_length=200)
+    note: OptionalText = Field(default=None, max_length=500)
+    intent_level: INTENT_LEVEL | None = None
+    # None = 不改标签；[] = 清空标签
+    tags: Optional[list[TagName]] = Field(default=None, max_length=MAX_TAGS)
+
+
+class LeadOut(BaseModel):
+    id: int
+    name: str | None = None
+    phone: str | None = None
+    wechat: str | None = None
+    lead_type: str
+    company_name: str | None = None
+    source: str
+    source_other: str | None = None
+    location: str | None = None
+    note: str | None = None
+    intent_level: str | None = None
+    status: str
+    invalid_reason: str | None = None
+    invalid_reason_other: str | None = None
+    converted_customer_id: int | None = None
+    converted_deal_id: int | None = None
+    owner: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class LeadDetailOut(LeadOut):
+    """线索详情：档案 + 标签 + 跟进记录。"""
+
+    tags: list[str] = Field(default_factory=list)
+    follow_ups: list[FollowUpOut] = Field(default_factory=list)
+
+
+class LeadListOut(BaseModel):
+    items: list[LeadOut]
+    total: int
+    page: int
+    size: int
+
+
+class LeadConvertIn(BaseModel):
+    """线索转化入参。"""
+
+    mode: Literal["new", "link"]
+    force_new: bool = False
+    link_customer_id: int | None = None
+    deal: DealIn
+
+
+class LeadConvertOut(BaseModel):
+    """线索转化出参。"""
+
+    lead: LeadOut
+    customer: CustomerOut | None = None
+    deal: DealOut | None = None
+    dedupe: Literal["none", "linked", "forced"]
+
+
+class DuplicateHint(BaseModel):
+    """重复提示对象。"""
+
+    object_type: Literal["lead", "customer"]
+    object_id: int
+    name: str
+
+
+class LeadConvertCheckOut(BaseModel):
+    """线索转化前检查结果。"""
+
+    has_match: bool
+    matches: list[DuplicateHint] = Field(default_factory=list)
+
+
+# ---------------- 订单 ----------------
+
+
+class OrderIn(BaseModel):
+    """新建订单。"""
+
+    customer_id: int = Field(gt=0)
+    deal_id: int = Field(gt=0)
+    product_type: OptionalText = Field(default=None, max_length=32)
+    model: OptionalText = Field(default=None, max_length=64)
+    spec: OptionalText = Field(default=None, max_length=200)
+    amount: float = Field(ge=0)
+    status: ORDER_STATUS = "pending_payment"
+    owner: OptionalText = Field(default=None, max_length=32)
+    # 新增字段
+    paid_amount: float = Field(default=0, ge=0)
+    carrier_id: Optional[int] = Field(default=None, gt=0)
+    tracking_number: OptionalText = Field(default=None, max_length=64)
+    created_at: str
+    updated_at: str
+
+
+class OrderUpdate(BaseModel):
+    """更新订单。"""
+
+    customer_id: Optional[int] = Field(default=None, gt=0)
+    deal_id: Optional[int] = Field(default=None, gt=0)
+    product_type: OptionalText = Field(default=None, max_length=32)
+    model: OptionalText = Field(default=None, max_length=64)
+    spec: OptionalText = Field(default=None, max_length=200)
+    amount: Optional[float] = Field(default=None, ge=0)
+    owner: OptionalText = Field(default=None, max_length=32)
+    # 新增字段
+    paid_amount: Optional[float] = Field(default=None, ge=0)
+    carrier_id: Optional[int] = Field(default=None, gt=0)
+    tracking_number: OptionalText = Field(default=None, max_length=64)
+
+
+class OrderOut(BaseModel):
+    """订单列表项。"""
+
+    id: int
+    order_no: str
+    customer_id: int
+    deal_id: int
+    product_type: str | None = None
+    model: str | None = None
+    spec: str | None = None
+    amount: float = 0.0
+    status: str
+    status_label: str | None = None
+    owner: str | None = None
+    paid_amount: float = 0.0
+    carrier_id: int | None = None
+    tracking_number: str | None = None
+    created_at: str
+    updated_at: str
+
+    @model_validator(mode="after")
+    def _fill_status_label(self) -> "OrderOut":
+        if self.status_label is None:
+            self.status_label = ORDER_STATUS_LABELS.get(self.status)
+        return self
+
+
+class OrderDetailOut(BaseModel):
+    """订单详情。"""
+
+    id: int
+    order_no: str
+    customer_id: int
+    deal_id: int
+    product_type: str | None = None
+    model: str | None = None
+    spec: str | None = None
+    amount: float = 0.0
+    status: str
+    status_label: str | None = None
+    owner: str | None = None
+    paid_amount: float = 0.0
+    carrier_id: int | None = None
+    tracking_number: str | None = None
+    created_at: str
+    updated_at: str
+    # 扩展字段
+    status_logs: list[OrderStatusLogOut] = Field(default_factory=list)
+    attachments: list[AttachmentOut] = Field(default_factory=list)
+    carrier: dict | None = None
+
+    @model_validator(mode="after")
+    def _fill_status_label(self) -> "OrderDetailOut":
+        if self.status_label is None:
+            self.status_label = ORDER_STATUS_LABELS.get(self.status)
+        return self
+
+
+class OrderStatusLogOut(BaseModel):
+    """订单状态日志。"""
+
+    id: int
+    order_id: int
+    from_status: str | None = None
+    to_status: str
+    note: str | None = None
+    created_at: str
+
+
+# ---------------- 物流公司 ----------------
+
+
+class CarrierIn(BaseModel):
+    """新建物流公司。"""
+
+    name: str = Field(min_length=1, max_length=64)
+    code: OptionalText = Field(default=None, max_length=32)
+    contact_person: OptionalText = Field(default=None, max_length=32)
+    phone: OptionalText = Field(default=None, max_length=32)
+    address: OptionalText = Field(default=None, max_length=200)
+    created_at: str
+    updated_at: str
+
+
+class CarrierUpdate(BaseModel):
+    """更新物流公司。"""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    code: OptionalText = Field(default=None, max_length=32)
+    contact_person: OptionalText = Field(default=None, max_length=32)
+    phone: OptionalText = Field(default=None, max_length=32)
+    address: OptionalText = Field(default=None, max_length=200)
+
+
+class CarrierOut(BaseModel):
+    """物流公司列表项。"""
+
+    id: int
+    name: str
+    code: str | None = None
+    contact_person: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    created_at: str
+    updated_at: str

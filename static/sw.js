@@ -5,7 +5,7 @@
  * 绝不缓存 /crm/api/ 的响应：客户数据是隐私，也必须实时。
  */
 const CACHE = 'crm-shell-v1';
-const SHELL = ['/crm/', '/crm/index.html', '/crm/app.js', '/crm/app.css', '/crm/manifest.json'];
+const SHELL = ['/crm/', '/crm/index.html', '/crm/app.js', '/crm/app.css', '/crm/manifest.json', '/crm/views/dashboard.js', '/crm/views/leads.js', '/crm/views/customers.js'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

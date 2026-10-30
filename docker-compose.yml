@@ -5,7 +5,7 @@ services:
     build: .
     container_name: crm-v2
     ports:
-      - "8010:8010"
+      - "8000:8000"
     volumes:
       - ./crm.db:/opt/data/crm/crm.db
       - ./backups:/opt/data/crm/backups

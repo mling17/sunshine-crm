@@ -95,8 +95,14 @@ class DealsTest(ApiTestCase):
 
     def test_all_stages_are_accepted(self):
         c = self.create_customer(name="张伟")
-        deal = self.create_deal(c["id"])
+        # 创建一个初始商机
+        deal = self.create_deal(c["id"], amount=10000.0)
+        
+        # 测试所有有效的阶段（排除won和lost，因为它们是冻结状态）
         for stage in STAGES:
+            if stage in ("won", "lost"):
+                # won/lost 是冻结状态，不应该被修改
+                continue
             resp = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": stage})
             self.assertEqual(resp.status_code, 200, f"{stage}: {resp.text}")
             self.assertEqual(resp.json()["stage"], stage)

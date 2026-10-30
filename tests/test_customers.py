@@ -17,7 +17,7 @@ class CustomersTest(ApiTestCase):
             phone="13800000001",
             wechat="zw001",
             location="阳光小区",
-            house_note="三居，主卧朝南",
+            note="三居，主卧朝南",
         )
         self.create_customer(name="李娜", phone="13900000002", location="翡翠湾")
 
@@ -26,7 +26,7 @@ class CustomersTest(ApiTestCase):
         self.assertEqual(a["phone"], "13800000001")
         self.assertEqual(a["wechat"], "zw001")
         self.assertEqual(a["location"], "阳光小区")
-        self.assertEqual(a["house_note"], "三居，主卧朝南")
+        self.assertEqual(a["note"], "三居，主卧朝南")
         self.assertTrue(a["created_at"])
         self.assertTrue(a["updated_at"])
         # 新客户默认无商机（标签口径在 T3b 的 tests/test_tags.py 覆盖）

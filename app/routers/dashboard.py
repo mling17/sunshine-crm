@@ -55,6 +55,35 @@ WHERE stage = 'won'
   AND strftime('%Y-%m', closed_at) = strftime('%Y-%m', 'now', 'localtime')
 """
 
+#: 订单状态统计（按 7 个状态分类）
+_ORDERS_BY_STATUS_SQL = """
+SELECT status, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
+FROM orders
+GROUP BY status
+"""
+
+#: 最近订单（按创建时间倒序）
+_RECENT_ORDERS_SQL = """
+SELECT o.id, o.order_no, c.name AS customer_name, o.amount, o.status, o.created_at
+FROM orders o
+JOIN customers c ON c.id = o.customer_id
+ORDER BY o.created_at DESC
+LIMIT 10
+"""
+
+#: 待处理售后单超期（超过3天）
+_AFTERSALE_SLA_ALERTS_SQL = """
+SELECT a.id, a.no, 
+       CAST(julianday(date('now','localtime')) - julianday(date(a.created_at)) AS INTEGER) AS days_pending,
+       o.order_no, c.name AS customer_name
+FROM aftersales a
+JOIN orders o ON o.id = a.order_id
+JOIN customers c ON c.id = a.customer_id
+WHERE a.status = 'pending'
+  AND julianday(date('now','localtime')) - julianday(date(a.created_at)) > 3
+ORDER BY a.created_at ASC
+"""
+
 
 def _month_won(conn) -> MonthWonOut:
     row = conn.execute(_MONTH_WON_SQL).fetchone()
@@ -94,6 +123,46 @@ def get_dashboard() -> DashboardOut:
             """
         ).fetchone()["n"]
 
+        # 订单状态统计（7个状态）
+        orders_by_status = {
+            "pending_payment": {"count": 0, "amount": 0.0},
+            "deposit_paid": {"count": 0, "amount": 0.0},
+            "producing": {"count": 0, "amount": 0.0},
+            "balance_paid": {"count": 0, "amount": 0.0},
+            "ready_to_ship": {"count": 0, "amount": 0.0},
+            "shipped": {"count": 0, "amount": 0.0},
+            "completed": {"count": 0, "amount": 0.0},
+        }
+        for row in conn.execute(_ORDERS_BY_STATUS_SQL).fetchall():
+            status = row["status"]
+            if status in orders_by_status:
+                orders_by_status[status]["count"] = int(row["count"] or 0)
+                orders_by_status[status]["amount"] = float(row["amount"] or 0.0)
+
+        # 最近订单
+        recent_orders = []
+        for row in conn.execute(_RECENT_ORDERS_SQL).fetchall():
+            recent_orders.append({
+                "id": row["id"],
+                "order_no": row["order_no"],
+                "customer_name": row["customer_name"],
+                "amount": float(row["amount"] or 0.0),
+                "status": row["status"],
+                "status_label": None,  # 由前端填充
+                "created_at": row["created_at"]
+            })
+
+        # 待处理售后单超期
+        aftersale_sla_alerts = []
+        for row in conn.execute(_AFTERSALE_SLA_ALERTS_SQL).fetchall():
+            aftersale_sla_alerts.append({
+                "id": row["id"],
+                "no": row["no"],
+                "days_pending": int(row["days_pending"] or 0),
+                "order_no": row["order_no"],
+                "customer_name": row["customer_name"]
+            })
+
     today_followups = [
         TodayFollowUpOut(
             id=row["id"],
@@ -118,5 +187,8 @@ def get_dashboard() -> DashboardOut:
             month_new_customers=int(month_new_customers),
             repeat_customers=int(repeat_customers),
             month_won=month_won,
+            orders_by_status=orders_by_status,
+            recent_orders=recent_orders,
+            aftersale_sla_alerts=aftersale_sla_alerts,
         ),
     )

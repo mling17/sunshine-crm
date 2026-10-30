@@ -48,6 +48,53 @@ def open_client(login_first: bool = True) -> TestClient:
     return client
 
 
+def insert_customer(
+    *,
+    name: str = "测试客户",
+    phone: str = "13900000000",
+    wechat: str | None = None,
+    customer_type: str = "personal",
+    source: str = "wechat",
+    intent_level: str | None = None,
+    company_name: str | None = None,
+) -> int:
+    """直接落一条 customer"""
+    now = now_iso()
+    with db_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO customers (name, phone, wechat, customer_type, source, intent_level, company_name, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (name, phone, wechat, customer_type, source, intent_level, company_name, now, now),
+        )
+        return int(cur.lastrowid or 0)
+
+
+def insert_order(
+    customer_id: int,
+    deal_id: int,
+    *,
+    order_no: str = "SO-20261030-001",
+    product_type: str = "天窗",
+    model: str = "平移",
+    spec: str = "1200*1400",
+    amount: float = 12800.0,
+    status: str = "completed",
+) -> int:
+    """直接落一条 order"""
+    now = now_iso()
+    with db_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO orders (order_no, customer_id, deal_id, product_type, model, spec, amount, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (order_no, customer_id, deal_id, product_type, model, spec, amount, status, now, now),
+        )
+        return int(cur.lastrowid or 0)
+
+
 def insert_deal(
     customer_id: int,
     *,
