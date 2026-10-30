@@ -1,0 +1,24 @@
+FROM python:3.10.12-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制项目文件
+COPY . .
+
+# 安装 Python 依赖
+RUN pip install --no-cache-dir -e .
+
+# 创建必要的目录
+RUN mkdir -p /opt/data/crm/uploads /opt/data/crm/backups
+
+# 暴露端口
+EXPOSE 8010
+
+# 启动命令
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]

@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  crm:
+    build: .
+    container_name: crm-v2
+    ports:
+      - "8010:8010"
+    volumes:
+      - ./crm.db:/opt/data/crm/crm.db
+      - ./backups:/opt/data/crm/backups
+      - ./uploads:/opt/data/crm/uploads
+    environment:
+      - CRM_DB=/opt/data/crm/crm.db
+      - CRM_UPLOADS=/opt/data/crm/uploads
+      - ADMIN_USERNAME=chen
+      - ADMIN_PASSWORD=test123
+    restart: unless-stopped

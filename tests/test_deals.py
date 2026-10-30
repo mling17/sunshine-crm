@@ -1,5 +1,6 @@
-"""T4：商机管道 —— deals CRUD + 阶段流转（won 置 closed_at）+ 非法阶段 400。"""
-
+"""
+测试用例：商机相关功能（Planner §5.2）。
+"""
 from __future__ import annotations
 
 import unittest
@@ -12,13 +13,14 @@ from app.models import STAGE_LABELS, STAGES
 
 class DealsTest(ApiTestCase):
     # ---------- 新建 ----------
-    def test_create_defaults_to_lead(self):
+    def test_create_defaults_to_confirm(self):
+        """测试新商机默认阶段是 confirm（V2 新要求）。"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=8800.0)
 
         self.assertEqual(deal["customer_id"], c["id"])
-        self.assertEqual(deal["stage"], "lead")
-        self.assertEqual(deal["stage_label"], "线索")
+        self.assertEqual(deal["stage"], "confirm")
+        self.assertEqual(deal["stage_label"], "需求确认")
         self.assertIsNone(deal["closed_at"])
         self.assertEqual(deal["amount"], 8800.0)
         self.assertEqual(deal["deposit"], 0.0)
@@ -36,13 +38,13 @@ class DealsTest(ApiTestCase):
             amount=12000.0,
             deposit=3000.0,
             balance=9000.0,
-            stage="quoted",
+            stage="quote",
         )
         self.assertEqual(deal["product_type"], "天幕")
         self.assertEqual(deal["model"], "TM-300")
         self.assertEqual(deal["spec"], "跨度 4m × 3m")
-        self.assertEqual(deal["stage"], "quoted")
-        self.assertEqual(deal["stage_label"], "已报价")
+        self.assertEqual(deal["stage"], "quote")
+        self.assertEqual(deal["stage_label"], "报价")
         self.assertEqual(deal["deposit"], 3000.0)
         self.assertEqual(deal["balance"], 9000.0)
         self.assertIsNone(deal["closed_at"], "只有 won 才写 closed_at")
@@ -69,7 +71,7 @@ class DealsTest(ApiTestCase):
         self.assertEqual(won.status_code, 200, won.text)
         body = won.json()
         self.assertEqual(body["stage"], "won")
-        self.assertEqual(body["stage_label"], "已成交")
+        self.assertEqual(body["stage_label"], "赢单")
         self.assertTrue(body["closed_at"], "进入 won 必须置 closed_at")
         closed_at = body["closed_at"]
         # 必须是本地时间口径（T6 的“本月成交”靠它和 localtime 比较）
@@ -114,7 +116,7 @@ class DealsTest(ApiTestCase):
 
         # 非法值不能把库里的阶段改坏
         detail = self.client.get("/api/crm/deals", params={"customer_id": c["id"]}).json()
-        self.assertEqual(detail[0]["stage"], "lead")
+        self.assertEqual(detail[0]["stage"], "confirm")
 
     # ---------- 改字段 ----------
     def test_partial_update_keeps_other_fields(self):
@@ -126,7 +128,7 @@ class DealsTest(ApiTestCase):
         body = resp.json()
         self.assertEqual(body["amount"], 2500.0)
         self.assertEqual(body["product_type"], "天窗", "没传的字段不许被清空")
-        self.assertEqual(body["stage"], "lead")
+        self.assertEqual(body["stage"], "confirm")
 
         # 文本字段可以显式清空
         cleared = self.client.put(

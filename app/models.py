@@ -1,7 +1,6 @@
 """Pydantic 入参/出参模型 + 业务枚举常量。
 
-``STAGES`` 是商机阶段的**唯一来源**：阶段名要改（用户后续可能调整）只动
-``STAGE_LABELS``，校验/展示逻辑都从它派生，不散落到各 router。前端下拉另存一份映射。
+所有枚举统一从 app/enums.py 导入，确保一致性。
 """
 
 from __future__ import annotations
@@ -10,20 +9,43 @@ from typing import Annotated, Optional
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
-# 阶段枚举：贴合她的真实工作流（不做测量/安装）
-STAGE_LABELS: dict[str, str] = {
-    "lead": "线索",
-    "quoted": "已报价",
-    "confirmed": "客户确认",
-    "deposit": "已收定金",
-    "producing": "已下单生产",
-    "balance": "待付尾款",
-    "shipped": "已发货",
-    "won": "已成交",
-    "lost": "已流失",  # 旁路
-}
-STAGES: tuple[str, ...] = tuple(STAGE_LABELS)
-DEFAULT_STAGE = "lead"
+from app.enums import (
+    DEAL_STAGE,
+    DEAL_STAGE_LABELS,
+    CUSTOMER_TYPE,
+    CUSTOMER_TYPE_LABELS,
+    SOURCE,
+    SOURCE_LABELS,
+    INTENT_LEVEL,
+    INTENT_LEVEL_LABELS,
+    LEAD_STATUS,
+    LEAD_STATUS_LABELS,
+    LEAD_INVALID_REASON,
+    LEAD_INVALID_REASON_LABELS,
+    DEAL_LOST_REASON,
+    DEAL_LOST_REASON_LABELS,
+    ORDER_STATUS,
+    ORDER_STATUS_LABELS,
+    LOGISTICS_MODE,
+    LOGISTICS_MODE_LABELS,
+    AFTERSALE_TYPE,
+    AFTERSALE_TYPE_LABELS,
+    AFTERSALE_STATUS,
+    AFTERSALE_STATUS_LABELS,
+    FOLLOW_OBJECT,
+    FOLLOW_OBJECT_LABELS,
+    FOLLOW_METHOD,
+    FOLLOW_METHOD_LABELS,
+    ATTACH_OBJECT,
+    ATTACH_OBJECT_LABELS,
+    CUSTOMER_LIFECYCLE,
+    CUSTOMER_LIFECYCLE_LABELS,
+)
+
+# 商机阶段枚举
+STAGE_LABELS = DEAL_STAGE_LABELS
+STAGES = tuple(DEAL_STAGE_LABELS.keys())
+DEFAULT_STAGE = "confirm"  # V2 默认阶段改为 confirm
 
 
 # ---------------- 字段清洗 ----------------

@@ -51,7 +51,7 @@ def open_client(login_first: bool = True) -> TestClient:
 def insert_deal(
     customer_id: int,
     *,
-    stage: str = "lead",
+    stage: str = "confirm",  # 修改默认值为 confirm
     amount: float = 1000.0,
     product_type: str = "天窗",
     closed_at: str | None = None,

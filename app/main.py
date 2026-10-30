@@ -2,8 +2,9 @@
 
 启动时（lifespan）做的事：
 1. 建表建索引（幂等）；
-2. 建上传目录；
-3. ``users`` 表为空时，按 ``ADMIN_USERNAME/ADMIN_PASSWORD`` 种一个 PBKDF2 用户。
+2. 运行迁移（幂等）；
+3. 建上传目录；
+4. ``users`` 表为空时，按 ``ADMIN_USERNAME/ADMIN_PASSWORD`` 种一个 PBKDF2 用户。
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from app.routers import (
     followups,
 )
 from app.schema import ensure_schema
+from app.migrations import run_migrations
+from app.errors import install_error_handler
 from app.security import hash_password, now_iso
 
 logging.basicConfig(
@@ -58,6 +61,7 @@ def seed_admin_if_needed() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     ensure_schema(settings.db_path)
+    run_migrations(settings.db_path)  # V2 增量迁移
     settings.uploads_path.mkdir(parents=True, exist_ok=True)
     seed_admin_if_needed()
     log.info(
@@ -80,6 +84,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 注册错误处理器
+install_error_handler(app)
 
 @app.get("/health", tags=["meta"])
 def health() -> dict:
