@@ -242,10 +242,24 @@ function viewCustomerDetail(root, rawId) {
 
     return Promise.all([
         api('/customers/' + id),
-        api('/follow-ups?customer_id=' + id)
+        api('/follow-ups?customer_id=' + id + '&include_system=true')
     ]).then(function (all) {
         var c = all[0];
-        var followups = all[1] || [];
+        var allRecords = all[1] || [];
+        var followups = allRecords.filter(function (r) {
+            return !r.kind || r.kind === 'follow';
+        });
+        var archiveRecords = allRecords.filter(function (r) {
+            return r.kind && r.kind !== 'follow' &&
+                r.object_type === 'customer' && String(r.object_id) === String(c.id);
+        }).map(function (r) {
+            return {
+                at: r.created_at,
+                type: r.kind === 'update' ? 'change' : r.kind,
+                content: r.content || '',
+                files: []
+            };
+        });
         var deals = c.deals || [];
 
         var dealHtml = deals.length
@@ -288,6 +302,12 @@ function viewCustomerDetail(root, rawId) {
             '备注：' + esc(c.note || '—') + '<br>' +
             '<span class=\"muted small\">建档 ' + fmtDateTime(c.created_at) + ' · 最近更新 ' + fmtDateTime(c.updated_at) + '</span>' +
             '</div>' +
+            '</div>' +
+            '<div class=\"card\">' +
+            '<div class=\"card-head\"><h2>档案履历（' + archiveRecords.length + '）</h2>' +
+            '<span class=\"small muted\">编辑客户后的字段变更会自动留痕</span></div>' +
+            (archiveRecords.length ? timelineHtml(archiveRecords)
+                : '<p class=\"empty\">还没有档案变更记录</p>') +
             '</div>' +
             '<div class=\"card\">' +
             '<div class=\"card-head\"><h2>商机（' + deals.length + '）</h2>' +

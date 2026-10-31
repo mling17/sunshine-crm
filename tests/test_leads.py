@@ -271,6 +271,36 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(body["name"], "张伟伟")
         self.assertEqual(body["phone"], "13800138001")
 
+    def test_update_lead_timeline_records_field_values(self):
+        lead = self.create_lead(
+            name="张伟",
+            phone="13800138000",
+            note="旧备注",
+            intent_level="medium",
+        )
+        resp = self.client.put(f"/api/crm/leads/{lead['id']}", json={
+            "name": "张伟伟",
+            "note": "新备注",
+            "intent_level": "high",
+        })
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+        history = self.client.get(
+            "/api/crm/follow-ups",
+            params={
+                "object_type": "lead",
+                "object_id": lead["id"],
+                "include_system": "true",
+            },
+        ).json()
+        change = next(item for item in history if item["kind"] == "change")
+        self.assertEqual(
+            change["content"],
+            "姓名由「张伟」改为「张伟伟」；"
+            "备注由「旧备注」改为「新备注」；"
+            "意向由「中」改为「高」",
+        )
+
     def test_update_lead_tags(self):
         lead = self.create_lead(phone="13800138000", tags=["重点客户"])
         resp = self.client.put(f"/api/crm/leads/{lead['id']}", json={

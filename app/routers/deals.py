@@ -33,8 +33,11 @@ router = APIRouter(
 
 STAGES = DEAL_STAGE_ORDER
 #: 会写「编辑」履历的字段
-_CHANGE_TRACKED = ("product_type", "model", "spec", "amount", "drive_type")
-_UPDATABLE = _CHANGE_TRACKED + ("note", "stage", "deposit", "balance")
+_CHANGE_TRACKED = (
+    "product_type", "model", "spec", "drive_type",
+    "amount", "deposit", "balance", "note",
+)
+_UPDATABLE = _CHANGE_TRACKED + ("stage",)
 #: 锁定（已生成订单）后唯一允许改的字段
 _LOCKED_ALLOWED = ("note",)
 

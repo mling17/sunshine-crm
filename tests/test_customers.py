@@ -98,6 +98,38 @@ class CustomersTest(ApiTestCase):
         detail = self.client.get(f"/api/crm/customers/{c['id']}").json()
         self.assertEqual(detail["location"], "新地址")
 
+    def test_update_writes_field_level_history(self):
+        c = self.create_customer(
+            name="张伟",
+            location="旧地址",
+            tags=["重点"],
+        )
+        resp = self.client.put(
+            f"/api/crm/customers/{c['id']}",
+            json={
+                "location": "新地址",
+                "phone": "13800000001",
+                "tags": ["门店", "待量尺"],
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+        history = self.client.get(
+            "/api/crm/follow-ups",
+            params={
+                "object_type": "customer",
+                "object_id": c["id"],
+                "include_system": "true",
+            },
+        ).json()
+        change = next(item for item in history if item["kind"] == "change")
+        self.assertEqual(
+            change["content"],
+            "电话由「未填写」改为「13800000001」；"
+            "地区由「旧地址」改为「新地址」；"
+            "标签由「重点」改为「门店、待量尺」",
+        )
+
     # ---------- 详情 ----------
     def test_detail_contains_deals_and_recent_follow_ups(self):
         c = self.create_customer(name="张伟")

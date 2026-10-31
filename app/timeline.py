@@ -15,10 +15,49 @@ import json
 import sqlite3
 from typing import Any, Iterable
 
-from app.enums import TIMELINE_TYPE_LABELS, DRIVE_TYPE_LABELS
+from app import labels as label_svc
+from app.enums import TIMELINE_TYPE_LABELS
 
 #: kind 的中文（前端也可直接用出参 type_label，避免自己维护映射）
 KIND_LABELS = TIMELINE_TYPE_LABELS
+
+#: 编辑履历统一使用的中文字段名。未列出的字段仍会显示原名，避免静默漏记。
+FIELD_LABELS = {
+    "name": "姓名",
+    "phone": "电话",
+    "wechat": "微信",
+    "lead_type": "类型",
+    "customer_type": "客户类型",
+    "company_name": "公司名",
+    "source": "来源",
+    "source_other": "来源补充",
+    "location": "地区",
+    "note": "备注",
+    "intent_level": "意向",
+    "owner": "负责人",
+    "tags": "标签",
+    "product_id": "关联产品",
+    "product_code_snapshot": "产品编码",
+    "product_name_snapshot": "产品名称",
+    "product_config_snapshot": "产品配置",
+    "product_type": "产品类型",
+    "model": "型号",
+    "spec": "尺寸",
+    "amount": "金额",
+    "deposit": "定金",
+    "balance": "尾款",
+    "drive_type": "手动/电动",
+}
+
+#: 枚举字段在履历中显示中文，detail 仍保存原始值供程序使用。
+_VALUE_LABELERS = {
+    "lead_type": label_svc.customer_type,
+    "customer_type": label_svc.customer_type,
+    "source": label_svc.source,
+    "intent_level": label_svc.intent_level,
+    "drive_type": label_svc.drive_type,
+}
+_MONEY_FIELDS = {"amount", "deposit", "balance"}
 
 
 def add_entry(
@@ -190,16 +229,34 @@ def order_events(
     return out
 
 
+def _change_value(column: str, value: Any) -> str:
+    """把字段值转成履历里可读的文案；空值也明确显示为“未填写”。"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "未填写"
+    labeler = _VALUE_LABELERS.get(column)
+    if labeler is not None:
+        return str(labeler(str(value)))
+    if column in _MONEY_FIELDS:
+        try:
+            return f"¥{float(value):,.2f}"
+        except (TypeError, ValueError):
+            pass
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, (list, tuple, set)):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return "、".join(items) if items else "未填写"
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
 def change_summary(old: dict, new: dict, columns: Iterable[str]) -> tuple[list[str], dict]:
-    """对比字段变化，返回（中文摘要列表, detail 字典）。没有变化返回空。"""
-    labels = {
-        "product_type": "产品类型",
-        "model": "型号",
-        "spec": "尺寸",
-        "amount": "金额",
-        "drive_type": "手动/电动",
-        "note": "备注",
-    }
+    """对比字段变化，返回（中文摘要列表, detail 字典）。
+
+    每个摘要都包含“字段名 + 原值 + 新值”；detail 同时保留原始值与展示文案，
+    便于页面直接展示和审计系统按字段读取。
+    """
     lines: list[str] = []
     detail: dict[str, dict] = {}
     for column in columns:
@@ -208,15 +265,17 @@ def change_summary(old: dict, new: dict, columns: Iterable[str]) -> tuple[list[s
         before, after = old.get(column), new[column]
         if before == after:
             continue
-        name = labels.get(column, column)
-        if column == "drive_type":
-            before = DRIVE_TYPE_LABELS.get(str(before), before) if before is not None else before
-            after = DRIVE_TYPE_LABELS.get(str(after), after) if after is not None else after
-        if column == "amount":
-            lines.append(f"{name}由 ¥{before} 改为 ¥{after}")
-        else:
-            lines.append(f"{name}由 {before} 改为 {after}")
-        detail[column] = {"from": old.get(column), "to": new[column]}
+        name = FIELD_LABELS.get(column, column)
+        before_text = _change_value(column, before)
+        after_text = _change_value(column, after)
+        lines.append(f"{name}由「{before_text}」改为「{after_text}」")
+        detail[column] = {
+            "label": name,
+            "from": before,
+            "to": after,
+            "from_label": before_text,
+            "to_label": after_text,
+        }
     return lines, detail
 
 def load_overdue_days(next_date: str | None) -> int:

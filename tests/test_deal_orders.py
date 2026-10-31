@@ -214,6 +214,32 @@ class DealOrdersTest(ApiTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["stage"], "confirm")
 
+    def test_update_deal_note_records_old_and_new_value(self):
+        """备注和定金也是可编辑业务字段，必须写清原值与新值。"""
+        c = self.create_customer(name="张伟")
+        deal = self.create_deal(
+            c["id"],
+            amount=1000.0,
+            drive_type="electric",
+            note="旧备注",
+        )
+
+        resp = self.client.put(
+            f"/api/crm/deals/{deal['id']}",
+            json={"note": "客户要求周五安装", "deposit": 300},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+        data = self.client.get(f"/api/crm/deals/{deal['id']}").json()
+        change = next(item for item in data["timeline"] if item["type"] == "change")
+        self.assertEqual(
+            change["content"],
+            "定金由「¥0.00」改为「¥300.00」；"
+            "备注由「旧备注」改为「客户要求周五安装」",
+        )
+        self.assertEqual(change["detail"]["note"]["from"], "旧备注")
+        self.assertEqual(change["detail"]["note"]["to"], "客户要求周五安装")
+
     def test_update_deal_field_change_timeline(self):
         """测试字段变更记录到 timeline"""
         c = self.create_customer(name="张伟")
@@ -228,7 +254,7 @@ class DealOrdersTest(ApiTestCase):
         data = resp.json()
         changes = [t for t in data["timeline"] if t["type"] == "change"]
         self.assertEqual(len(changes), 1, "只应有一条编辑履历")
-        self.assertEqual(changes[0]["content"], "尺寸由 1000x2000 改为 1200x2400")
+        self.assertEqual(changes[0]["content"], "尺寸由「1000x2000」改为「1200x2400」")
         self.assertIn("create", [t["type"] for t in data["timeline"]], "创建履历必须存在")
 
     def test_update_deal_stage_change_timeline(self):

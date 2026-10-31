@@ -28,6 +28,7 @@ from app.models import (
 )
 from app.routers.auth import require_auth
 from app.security import now_iso
+from app.timeline import add_entry, change_summary
 
 router = APIRouter(
     prefix="/api/crm",
@@ -316,11 +317,34 @@ def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
         raise HTTPException(status_code=400, detail="name 不能为空")
 
     with db_conn() as conn:
-        exists = conn.execute(
-            "SELECT 1 FROM customers WHERE id = ? AND is_delete = 0", (customer_id,)
+        old_row = conn.execute(
+            f"{_CUSTOMER_SELECT} WHERE c.id = ? AND c.is_delete = 0", (customer_id,)
         ).fetchone()
-        if exists is None:
+        if old_row is None:
             raise _not_found()
+
+        current_tags = _tags_for(conn, [customer_id]).get(customer_id, [])
+        before_values = dict(old_row)
+        before_values["tags"] = current_tags
+        after_values = dict(columns)
+        if has_tags:
+            after_values["tags"] = _normalize_tags(tags_payload or [])
+
+        lines, detail = change_summary(
+            before_values,
+            after_values,
+            [*_UPDATABLE_COLUMNS, "tags"],
+        )
+        if lines:
+            add_entry(
+                conn,
+                object_type="customer",
+                object_id=customer_id,
+                customer_id=customer_id,
+                kind="change",
+                content="；".join(lines),
+                detail=detail,
+            )
 
         if columns:
             assignments = ", ".join(f"{column} = ?" for column in columns)

@@ -454,14 +454,14 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
         current_tags = [
             row["name"] for row in conn.execute(
                 "SELECT t.name FROM tags t JOIN lead_tags lt ON t.id = lt.tag_id"
-                " WHERE lt.lead_id = ? ORDER BY t.id",
+                " WHERE lt.lead_id = ? AND lt.is_delete = 0 AND t.is_delete = 0 ORDER BY t.id",
                 (lead_id,),
             ).fetchall()
         ]
 
         updates = []
         params = []
-        changed: list[str] = []
+        field_updates: dict[str, object] = {}
         field_map = [
             ("name", "姓名"),
             ("phone", "电话"),
@@ -473,15 +473,23 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
             ("location", "地区"),
             ("note", "备注"),
             ("intent_level", "意向"),
+            ("owner", "负责人"),
         ]
-        for field, label in field_map:
+        sent_fields = lead_update.model_fields_set
+        if "name" in sent_fields and lead_update.name is None:
+            raise ApiError(status_code=400, code="name_required", message="姓名不能为空")
+        if "source" in sent_fields and lead_update.source is None:
+            raise ApiError(status_code=400, code="source_required", message="来源不能为空")
+        for field, _label in field_map:
+            if field not in sent_fields:
+                continue
             value = getattr(lead_update, field)
             if field == "phone" and value is not None:
                 value = _normalize_phone(value) or None
-            if value is not None and value != lead[field]:
+            if value != lead[field]:
                 updates.append(f"{field} = ?")
                 params.append(value)
-                changed.append(label)
+                field_updates[field] = value
 
                 if field == "phone" and value:
                     conflicts = [
@@ -507,25 +515,35 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
             lead_update.tags is not None
             and lead_update.tags[:MAX_TAGS] != current_tags
         )
-        if tags_changed:
-            changed.append("标签")
-        
         if updates or tags_changed:
-            updates.append("updated_at = ?")
-            params.append(now_iso())
-            params.append(lead_id)
-            sql = f"UPDATE leads SET {', '.join(updates)} WHERE id = ?"
-            conn.execute(sql, params)
+            before_values = dict(lead)
+            before_values["tags"] = current_tags
+            after_values = dict(field_updates)
+            if tags_changed:
+                after_values["tags"] = lead_update.tags[:MAX_TAGS]
 
-            if changed:
-                from app.timeline import add_entry as _add_entry
+            from app.timeline import add_entry as _add_entry, change_summary
+
+            lines, detail = change_summary(
+                before_values,
+                after_values,
+                [field for field, _label in field_map] + ["tags"],
+            )
+            if lines:
                 _add_entry(
                     conn,
                     object_type="lead",
                     object_id=lead_id,
                     kind="change",
-                    content="编辑线索：" + "、".join(changed),
+                    content="；".join(lines),
+                    detail=detail,
                 )
+
+            updates.append("updated_at = ?")
+            params.append(now_iso())
+            params.append(lead_id)
+            sql = f"UPDATE leads SET {', '.join(updates)} WHERE id = ?"
+            conn.execute(sql, params)
             
             # 处理标签更新
             if lead_update.tags is not None:
