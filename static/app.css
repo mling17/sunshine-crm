@@ -1789,6 +1789,54 @@ body {
   border-color: #edf1f6;
 }
 .card-head h2 { font-size: 19px; letter-spacing: -.015em; color: #10233e; }
+.entity-title-head { align-items: center; }
+.entity-title-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px 12px;
+  min-width: 0;
+}
+.entity-title-main h2 { margin: 0; }
+.lead-detail-title-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.lead-detail-title-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 12px;
+  min-width: 0;
+}
+.lead-detail-title-line h2 { margin: 0; }
+.lead-detail-crumb { align-self: flex-start; font-size: 12px; }
+.entity-title-badges {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-left: auto;
+}
+.entity-title-head > .entity-title-badges { align-self: flex-end; }
+.detail-title-tags,
+.detail-title-tag {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.detail-title-tag .tag { margin: 0; white-space: nowrap; }
+.detail-title-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
 .card-subtitle {
   margin: 5px 0 0;
   color: var(--muted);
@@ -1895,50 +1943,6 @@ table.data-table tbody tr:hover { background: #f8fbff; }
 table.data-table tbody tr:last-child td { border-bottom: none; }
 table.data-table a { color: #174fbd; font-weight: 650; text-decoration: none; }
 table.data-table a:hover { text-decoration: underline; }
-table.lead-table { table-layout: auto; min-width: 900px; }
-table.lead-table th,
-table.lead-table td { padding-left: 10px; padding-right: 10px; }
-.lead-name-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 360px;
-}
-.lead-name-main {
-  display: flex;
-  flex: 0 1 180px;
-  min-width: 110px;
-  flex-direction: column;
-  gap: 2px;
-}
-.lead-name-main > a { line-height: 1.35; }
-.lead-company-name {
-  max-width: 180px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lead-name-tags {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-.lead-name-tags .tag { margin: 0; white-space: nowrap; }
-.lead-name-meta {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-left: auto;
-}
-.lead-table .op-group { flex-wrap: wrap; gap: 6px 10px; }
 .op-group { gap: 12px; }
 .op-group .btn-link { font-size: 12px; text-underline-offset: 3px; }
 .tag { margin: 0 5px 3px 0; background: #eef3fb; color: #42526b; border: 1px solid #e0e8f3; }
@@ -2070,6 +2074,10 @@ table.lead-table td { padding-left: 10px; padding-right: 10px; }
   .card-head { margin-bottom: 13px; padding-bottom: 11px; }
   .card-head h2 { font-size: 18px; }
   .lead-page-head { align-items: flex-start; }
+  .entity-title-head { align-items: flex-start; }
+  .entity-title-main { flex-basis: calc(100% - 110px); }
+  .lead-detail-title-main { flex-basis: calc(100% - 110px); }
+  .entity-title-badges { align-self: flex-start; }
   .tab-btn { padding: 7px 10px; font-size: 12px; }
   .searchbar { padding: 6px; }
   .searchbar button { min-width: 58px; padding-inline: 12px; }
@@ -2081,7 +2089,6 @@ table.lead-table td { padding-left: 10px; padding-right: 10px; }
   table.data-table tbody,
   table.data-table tr,
   table.data-table td { display: block; width: 100%; box-sizing: border-box; }
-  table.lead-table { min-width: 0; }
   table.data-table thead { display: none; }
   table.data-table tbody { display: grid; gap: 10px; background: transparent; }
   table.data-table tbody tr {
@@ -2124,15 +2131,6 @@ table.lead-table td { padding-left: 10px; padding-right: 10px; }
   table.data-table tr.empty-row { display: block; }
   table.data-table tr.empty-row td { display: block; grid-column: 1 / -1; }
   table.data-table tr.empty-row td::before { display: none; }
-  .lead-name-row {
-    min-width: 0;
-    flex-wrap: wrap;
-    gap: 7px 10px;
-  }
-  .lead-name-main { flex: 1 1 120px; max-width: none; }
-  .lead-company-name { max-width: none; }
-  .lead-name-tags { flex: 1 1 90px; }
-  .lead-name-meta { margin-left: auto; }
   .op-group { gap: 14px; }
   .pager { gap: 6px; flex-wrap: wrap; }
   .pager .small { width: 100%; text-align: center; order: 3; }
@@ -2144,10 +2142,4 @@ table.lead-table td { padding-left: 10px; padding-right: 10px; }
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 8px 10px;
   }
-}
-
-@media (min-width: 721px) and (max-width: 1100px) {
-  /* 中等窗口优先保证姓名、标签、状态/意向与操作可用，创建时间在名下信息卡中仍可查看。 */
-  table.lead-table th:nth-child(7),
-  table.lead-table td:nth-child(7) { display: none; }
 }

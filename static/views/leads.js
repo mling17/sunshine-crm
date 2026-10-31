@@ -1,6 +1,6 @@
 /* 线索列表页面逻辑 */
 /* ---------------- 线索列表（表格，对齐 demo 定稿） ----------------
- * 定稿口径：表格列 = 名称（含标签、状态、意向） / 来源 / 地区 / 微信号 / 联系方式 / 上次跟进 / 创建时间 / 操作
+ * 定稿口径：表格列 = 名称 / 来源 / 地区 / 微信号 / 联系方式 / 标签 / 意向 / 上次跟进 / 创建时间 / 操作
  *           操作 = 编辑（弹层）/ 跟进（详情页）/ 转商机（独立页面 #/deals/new?lead=）
  */
 function viewLeads(root) {
@@ -90,25 +90,11 @@ function leadStatusBadge(status) {
     return '<span class="badge ' + v[0] + '">' + v[1] + '</span>';
 }
 
-function leadTagBadges(tags) {
-    if (!tags || !tags.length) { return '<span class="small muted">暂无标签</span>'; }
-    return tags.map(function (tag) {
+function leadDetailTags(tags) {
+    if (!tags || !tags.length) { return '<span class="detail-title-empty">暂无标签</span>'; }
+    return '<span class="detail-title-tag">' + tags.map(function (tag) {
         return '<span class="tag">' + esc(tag) + '</span>';
-    }).join('');
-}
-
-function leadNameCell(l) {
-    var name = l.name || (l.lead_type === 'company' ? l.company_name : '') || '—';
-    var company = l.company_name && l.lead_type === 'company' && l.company_name !== name
-        ? '<span class="lead-company-name">' + esc(l.company_name) + '</span>'
-        : '';
-    return '<div class="lead-name-row">' +
-        '<div class="lead-name-main"><a href="#/leads/' + l.id + '">' + esc(name) + '</a>' +
-        company + '</div>' +
-        '<div class="lead-name-tags">' + leadTagBadges(l.tags) + '</div>' +
-        '<div class="lead-name-meta">' + leadStatusBadge(l.status) +
-        leadIntentBadge(l.intent_level) + '</div>' +
-        '</div>';
+    }).join('') + '</span>';
 }
 
 function invalidReasonLabel(reason, other) {
@@ -139,12 +125,20 @@ function loadLeads(root) {
         var items = res.items || [];
         listEl.innerHTML = dataTable([
             { title: '名称', render: function (l) {
-                return leadNameCell(l);
+                var name = l.name || (l.lead_type === 'company' ? l.company_name : '') || '—';
+                return '<a href="#/leads/' + l.id + '">' + esc(name) + '</a>' +
+                    (l.company_name && l.lead_type === 'company' && l.company_name !== name
+                        ? '<div class="small muted">' + esc(l.company_name) + '</div>' : '') +
+                    ' ' + leadStatusBadge(l.status);
             } },
             { title: '来源', render: function (l) { return esc(leadSourceText(l)); }, nowrap: true },
-            { title: '地区', nowrap: true, render: function (l) { return esc(l.location || '—'); } },
+            { title: '地区', render: function (l) { return esc(l.location || '—'); } },
             { title: '微信号', render: function (l) { return esc(l.wechat || '—'); }, nowrap: true },
             { title: '联系方式', render: function (l) { return esc(l.phone || '—'); }, nowrap: true },
+            { title: '标签', render: function (l) {
+                return (l.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') || '—';
+            } },
+            { title: '意向', render: function (l) { return leadIntentBadge(l.intent_level); }, nowrap: true },
             { title: '上次跟进', nowrap: true, render: function (l) {
                 return l.last_follow_at ? fmtDateTime(l.last_follow_at).slice(5, 16) : '—';
             } },
@@ -165,7 +159,7 @@ function loadLeads(root) {
                 return opButtons(ops);
             } }
         ], items, st.q || st.status ? '没有匹配的线索，换个条件试试'
-            : '还没有线索，点右上「新增线索」开始', 'lead-table');
+            : '还没有线索，点右上「新增线索」开始');
 
         pagerEl.innerHTML = pagerHtml(res);
         pagerEl.onclick = function (ev) {
@@ -409,6 +403,11 @@ function viewLeadDetail(root, rawId) {
             backHash: '#/leads',
             backLabel: '线索池',
             title: name,
+            titleHtml:
+                '<div class="lead-detail-title-main">' +
+                '<a class="crumb lead-detail-crumb" href="#/leads">‹ 线索池</a>' +
+                '<div class="lead-detail-title-line"><h2>' + esc(name) + '</h2>' +
+                '<div class="detail-title-tags">' + leadDetailTags(l.tags) + '</div></div></div>',
             badgesHtml: leadStatusBadge(l.status) + ' ' + leadIntentBadge(l.intent_level),
             infoHtml: infoGrid([
                 ['类型', l.lead_type === 'company' ? '公司' : '个人'],
@@ -417,7 +416,6 @@ function viewLeadDetail(root, rawId) {
                 ['微信号', l.wechat],
                 ['联系方式', l.phone],
                 ['公司名', l.company_name],
-                ['标签', (l.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') || '—', true],
                 ['建档时间', fmtDateTime(l.created_at)],
                 ['最近更新', fmtDateTime(l.updated_at)],
                 ['备注', l.note],
