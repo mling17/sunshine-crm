@@ -78,7 +78,7 @@ function funnelChart(stages) {
 
 /* 商机阶段累计口径：到达过第 n 阶段（含之后各阶段）的数量 */
 function dealReached(n) {
-  var order = ['confirm', 'quote', 'negotiate', 'won'];
+  var order = ['quote', 'confirm', 'won'];
   return (window.DEMO.deals || []).filter(function (d) {
     return order.indexOf(d.stage) >= n;
   }).length;
@@ -159,10 +159,9 @@ function viewStats(root) {
       '<div class="card">' +
         '<div class="card-head"><h2>商机销售漏斗</h2><span class="small muted">累计到达该阶段的数量</span></div>' +
         funnelChart([
-          { label: '需求确认', value: dealReached(0), unit: ' 个' },
-          { label: '报价', value: dealReached(1), unit: ' 个' },
-          { label: '成交洽谈', value: dealReached(2), unit: ' 个' },
-          { label: '赢单', value: dealReached(3), unit: ' 个' }
+          { label: '报价', value: dealReached(0), unit: ' 个' },
+          { label: '待客户确认', value: dealReached(1), unit: ' 个' },
+          { label: '成交', value: dealReached(2), unit: ' 个' }
         ]) +
       '</div>' +
       '<div class="card">' +

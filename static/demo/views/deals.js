@@ -115,8 +115,12 @@ function viewDealDetail(root, rawId) {
         ? '<button type="button" class="btn btn-sm" disabled title="已生成订单，商机不可修改">编辑商机</button>' +
           '<a class="btn btn-sm" href="#/orders/' + d.order_id + '">查看订单</a>'
         : '<button type="button" class="btn btn-sm" id="dealEdit">编辑商机</button>' +
-          '<button type="button" class="btn btn-sm btn-primary" id="dealToOrder">生成订单</button>') +
-      '<span class="small muted">' + (d.locked ? '已生成订单，商机锁定' : '客户认可方案后再生成订单') + '</span>',
+          (d.stage === 'won'
+            ? '<button type="button" class="btn btn-sm btn-primary" id="dealToOrder">生成订单</button>'
+            : '<button type="button" class="btn btn-sm" disabled title="先把阶段推进到「成交」">生成订单</button>')) +
+      '<span class="small muted">' +
+        (d.locked ? '已生成订单，商机锁定'
+          : (d.stage === 'won' ? '已成交，可以生成订单' : '阶段推进到「成交」后才能生成订单')) + '</span>',
     records: records,
     onSubmit: function (p) {
       (window.DEMO.followups || []).push({
@@ -167,19 +171,22 @@ function viewDealNew(root, route) {
               DRIVE_TYPE.map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === 'electric' ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
             '</select></div>' +
         '</div>' +
-        '<div class="field"><label>产品型号（下拉，可在数据字典维护）*</label>' +
-          '<select name="model" id="dpModel">' +
-            models.map(function (m) {
-              return '<option value="' + esc(m.key) + '" data-size="' + esc((m.label.match(/\d+×\d+/) || [''])[0]) + '">' +
-                esc(m.label) + '</option>';
-            }).join('') +
-          '</select></div>' +
+        '<div class="field"><label>产品型号（可搜索，共 ' + models.length + ' 个）*</label>' +
+          '<div class="combo" id="modelCombo">' +
+            '<input type="text" id="modelSearch" autocomplete="off" placeholder="输入型号 / 尺寸 搜索，如 XW 或 1200" >' +
+            '<input type="hidden" name="model" id="dpModel">' +
+            '<div class="combo-list" id="modelList"></div>' +
+          '</div></div>' +
         '<div class="row-2">' +
           '<div class="field"><label>尺寸（宽×高 mm）*</label>' +
             '<input name="size" id="dpSize" required maxlength="32" placeholder="1200×2400"></div>' +
-          '<div class="field"><label>金额（报价）*</label>' +
-            '<input name="amount" type="number" min="0" step="0.01" required placeholder="12000"></div>' +
+          '<div class="field"><label>阶段</label>' +
+            '<select name="stage" disabled title="新建商机固定为报价">' +
+              '<option value="quote" selected>报价</option>' +
+            '</select></div>' +
         '</div>' +
+        '<div class="field"><label>金额（报价）*</label>' +
+          '<input name="amount" type="number" min="0" step="0.01" required placeholder="12000"></div>' +
         '<div class="field"><label>备注</label>' +
           '<textarea name="note" rows="2" maxlength="300" placeholder="客户需求、现场情况、特殊要求…"></textarea></div>' +
         '<p class="small muted">新建商机的初始阶段固定为「报价」，定金/尾款在生成订单时才填。</p>' +
@@ -190,15 +197,50 @@ function viewDealNew(root, route) {
       '</form>' +
     '</div>';
 
-  /* 选型号自动带出尺寸 */
-  var modelSel = $('#dpModel', root);
-  function fillSize() {
-    var opt = modelSel.options[modelSel.selectedIndex];
-    var s = opt.getAttribute('data-size');
-    if (s) { $('#dpSize', root).value = s; }
+  /* 型号：可搜索下拉（型号会越来越多，不能用长下拉） */
+  var searchEl = $('#modelSearch', root);
+  var hiddenEl = $('#dpModel', root);
+  var listEl = $('#modelList', root);
+
+  function renderModelList(kw) {
+    var q = String(kw || '').trim().toUpperCase();
+    var hits = models.filter(function (m) {
+      if (!q) { return true; }
+      return (m.key + ' ' + m.label).toUpperCase().indexOf(q) >= 0;
+    }).slice(0, 40);
+    listEl.innerHTML = hits.length ? hits.map(function (m) {
+      var size = (m.label.match(/\d+×\d+/) || [''])[0];
+      return '<button type="button" class="combo-item" data-key="' + esc(m.key) + '" data-size="' + esc(size) + '">' +
+        '<span class="combo-key">' + esc(m.key) + '</span>' +
+        '<span class="combo-label">' + esc(m.label) + '</span></button>';
+    }).join('') : '<div class="combo-empty small muted">没有匹配的型号</div>';
   }
-  modelSel.addEventListener('change', fillSize);
-  fillSize();
+
+  function openList() { listEl.classList.add('open'); renderModelList(searchEl.value); }
+  function closeList() { listEl.classList.remove('open'); }
+
+  searchEl.addEventListener('focus', openList);
+  searchEl.addEventListener('input', function () { openList(); });
+  searchEl.addEventListener('blur', function () { setTimeout(closeList, 180); });
+
+  listEl.addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-key]');
+    if (!b) { return; }
+    var key = b.getAttribute('data-key');
+    hiddenEl.value = key;
+    searchEl.value = key;
+    var size = b.getAttribute('data-size');
+    if (size) { $('#dpSize', root).value = size; }
+    closeList();
+  });
+
+  /* 默认选第一个 */
+  if (models.length) {
+    hiddenEl.value = models[0].key;
+    searchEl.value = models[0].key;
+    var s0 = (models[0].label.match(/\d+×\d+/) || [''])[0];
+    if (s0) { $('#dpSize', root).value = s0; }
+  }
 
   $('#dpCancel', root).addEventListener('click', function () {
     navigate(lead ? '#/leads' : '#/customers');
@@ -208,6 +250,7 @@ function viewDealNew(root, route) {
     ev.preventDefault();
     var f = ev.target;
     var amount = Number(f.amount.value || 0);
+    if (!f.model.value) { toast('请选择产品型号（可输入关键字搜索）', true); return; }
     if (!f.size.value.trim()) { toast('尺寸必填', true); return; }
     if (!(amount > 0)) { toast('金额必须大于 0', true); return; }
 
@@ -293,14 +336,16 @@ function openDealForm(id) {
             }).join('') + '</select></div>' +
           '<div class="field"><label>尺寸</label><input name="size" value="' + esc(d.size || '') + '" maxlength="32"></div>' +
         '</div>' +
-        '<div class="field"><label>金额（报价）</label>' +
-          '<input name="amount" type="number" min="0" step="0.01" value="' + (d.amount || 0) + '"></div>' +
+        '<div class="row-2">' +
+          '<div class="field"><label>阶段</label><select name="stage">' +
+            STAGES.map(function (p) { return '<option value="' + p[0] + '"' + (d.stage === p[0] ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="field"><label>金额（报价）</label>' +
+            '<input name="amount" type="number" min="0" step="0.01" value="' + (d.amount || 0) + '"></div>' +
+        '</div>' +
         '<div class="field"><label>备注</label>' +
           '<textarea name="note" rows="2" maxlength="300">' + esc(d.note || '') + '</textarea></div>' +
-        '<div class="field"><label>阶段</label><select name="stage">' +
-          STAGES.map(function (p) { return '<option value="' + p[0] + '"' + (d.stage === p[0] ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
-        '</select></div>' +
-        '<p class="small muted">保存后，凡有变化的字段都会自动生成一条「信息变更」履历。</p>' +
+        '<p class="small muted">保存后，凡有变化的字段都会自动生成一条「编辑」履历。</p>' +
         '<div class="form-actions">' +
           '<button type="button" class="btn modal-cancel">取消</button>' +
           '<button type="submit" class="btn btn-primary">保存</button>' +

@@ -14,7 +14,9 @@ var RECORD_META = {
   change: { label: '编辑', cls: 'change', icon: '✏️' },
   stage: { label: '状态变更', cls: 'stage', icon: '🚩' },
   order: { label: '生成订单', cls: 'order', icon: '📦' },
-  aftersale: { label: '售后', cls: 'after', icon: '🛠' }
+  aftersale: { label: '售后', cls: 'after', icon: '🛠' },
+  pay: { label: '收款', cls: 'pay', icon: '💰' },
+  ship: { label: '发货', cls: 'ship', icon: '🚚' }
 };
 
 function recordLabel(type) { return (RECORD_META[type] || RECORD_META.follow).label; }
@@ -47,15 +49,35 @@ function openImageModal(url, name) {
   modal.addEventListener('click', function (ev) { if (ev.target === modal) { close(); } });
 }
 
-/* 附件缩略图：files 元素可以是字符串文件名，也可以是 {name,url} */
+/* 附件区：图片显示缩略图（点开大图），Excel/PDF 等显示文件条 */
+function fileIcon(name) {
+  var ext = String(name || '').split('.').pop().toLowerCase();
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic'].indexOf(ext) >= 0) { return '🖼'; }
+  if (['xlsx', 'xls', 'csv'].indexOf(ext) >= 0) { return '📊'; }
+  if (ext === 'pdf') { return '📕'; }
+  if (['doc', 'docx'].indexOf(ext) >= 0) { return '📄'; }
+  if (['zip', 'rar', '7z'].indexOf(ext) >= 0) { return '🗜️'; }
+  if (['dwg', 'dxf'].indexOf(ext) >= 0) { return '📐'; }
+  return '📎';
+}
+
+function isImageFile(f) {
+  if (typeof f === 'string') { return /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(f); }
+  if (typeof f.isImage === 'boolean') { return f.isImage; }
+  if (f.url && /^data:image\//.test(f.url)) { return true; }
+  return /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(f.name || '');
+}
+
 function photoThumbs(files) {
   if (!files || !files.length) { return ''; }
-  return '<div class="thumb-strip">' + files.map(function (f) {
-    var name = typeof f === 'string' ? f : (f.name || '图片');
+  return '<div class="attach-strip">' + files.map(function (f) {
+    var name = typeof f === 'string' ? f : (f.name || '附件');
     var url = typeof f === 'string' ? null : f.url;
-    if (!url) { return '<span class="file-chip">📎 ' + esc(name) + '</span>'; }
-    return '<button type="button" class="thumb" data-img="' + esc(url) + '" data-name="' + esc(name) + '" ' +
-      'title="点击查看大图"><img src="' + esc(url) + '" alt="' + esc(name) + '" loading="lazy"></button>';
+    if (url && isImageFile(f)) {
+      return '<button type="button" class="thumb" data-img="' + esc(url) + '" data-name="' + esc(name) + '" ' +
+        'title="点击查看大图"><img src="' + esc(url) + '" alt="' + esc(name) + '" loading="lazy"></button>';
+    }
+    return '<span class="file-chip" title="' + esc(name) + '">' + fileIcon(name) + ' ' + esc(name) + '</span>';
   }).join('') + '</div>';
 }
 
@@ -114,12 +136,17 @@ function openFollowModal(opts) {
                 return '<option value="' + m[0] + '"' + (m[0] === 'wechat' ? ' selected' : '') + '>' + m[1] + '</option>';
               }).join('') +
             '</select></div>' +
-          '<div class="field"><label>下次跟进时间</label>' +
-            '<input type="date" name="next_date" value="' + (opts.defaultNext || dayAfter(3)) + '"></div>' +
+          '<div class="field">' +
+            '<label class="label-with-switch">下次跟进时间' +
+              '<span class="switch"><input type="checkbox" id="fuNextOn" checked><span>需要</span></span>' +
+            '</label>' +
+            '<input type="date" name="next_date" id="fuNextDate" value="' + (opts.defaultNext || dayAfter(3)) + '">' +
+            '<div class="small muted" id="fuNextHint">关掉则表示这次不需要再跟进</div>' +
+          '</div>' +
         '</div>' +
-        '<div class="field"><label>图片（图纸 / 现场照片，可多选）</label>' +
-          '<input type="file" name="photos" accept="image/*" multiple></div>' +
-        '<div id="fuThumbs" class="thumb-strip"></div>' +
+        '<div class="field"><label>附件（图片 / Excel / PDF，可多选）</label>' +
+          '<input type="file" name="photos" multiple></div>' +
+        '<div id="fuThumbs" class="attach-strip"></div>' +
         '</div>' +
         '<div class="form-actions">' +
           '<button type="button" class="btn modal-cancel">取消</button>' +
@@ -137,13 +164,24 @@ function openFollowModal(opts) {
   var input = modal.querySelector('[name="photos"]');
   input.addEventListener('change', function () {
     picked = Array.prototype.map.call(input.files, function (f) {
-      return { name: f.name, url: URL.createObjectURL(f) };
+      return {
+        name: f.name,
+        url: URL.createObjectURL(f),
+        isImage: /^image\//.test(f.type || '')
+      };
     });
-    $('#fuThumbs', modal).innerHTML = picked.map(function (p) {
-      return '<button type="button" class="thumb" data-img="' + esc(p.url) + '" data-name="' + esc(p.name) + '">' +
-        '<img src="' + esc(p.url) + '" alt="' + esc(p.name) + '"></button>';
-    }).join('');
+    $('#fuThumbs', modal).innerHTML = photoThumbs(picked);
   });
+
+  /* 下次跟进开关 */
+  var nextOn = $('#fuNextOn', modal);
+  var nextDate = $('#fuNextDate', modal);
+  function syncNext() {
+    nextDate.disabled = !nextOn.checked;
+    nextDate.style.opacity = nextOn.checked ? '1' : '.45';
+  }
+  nextOn.addEventListener('change', syncNext);
+  syncNext();
 
   $('#fuModalForm', modal).addEventListener('submit', function (ev) {
     ev.preventDefault();
@@ -153,7 +191,7 @@ function openFollowModal(opts) {
     var payload = {
       content: content,
       method: f.method.value,
-      next_date: f.next_date.value || null,
+      next_date: nextOn.checked ? (f.next_date.value || null) : null,
       files: picked
     };
     close();

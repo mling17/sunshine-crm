@@ -83,6 +83,9 @@ function viewOrderDetail(root, rawId) {
   var paid = Number(o.paid_amount) || 0;
   var unpaid = Math.max(0, Number(o.amount) - paid);
   var stepIdx = ORDER_STATUS.map(function (p) { return p[0]; }).indexOf(o.status);
+  var logs = (o.logs || []).map(function (g) {
+    return { at: g.at, type: g.type, content: g.text, files: g.files || [] };
+  }).sort(function (a, b) { return a.at < b.at ? 1 : -1; });
 
   /* 进度条 */
   var progress = '<div class="progress-bar">' + ORDER_STATUS.map(function (p, i) {
@@ -146,18 +149,30 @@ function viewOrderDetail(root, rawId) {
       '<div class="card-head"><h2>收货 / 配送</h2>' +
         '<button type="button" class="btn btn-sm" id="btnEditAddr">修改收货信息</button></div>' +
       infoGrid([
+        ['物流方式', o.logistics_mode_label],
+        ['物流公司', o.carrier_name || '不指定'],
+        ['公司联系人', carrierContactText(o)],
+        ['物流费用', o.logistics_fee ? money(o.logistics_fee) : '—'],
         ['收件人', o.receiver_name],
         ['收件电话', o.receiver_phone],
         ['收件地址', o.receiver_address],
-        ['物流费用', o.logistics_fee ? money(o.logistics_fee) : '—']
+        ['运单号', o.tracking_number || '待补']
       ]) +
     '</div>' +
+    /* 2026-10-31：没有售后单就整块不显示 */
+    (aftersales.length
+      ? '<div class="card">' +
+          '<div class="card-head"><h2>售后单（' + aftersales.length + '）</h2>' +
+            (o.status === 'completed'
+              ? '<button type="button" class="btn btn-sm" id="btnAddAftersale2">＋ 添加售后</button>'
+              : '<span class="small muted">订单完成后可申请</span>') +
+          '</div>' + aftersaleHtml +
+        '</div>'
+      : '') +
     '<div class="card">' +
-      '<div class="card-head"><h2>售后单（' + aftersales.length + '）</h2>' +
-        (o.status === 'completed'
-          ? '<button type="button" class="btn btn-sm" id="btnAddAftersale2">＋ 添加售后</button>'
-          : '<span class="small muted">订单完成后可申请</span>') +
-      '</div>' + aftersaleHtml +
+      '<div class="card-head"><h2>订单履历 <span class="badge muted">' + logs.length + '</span></h2>' +
+        '<span class="small muted">每次操作都会记录</span></div>' +
+      timelineHtml(logs) +
     '</div>';
 
   var previewBtn = $('#btnDealPreview', root);
@@ -181,24 +196,32 @@ function viewOrderDetail(root, rawId) {
   }
 }
 
-/* 状态推进（演示：直接改内存） */
+/* 状态推进（每次推进都写一条履历） */
 function advanceOrder(o) {
   var step = ORDER_NEXT[o.status];
   if (!step) { return; }
   var nowIso = new Date().toISOString().slice(0, 19);
+  var prevLabel = ORDER_STATUS_LABEL[o.status] || o.status;
+  var nextLabel = ORDER_STATUS_LABEL[step.next] || step.next;
 
   if (step.next === 'deposit_paid') {
     o.paid_amount = Number(o.deposit) || 0;
+    pushOrderLog(o, 'pay', '收押金 ' + moneyRaw(o.deposit) + '，财务已确认');
   } else if (step.next === 'balance_paid') {
     o.paid_amount = Number(o.amount) || 0;
+    pushOrderLog(o, 'pay', '收尾款 ' + moneyRaw(o.balance) + '，全款收清');
   } else if (step.next === 'shipped') {
     if (!o.tracking_number) { o.tracking_number = 'SF' + Date.now().toString().slice(-10); }
+    pushOrderLog(o, 'ship', '已发货，承运：' + (o.carrier_name || '不指定') +
+      (o.carrier_name ? '（' + carrierContactText(o) + '）' : '') + '，运单 ' + o.tracking_number);
   } else if (step.next === 'completed') {
     o.completed_at = nowIso;
   }
+
   o.status = step.next;
   o.updated_at = nowIso;
-  toast('订单已推进到「' + (ORDER_STATUS_LABEL[o.status] || o.status) + '」（演示）');
+  pushOrderLog(o, 'stage', '状态变更：' + prevLabel + ' → ' + nextLabel);
+  toast('订单已推进到「' + nextLabel + '」（演示）');
   render();
 }
 
@@ -256,6 +279,7 @@ function openAftersaleModal(o) {
       updated_at: new Date().toISOString().slice(0, 19)
     };
     window.DEMO.aftersales.push(as);
+    pushOrderLog(o, 'aftersale', '添加售后 ' + no + '（' + (AFTERSALE_TYPE_LABEL[as.type] || as.type) + '）：' + desc.slice(0, 24));
     close();
     toast('售后单已生成：' + no);
     navigate('#/aftersales/' + as.id);
@@ -296,6 +320,7 @@ function openAddressPicker(o) {
     o.receiver_name = a.receiver_name;
     o.receiver_phone = a.phone;
     o.receiver_address = a.address;
+    pushOrderLog(o, 'change', '修改收货信息：' + a.label + ' · ' + a.receiver_name + ' ' + a.phone + ' ' + a.address);
     close();
     toast('收货地址已更换（演示）');
     render();
@@ -341,4 +366,22 @@ function openDealPreviewModal(dealId) {
   function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
   $('.modal-close', modal).addEventListener('click', close);
   $('.modal-cancel', modal).addEventListener('click', close);
+}
+
+
+/* 物流公司联系人文案：姓名（标签） 电话 —— 实时取物流主数据，避免缓存旧值 */
+function carrierContactText(o) {
+  var car = (window.DEMO.carriers || []).filter(function (c) { return c.id === o.carrier_id; })[0];
+  var cs = (car && car.contacts) || o.carrier_contacts || [];
+  if (!cs.length) { return o.carrier_name ? '未维护联系人' : '—'; }
+  return cs.map(function (c) {
+    var tags = (c.tags || []).join('/');
+    return c.name + (tags ? '（' + tags + '）' : '') + ' ' + c.phone;
+  }).join('；');
+}
+
+/* 订单履历写入 */
+function pushOrderLog(o, type, text) {
+  o.logs = o.logs || [];
+  o.logs.push({ at: new Date().toISOString().slice(0, 19), type: type, text: text });
 }

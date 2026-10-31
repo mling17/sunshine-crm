@@ -15,11 +15,11 @@
   var MAX_PHOTO_MB = 20;
   var MAX_TAGS = 20;
 
+  /* 2026-10-31 定稿：阶段顺序 = 报价 → 待客户确认 → 成交 / 流失 */
   var STAGES = [
-    ['confirm', '需求确认'],
     ['quote', '报价'],
-    ['negotiate', '成交洽谈'],
-    ['won', '赢单'],
+    ['confirm', '待客户确认'],
+    ['won', '成交'],
     ['lost', '流失']
   ];
   var STAGE_LABEL = {};
@@ -237,12 +237,11 @@
       { key: 'wechat', label: '微信', sort: 1, enabled: true, used: 8 },
       { key: 'phone', label: '电话', sort: 2, enabled: true, used: 5 }
     ] },
-    { code: 'deal_stage', name: '商机阶段', level: 'B', desc: '状态机，只能改名/排序，不能增删', items: [
-      { key: 'confirm', label: '需求确认', sort: 1, enabled: true, used: 3 },
-      { key: 'quote', label: '报价', sort: 2, enabled: true, used: 2 },
-      { key: 'negotiate', label: '成交洽谈', sort: 3, enabled: true, used: 1 },
-      { key: 'won', label: '赢单', sort: 4, enabled: true, used: 7 },
-      { key: 'lost', label: '流失', sort: 5, enabled: true, used: 1 }
+    { code: 'deal_stage', name: '商机阶段', level: 'B', desc: '状态机，只能改名/排序，不能增删；顺序=报价→待客户确认→成交/流失', items: [
+      { key: 'quote', label: '报价', sort: 1, enabled: true, used: 2 },
+      { key: 'confirm', label: '待客户确认', sort: 2, enabled: true, used: 4 },
+      { key: 'won', label: '成交', sort: 3, enabled: true, used: 7 },
+      { key: 'lost', label: '流失', sort: 4, enabled: true, used: 1 }
     ] },
     { code: 'order_status', name: '订单状态', level: 'B', desc: '状态机，只能改名，不能增删', items: [
       { key: 'pending_payment', label: '待支付', sort: 1, enabled: true, used: 1 },
@@ -284,14 +283,36 @@
 
   /* 产品型号字典（下拉来源，走数据字典 A 类） */
   var PRODUCT_MODELS = [
+    { key: 'XW-60', label: 'XW-60 天窗 600×1200', product: '天窗', used: 0 },
     { key: 'XW-90', label: 'XW-90 天窗 900×1800', product: '天窗', used: 3 },
     { key: 'XW-120', label: 'XW-120 天窗 1200×2400', product: '天窗', used: 5 },
     { key: 'XW-150', label: 'XW-150 天窗 1500×2800', product: '天窗', used: 1 },
+    { key: 'XW-180', label: 'XW-180 天窗 1800×3000', product: '天窗', used: 0 },
+    { key: 'XW-120E', label: 'XW-120E 天窗 电动款 1200×2400', product: '天窗', used: 2 },
+    { key: 'XW-150E', label: 'XW-150E 天窗 电动款 1500×2800', product: '天窗', used: 1 },
+    { key: 'XW-200E', label: 'XW-200E 天窗 电动款 2000×3200', product: '天窗', used: 0 },
+    { key: 'TM-120', label: 'TM-120 天幕 1200×2000', product: '天幕', used: 0 },
     { key: 'TM-180', label: 'TM-180 天幕 1800×2600', product: '天幕', used: 1 },
     { key: 'TM-240', label: 'TM-240 天幕 2400×3000', product: '天幕', used: 2 },
     { key: 'TM-300', label: 'TM-300 天幕 3000×3500', product: '天幕', used: 1 },
+    { key: 'TM-360', label: 'TM-360 天幕 3600×4200', product: '天幕', used: 0 },
+    { key: 'TM-240E', label: 'TM-240E 天幕 电动款 2400×3000', product: '天幕', used: 1 },
+    { key: 'TM-300E', label: 'TM-300E 天幕 电动款 3000×3500', product: '天幕', used: 0 },
+    { key: 'YG-20', label: 'YG-20 阳光房 2000×3000', product: '阳光房', used: 0 },
     { key: 'YG-30', label: 'YG-30 阳光房 3000×4000', product: '阳光房', used: 2 },
-    { key: 'ZY-15', label: 'ZY-15 遮阳帘 1500×2000', product: '遮阳帘', used: 1 }
+    { key: 'YG-40', label: 'YG-40 阳光房 4000×5000', product: '阳光房', used: 0 },
+    { key: 'YG-50', label: 'YG-50 阳光房 5000×6000', product: '阳光房', used: 0 },
+    { key: 'ZY-10', label: 'ZY-10 遮阳帘 1000×1500', product: '遮阳帘', used: 0 },
+    { key: 'ZY-15', label: 'ZY-15 遮阳帘 1500×2000', product: '遮阳帘', used: 1 },
+    { key: 'ZY-20', label: 'ZY-20 遮阳帘 2000×2500', product: '遮阳帘', used: 0 },
+    { key: 'ZY-25E', label: 'ZY-25E 遮阳帘 电动款 2500×3000', product: '遮阳帘', used: 0 },
+    { key: 'FT-100', label: 'FT-100 上翻窗 1000×1000', product: '天窗', used: 0 },
+    { key: 'FT-140', label: 'FT-140 上翻窗 1400×1400', product: '天窗', used: 0 },
+    { key: 'PY-120', label: 'PY-120 平移窗 1200×1200', product: '天窗', used: 0 },
+    { key: 'PY-160', label: 'PY-160 平移窗 1600×1200', product: '天窗', used: 0 },
+    { key: 'PY-200E', label: 'PY-200E 平移窗 电动款 2000×1500', product: '天窗', used: 0 },
+    { key: 'YG-30E', label: 'YG-30E 阳光房 电动开合 3000×4000', product: '阳光房', used: 0 },
+    { key: 'TM-420', label: 'TM-420 天幕 4200×5000', product: '天幕', used: 0 }
   ];
 
   /* 手动 / 电动（商机必填） */
@@ -312,6 +333,8 @@
          { at: d(3, '09:20'), type: 'change', text: '尺寸由 3000×4000 改为 3000×4200（客户要求加宽）' }]
   };
   DEALS.forEach(function (x) {
+    /* 阶段迁移到新枚举：negotiate→confirm，其余同名 */
+    if (x.stage === 'negotiate') { x.stage = 'confirm'; }
     /* 手动/电动：天窗多为电动，遮阳帘手动 */
     x.drive_type = (x.product_type === '遮阳帘') ? 'manual' : (x.id % 3 === 0 ? 'manual' : 'electric');
     x.model_code = x.model;
@@ -355,6 +378,42 @@
     o.carrier_name = o.carrier_id ? ((CARRIERS.filter(function (c) { return c.id === o.carrier_id; })[0] || {}).name || '') : '';
   });
 
+  /* 订单履历（2026-10-31：订单的每次操作都要留痕） */
+  var ORDER_LOGS = {
+    1: [{ at: d(49, '14:20'), type: 'order', text: '订单创建：由商机 阳光房 YG-30 生成，总额 ¥68,000，押金 ¥20,000，尾款 ¥48,000' },
+        { at: d(46, '10:00'), type: 'pay', text: '收押金 ¥20,000，财务已确认' }],
+    2: [{ at: d(36, '10:40'), type: 'order', text: '订单创建：由商机 天幕 TM-300 生成，总额 ¥52,000，押金 ¥15,000，尾款 ¥37,000' },
+        { at: d(35, '09:00'), type: 'pay', text: '收押金 ¥15,000，财务已确认' },
+        { at: d(30, '09:30'), type: 'stage', text: '状态变更：已付押金 → 生产中（厂里已排产）' },
+        { at: d(18, '15:00'), type: 'pay', text: '收尾款 ¥37,000，财务已确认' },
+        { at: d(16, '10:00'), type: 'stage', text: '状态变更：已付尾款 → 待发货' },
+        { at: d(14, '11:20'), type: 'ship', text: '已发货，承运：顺丰快运，运单 SF7788123400' },
+        { at: d(12, '15:30'), type: 'stage', text: '状态变更：已发货 → 已完成（客户确认收货）' }],
+    3: [{ at: d(16, '15:30'), type: 'order', text: '订单创建：由商机 天窗 XW-120 生成，总额 ¥12,000，押金 ¥3,600，尾款 ¥8,400' },
+        { at: d(15, '09:10'), type: 'pay', text: '收押金 ¥3,600' },
+        { at: d(10, '14:00'), type: 'stage', text: '状态变更：已付押金 → 生产中' },
+        { at: d(6, '11:00'), type: 'pay', text: '收尾款 ¥8,400' }],
+    4: [{ at: d(11, '10:20'), type: 'order', text: '订单创建：由商机 天幕 TM-240 生成，总额 ¥45,000，押金 ¥13,500，尾款 ¥31,500' },
+        { at: d(10, '16:00'), type: 'pay', text: '收押金 ¥13,500' },
+        { at: d(9, '09:00'), type: 'stage', text: '状态变更：已付押金 → 生产中' }],
+    5: [{ at: d(3, '09:10'), type: 'order', text: '订单创建：由商机 天窗 XW-90 生成，总额 ¥8,600，押金 ¥2,600，尾款 ¥6,000' }],
+    6: [{ at: d(7, '16:50'), type: 'order', text: '订单创建：由商机 天窗 XW-120 生成，总额 ¥13,500，押金 ¥4,000，尾款 ¥9,500' },
+        { at: d(6, '10:00'), type: 'pay', text: '收押金 ¥4,000' },
+        { at: d(4, '09:00'), type: 'stage', text: '状态变更：已付押金 → 生产中' },
+        { at: d(2, '10:00'), type: 'pay', text: '收尾款 ¥9,500' },
+        { at: d(2, '10:05'), type: 'stage', text: '状态变更：已付尾款 → 待发货' }],
+    7: [{ at: d(5, '11:20'), type: 'order', text: '订单创建：由商机 天窗 XW-90 生成，总额 ¥9,800，押金 ¥3,000，尾款 ¥6,800' },
+        { at: d(4, '09:00'), type: 'pay', text: '收押金 ¥3,000' },
+        { at: d(3, '09:00'), type: 'stage', text: '状态变更：已付押金 → 生产中' },
+        { at: d(2, '10:00'), type: 'pay', text: '收尾款 ¥6,800' },
+        { at: d(1, '16:00'), type: 'ship', text: '已发货，承运：济南本地专线，运单 SF1234567890' }]
+  };
+  ORDERS.forEach(function (o) {
+    o.logs = ORDER_LOGS[o.id] || [];
+    o.carrier_contacts = o.carrier_id
+      ? ((CARRIERS.filter(function (c) { return c.id === o.carrier_id; })[0] || {}).contacts || []) : [];
+  });
+
   /* 客户收货地址簿（复购可直接选历史地址） */
   var ADDRESSES = [
     { id: 1, customer_id: 1, label: '家', receiver_name: '王志远', phone: '138 5312 7745', address: '济南市历下区万科城 12-3-1801', is_default: true },
@@ -377,7 +436,7 @@
   /* 线索跟进履历（和客户跟进分开存，转客户后一次性带过去） */
   var LEAD_FOLLOWS = [
     { lead_id: 1, method: 'wechat', content: '抖音私信，发了 3 个顶楼案例，问能不能做 90 平露台', next_date: dayOff(-1), created_at: d(0, '08:40'), files: [{ name: '露台现场.jpg', url: demoPhoto('露台现场') }] },
-    { lead_id: 1, method: 'phone', content: '电话沟通 10 分钟，预算 2 万左右，约周末到店', next_date: dayOff(-3), created_at: d(0, '10:20'), files: ['户型图.jpg'] },
+    { lead_id: 1, method: 'phone', content: '电话沟通 10 分钟，预算 2 万左右，约周末到店', next_date: dayOff(-3), created_at: d(0, '10:20'), files: [{ name: '户型图.jpg', url: demoPhoto('户型图', '#7b61ff'), isImage: true }] },
     { lead_id: 2, method: 'phone', content: '同行介绍的装饰公司，说手上有 5 套要装', next_date: dayOff(2), created_at: d(3, '10:20'), files: [] },
     { lead_id: 2, method: 'visit', content: '去了他们工地，甲方要求电动开合', next_date: dayOff(-1), created_at: d(1, '15:00'), files: [{ name: '现场1.jpg', url: demoPhoto('工地现场') }, { name: '现场2.jpg', url: demoPhoto('洞口尺寸', '#2f855a') }] },
     { lead_id: 3, method: 'wechat', content: '微信咨询天幕，预算 3 万内，发了 TM-180 报价', next_date: todayISO(), created_at: d(2, '19:50'), files: [] },
@@ -888,7 +947,7 @@
     DRIVE_TYPE: DRIVE_TYPE, DRIVE_LABEL: DRIVE_LABEL,
     FOLLOW_METHODS: FOLLOW_METHODS, FOLLOW_METHOD_LABEL: FOLLOW_METHOD_LABEL,
     LOGISTICS_MODES: LOGISTICS_MODES, LOGISTICS_MODE_LABEL: LOGISTICS_MODE_LABEL,
-    DEMO: { customers: CUSTOMERS, deals: DEALS, orders: ORDERS, aftersales: AFTERSALES, followups: FOLLOWUPS, leads: LEADS, dicts: DICTS, tags: TAG_NAMES, models: PRODUCT_MODELS, leadFollows: LEAD_FOLLOWS, dealLogs: DEAL_LOGS, carriers: CARRIERS, receivers: RECEIVERS, addresses: ADDRESSES, aftersaleFollows: AFTERSALE_FOLLOWS }
+    DEMO: { customers: CUSTOMERS, deals: DEALS, orders: ORDERS, aftersales: AFTERSALES, followups: FOLLOWUPS, leads: LEADS, dicts: DICTS, tags: TAG_NAMES, models: PRODUCT_MODELS, leadFollows: LEAD_FOLLOWS, dealLogs: DEAL_LOGS, carriers: CARRIERS, receivers: RECEIVERS, addresses: ADDRESSES, aftersaleFollows: AFTERSALE_FOLLOWS, orderLogs: ORDER_LOGS }
   });
 
   if (document.readyState === 'loading') {

@@ -114,7 +114,13 @@ function viewAftersaleDetail(root, rawId) {
         aftersale_id: a.id, method: p.method, content: p.content, next_date: p.next_date,
         created_at: new Date().toISOString().slice(0, 19), files: p.files
       });
-      toast('已记录跟进（演示：仅本次会话有效）');
+      /* 2026-10-31：售后一旦有了跟进记录，自动进入「处理中」，直到手动标记完成 */
+      if (a.status === 'pending') {
+        a.status = 'processing';
+        a.updated_at = new Date().toISOString().slice(0, 19);
+        addStatusLog('状态变更：待处理 → 处理中（已记录跟进）');
+      }
+      toast('已记录跟进' + (a.status === 'processing' ? '，售后自动进入「处理中」' : ''));
       render();
     }
   });
