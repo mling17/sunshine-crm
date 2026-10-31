@@ -18,16 +18,34 @@ from app.security import now_iso
 ADMIN = {"username": "chen", "password": "test123"}
 
 
+class IdRow(int):
+    """既当 int（老用例）、又能下标取字段（新用例）的返回值。"""
+
+    def __new__(cls, value: int, **data):
+        obj = super().__new__(cls, int(value))
+        obj._data = data
+        return obj
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+
 def reset_data() -> None:
     """清空业务数据；``DELETE FROM customers`` 会按外键级联清掉 deals/follow_ups/customer_tags。
 
     前提：表已建好（TestClient 已进入 lifespan，见 ``ApiTestCase.setUp``）。
     """
     with db_conn() as conn:
-        conn.execute("DELETE FROM customers")
-        conn.execute("DELETE FROM tags")
-        conn.execute("DELETE FROM sessions")
-        conn.execute("DELETE FROM import_log")
+        # 子表先删，避免 orders/aftersales 的 RESTRICT 外键挡住 customers 删除
+        for table in (
+            "aftersale_status_log", "aftersales", "order_status_log", "orders",
+            "attachments", "follow_ups", "deals", "customer_tags",
+            "lead_tags", "leads", "customers", "tags", "sessions", "import_log",
+        ):
+            conn.execute(f"DELETE FROM {table}")
 
 
 def login(client: TestClient, password: str = ADMIN["password"]) -> TestClient:
@@ -68,14 +86,16 @@ def insert_customer(
             """,
             (name, phone, wechat, customer_type, source, intent_level, company_name, now, now),
         )
-        return int(cur.lastrowid or 0)
+        cid = int(cur.lastrowid or 0)
+        return IdRow(cid, id=cid, name=name, phone=phone, wechat=wechat,
+                     customer_type=customer_type, source=source, intent_level=intent_level)
 
 
 def insert_order(
     customer_id: int,
-    deal_id: int,
+    deal_id: int | None = None,
     *,
-    order_no: str = "SO-20261030-001",
+    order_no: str | None = None,
     product_type: str = "天窗",
     model: str = "平移",
     spec: str = "1200*1400",
@@ -85,6 +105,16 @@ def insert_order(
     """直接落一条 order"""
     now = now_iso()
     with db_conn() as conn:
+        if order_no is None:
+            _n = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] + 1
+            order_no = f"SO-20261030-{_n:03d}"
+        if deal_id is None:
+            cur = conn.execute(
+                "INSERT INTO deals (customer_id, product_type, amount, stage, closed_at, created_at, updated_at)"
+                " VALUES (?, ?, ?, 'won', ?, ?, ?)",
+                (customer_id, product_type, amount, now, now, now),
+            )
+            deal_id = int(cur.lastrowid or 0)
         cur = conn.execute(
             """
             INSERT INTO orders (order_no, customer_id, deal_id, product_type, model, spec, amount, status, created_at, updated_at)
@@ -92,7 +122,9 @@ def insert_order(
             """,
             (order_no, customer_id, deal_id, product_type, model, spec, amount, status, now, now),
         )
-        return int(cur.lastrowid or 0)
+        oid = int(cur.lastrowid or 0)
+        return IdRow(oid, id=oid, customer_id=customer_id, deal_id=deal_id,
+                     order_no=order_no, amount=amount, status=status)
 
 
 def insert_deal(
@@ -113,7 +145,8 @@ def insert_deal(
             """,
             (customer_id, product_type, amount, stage, closed_at, now, now),
         )
-        return int(cur.lastrowid or 0)
+        did = int(cur.lastrowid or 0)
+        return IdRow(did, id=did, customer_id=customer_id, stage=stage, amount=amount)
 
 
 def insert_follow_up(
@@ -131,7 +164,8 @@ def insert_follow_up(
             """,
             (customer_id, deal_id, content, next_date, now_iso()),
         )
-        return int(cur.lastrowid or 0)
+        fid = int(cur.lastrowid or 0)
+        return IdRow(fid, id=fid, customer_id=customer_id, deal_id=deal_id, content=content)
 
 
 class ApiTestCase(unittest.TestCase):
@@ -141,6 +175,8 @@ class ApiTestCase(unittest.TestCase):
     """
 
     def setUp(self) -> None:
+        from app.db import db_conn as _db_conn
+        self.db_conn = _db_conn
         self.client = TestClient(app)
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)

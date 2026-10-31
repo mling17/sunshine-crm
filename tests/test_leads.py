@@ -173,7 +173,7 @@ class LeadsTest(ApiTestCase):
         resp = self.create_lead(phone="13800138000")
         self.assertEqual(resp["phone"], "13800138000")
         self.assertEqual(resp["status"], "new")
-        self.assertEqual(resp["intent_level"], "high")
+        self.assertIsNone(resp["intent_level"])  # 未显式传意向 → 不默认
 
     def test_create_lead_with_wechat_only(self):
         resp = self.create_lead(wechat="wechat123")
@@ -432,7 +432,8 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(body["dedupe"], "forced")
 
     def test_lead_convert_with_link_mode(self):
-        customer = self.create_customer(phone="13800138000")
+        # 按 PLANNER §2.3：link 模式要求 link_customer_id 在去重命中集合内
+        customer = self.create_customer(phone="13800138001")
         lead = self.create_lead(phone="13800138001")
         resp = self.client.post(f"/api/crm/leads/{lead['id']}/convert", json={
             "mode": "link",
@@ -563,7 +564,16 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(resp.status_code, 400, resp.text)
 
     def test_lead_convert_with_missing_contact_info_400(self):
-        lead = self.create_lead(phone="", wechat="")
+        # 直接落库造一条无联系方式的线索（API 会拦，故绕过）
+        from app.db import db_conn
+        from app.security import now_iso
+        now = now_iso()
+        with db_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO leads (name, source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                ("无联系方式", "wechat", "new", now, now),
+            )
+            lead = {"id": int(cur.lastrowid)}
         resp = self.client.post(f"/api/crm/leads/{lead['id']}/convert", json={
             "mode": "new",
             "deal": {
@@ -621,6 +631,10 @@ class LeadsTest(ApiTestCase):
 
 
 class FollowUpsV2Test(ApiTestCase):
+    # 复用 LeadsTest 的构造助手（避免重复实现）
+    create_lead = LeadsTest.create_lead
+    post_follow_up = LeadsTest.post_follow_up
+
     # ---------- 小工具 ----------
     def test_follow_up_with_customer_object(self):
         """客户对象类型跟进"""

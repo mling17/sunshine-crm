@@ -103,7 +103,13 @@ class CarriersTest(ApiTestCase):
                 ("测试客户", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
             )
             customer_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-            
+            # 订单必须挂在真实商机上（1:1 + 外键）
+            conn.execute(
+                "INSERT INTO deals (customer_id, amount, stage, created_at, updated_at)"
+                " VALUES (?, ?, 'won', ?, ?)",
+                (customer_id, 1000.0, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
+            )
+            deal_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             # 插入一个测试订单
             conn.execute(
                 """
@@ -111,14 +117,14 @@ class CarriersTest(ApiTestCase):
                                   carrier_id, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("SO-20260101-001", customer_id, 1, 1000.0, "pending_payment", 
+                ("SO-20260101-001", customer_id, deal_id, 1000.0, "pending_payment", 
                  carrier_id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
             )
         
         # 尝试删除被引用的物流公司，应该返回 409
         response = self.client.delete(f"/api/crm/carriers/{carrier_id}")
         self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["code"], "carrier_referenced")
+        self.assertEqual(response.json()["code"], "carrier_in_use")  # 计划 §2.6 错误码
         
         # 清理测试数据
         with db_conn() as conn:

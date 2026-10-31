@@ -234,14 +234,15 @@ STATEMENTS: list[tuple[str, object, str]] = [
     # ---------- 4. 物流公司主数据（先建，orders 外键指向它）----------
     ("carriers", None, """
     CREATE TABLE IF NOT EXISTS carriers (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      name       TEXT NOT NULL UNIQUE,
-      contact    TEXT,
-      phone      TEXT,
-      note       TEXT,
-      is_active  INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      name           TEXT NOT NULL UNIQUE,
+      code           TEXT,
+      contact_person TEXT,
+      phone          TEXT,
+      address        TEXT,
+      is_active      INTEGER NOT NULL DEFAULT 1,
+      created_at     TEXT NOT NULL,
+      updated_at     TEXT NOT NULL
     )
     """),
     ("idx_carriers_active", None, "CREATE INDEX IF NOT EXISTS idx_carriers_active ON carriers(is_active)"),

@@ -138,6 +138,9 @@ def create_deal(payload: DealIn) -> DealOut:
 @router.put("/deals/{deal_id}", response_model=DealOut)
 def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
     fields = payload.model_dump(exclude_unset=True)
+    # N6：won/lost 只能走 /win 与 /lose 动作端点（赢单要生成订单、流失要记原因）
+    if fields.get("stage") in ("won", "lost"):
+        raise HTTPException(status_code=400, detail=f"阶段 '{fields['stage']}' 必须通过 /win 或 /lose 动作端点变更")
 
     for key in _REQUIRED_NON_NULL:
         if key in fields and fields[key] is None:
@@ -192,27 +195,19 @@ def win_deal(deal_id: int) -> dict:
         if deal is None:
             raise HTTPException(status_code=404, detail="商机不存在")
             
-        # 2. 检查是否已冻结
-        if deal["stage"] in _FROZEN_STAGES:
-            raise _deal_frozen_error()
-            
-        # 3. 检查是否已有订单
+        # 2. 已有订单 → order_exists（优先于冻结判断）
         existing_order = conn.execute(
             "SELECT 1 FROM orders WHERE deal_id = ?", (deal_id,)
         ).fetchone()
         if existing_order:
-            raise ApiError(
-                status_code=409,
-                code="order_exists",
-                message="该商机已有订单",
-            )
+            raise ApiError(status_code=409, code="order_exists", message="该商机已有订单")
+        # 3. 已冻结 → deal_frozen
+        if deal["stage"] in _FROZEN_STAGES:
+            raise _deal_frozen_error()
             
         # 4. 检查金额是否有效
         if deal["amount"] <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="商机金额必须大于0",
-            )
+            raise ApiError(status_code=400, code="invalid_amount", message="商机金额必须大于0")
             
         # 5. 生成订单号
         order_no = next_no(conn, "orders", "order_no", "SO", now_local_iso()[:8])
@@ -287,7 +282,7 @@ def win_deal(deal_id: int) -> dict:
         
         return {
             "deal": DealOut(**dict(deal_row)),
-            "order": order_row
+            "order": dict(order_row)
         }
 
 

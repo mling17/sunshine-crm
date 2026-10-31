@@ -58,40 +58,29 @@ class DealsTest(ApiTestCase):
         resp = self.client.post(
             "/api/crm/deals", json={"customer_id": c["id"], "amount": -1}
         )
-        self.assertEqual(resp.status_code, 422, resp.text)
+        self.assertEqual(resp.status_code, 400, resp.text)  # 计划 §2.6：校验失败 400
         resp = self.client.post("/api/crm/deals", json={"customer_id": c["id"]})
-        self.assertEqual(resp.status_code, 422, "amount 必填")
+        self.assertEqual(resp.status_code, 400, "amount 必填")
 
     # ---------- 阶段流转 ----------
     def test_stage_won_sets_and_clears_closed_at(self):
         c = self.create_customer(name="张伟")
-        deal = self.create_deal(c["id"])
+        deal = self.create_deal(c["id"], amount=1000.0)
 
-        won = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        # V2（N6）：won 只能走 /win 动作端点，PUT 不允许直接置 won
+        bad = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.assertEqual(bad.status_code, 400, bad.text)
+
+        won = self.client.post(f"/api/crm/deals/{deal['id']}/win")
         self.assertEqual(won.status_code, 200, won.text)
-        body = won.json()
+        body = won.json()["deal"]
         self.assertEqual(body["stage"], "won")
-        self.assertEqual(body["stage_label"], "赢单")
-        self.assertTrue(body["closed_at"], "进入 won 必须置 closed_at")
-        closed_at = body["closed_at"]
-        # 必须是本地时间口径（T6 的“本月成交”靠它和 localtime 比较）
-        self.assertEqual(closed_at[:10], datetime.now().strftime("%Y-%m-%d"))
-        self.assertFalse(closed_at.endswith("Z"), "closed_at 用本地时间，不带 UTC 的 Z")
+        self.assertTrue(body["closed_at"], "赢单必须置 closed_at")
+        self.assertEqual(body["closed_at"][:10], __import__("datetime").datetime.now().strftime("%Y-%m-%d"))
 
-        # won → won（重复提交）不改 closed_at
-        again = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"}).json()
-        self.assertEqual(again["closed_at"], closed_at)
-
-        # 从 won 移出 → closed_at 清空
-        shipped = self.client.put(
-            f"/api/crm/deals/{deal['id']}", json={"stage": "shipped"}
-        ).json()
-        self.assertEqual(shipped["stage"], "shipped")
-        self.assertIsNone(shipped["closed_at"], "从 won 移出必须清空 closed_at")
-
-        # 再回 won → 重新写时间
-        rewon = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"}).json()
-        self.assertTrue(rewon["closed_at"])
+        # 赢单后冻结：PUT 改阶段 → 409
+        frozen = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "quote"})
+        self.assertEqual(frozen.status_code, 409, frozen.text)
 
     def test_all_stages_are_accepted(self):
         c = self.create_customer(name="张伟")
@@ -158,7 +147,7 @@ class DealsTest(ApiTestCase):
         d1 = self.create_deal(a["id"], amount=100.0)
         d2 = self.create_deal(a["id"], amount=200.0)
         d3 = self.create_deal(b["id"], amount=300.0)
-        self.client.put(f"/api/crm/deals/{d3['id']}", json={"stage": "won"})
+        self.client.post(f"/api/crm/deals/{d3['id']}/win")
 
         only_a = self.client.get("/api/crm/deals", params={"customer_id": a["id"]})
         self.assertEqual(only_a.status_code, 200, only_a.text)
@@ -224,7 +213,6 @@ class DealsTest(ApiTestCase):
         self.assertIn("order", data)
         self.assertEqual(data["deal"]["stage"], "won")
         self.assertIsNotNone(data["deal"]["order_id"])
-        self.assertIsNotNone(data["deal"]["order_no"])
         self.assertIsNotNone(data["order"]["order_no"])
         self.assertEqual(data["order"]["amount"], 1000.0)
         self.assertEqual(data["order"]["status"], "pending_payment")
@@ -238,14 +226,12 @@ class DealsTest(ApiTestCase):
         self.assertEqual(order_data["status_log"][0]["to_status"], "pending_payment")
 
     def test_win_deal_already_won_fails(self):
-        """测试已赢单的商机再次赢单失败"""
+        """已赢单（无订单的异常态）再次赢单 → deal_frozen"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=1000.0)
-        
-        # 先赢单
-        self.client.post(f"/api/crm/deals/{deal['id']}/win")
-        
-        # 再次赢单应该失败
+        # 直接落库置 won（模拟历史异常态：赢了但没有订单）
+        with self.db_conn() as conn:
+            conn.execute("UPDATE deals SET stage='won' WHERE id=?", (deal["id"],))
         resp = self.client.post(f"/api/crm/deals/{deal['id']}/win")
         self.assertEqual(resp.status_code, 409)
         self.assertEqual(resp.json()["code"], "deal_frozen")

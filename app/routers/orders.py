@@ -12,10 +12,10 @@ from pydantic import BaseModel, Field
 
 from app.db import db_conn
 from app.models import (
-    ORDER_STATUS, ORDER_STATUS_LABELS, 
+    ORDER_STATUS, ORDER_STATUS_LABELS,
     LOGISTICS_MODE, LOGISTICS_MODE_LABELS,
     OrderOut, OrderDetailOut, OrderIn, OrderUpdate,
-    AttachmentOut, OrderStatusLogOut
+    AttachmentOut, OrderStatusLogOut, OrderTransitionIn, OrderTransitionOut
 )
 from app.routers.auth import require_auth
 from app.security import now_iso
@@ -46,25 +46,6 @@ STATUS_REQUIRED_FIELDS = {
     "ready_to_ship": ["logistics_mode", "carrier_id", "tracking_number"],
     "shipped": ["received_at"]
 }
-
-
-class OrderTransitionIn(BaseModel):
-    """订单状态转换输入"""
-    to_status: ORDER_STATUS
-    deposit: Optional[float] = Field(default=None, ge=0)
-    balance: Optional[float] = Field(default=None, ge=0)
-    payment_screenshots: Optional[List[int]] = Field(default=None)  # 截图附件ID列表
-    logistics_mode: Optional[LOGISTICS_MODE] = None
-    carrier_id: Optional[int] = Field(default=None, gt=0)
-    tracking_number: Optional[str] = Field(default=None, max_length=64)
-    received_at: Optional[str] = None  # 确认收货时间
-    note: Optional[str] = Field(default=None, max_length=500)
-
-
-class OrderTransitionOut(BaseModel):
-    """订单状态转换输出"""
-    order: OrderOut
-    status_log: OrderStatusLogOut
 
 
 @router.get("/orders", response_model=list[OrderOut])
@@ -127,7 +108,7 @@ def get_order(order_id: int) -> OrderDetailOut:
             ).fetchone()
         
         order_dict = dict(row)
-        order_dict['status_logs'] = [OrderStatusLogOut(**dict(log)) for log in status_logs]
+        order_dict['status_log'] = [OrderStatusLogOut(**dict(log)) for log in status_logs]
         order_dict['attachments'] = [AttachmentOut(**dict(attach)) for attach in attachments]
         order_dict['carrier'] = dict(carrier_row) if carrier_row else None
         
@@ -135,9 +116,9 @@ def get_order(order_id: int) -> OrderDetailOut:
 
 
 @router.post("/orders", response_model=OrderOut)
-def create_order(payload: OrderIn) -> OrderOut:
-    """创建订单 - 由于订单必须由商机赢单生成，此接口应返回405"""
-    raise HTTPException(status_code=405, detail="订单必须由商机赢单生成")
+def create_order() -> OrderOut:
+    """创建订单 —— 订单必须由商机赢单生成（N6），此接口固定 405。"""
+    raise ApiError(status_code=405, code="order_create_forbidden", message="订单必须由商机赢单生成")
 
 
 @router.put("/orders/{order_id}", response_model=OrderOut)
@@ -173,7 +154,8 @@ def transition_order(order_id: int, payload: OrderTransitionIn) -> OrderTransiti
     from app.services import transition
     
     try:
-        result = transition(db_conn(), order_id, payload.to_status, payload.dict(exclude_unset=True))
+        with db_conn() as conn:
+            result = transition(conn, order_id, payload.to_status, payload.model_dump(exclude_unset=True))
         return OrderTransitionOut(**result)
     except Exception as e:
         if isinstance(e, ApiError):
@@ -257,8 +239,8 @@ def upload_payment_screenshots(
             # 插入附件记录
             cur = conn.execute(
                 """
-                INSERT INTO attachments 
-                    (object_type, object_id, file_name, mime_type, size, url, created_at)
+                INSERT INTO attachments
+                    (object_type, object_id, file_name, mime_type, size, storage_key, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 ("order_payment", order_id, filename, mime_type, len(data), url, now_iso()),

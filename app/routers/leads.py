@@ -51,7 +51,11 @@ def _fetch_lead(conn, lead_id: int) -> LeadOut:
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="线索不存在")
-    return LeadOut(**dict(row))
+    tag_rows = conn.execute(
+        "SELECT t.name FROM tags t JOIN lead_tags lt ON t.id = lt.tag_id WHERE lt.lead_id = ? ORDER BY t.id",
+        (lead_id,),
+    ).fetchall()
+    return LeadOut(**dict(row), tags=[r[0] for r in tag_rows])
 
 
 def _fetch_lead_detail(conn, lead_id: int) -> LeadDetailOut:
@@ -254,8 +258,8 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
                 ).fetchone()
                 if tag_row is None:
                     cur = conn.execute(
-                        "INSERT INTO tags (name) VALUES (?)",
-                        (tag_name,),
+                        "INSERT INTO tags (name, created_at) VALUES (?, ?)",
+                        (tag_name, now_iso()),
                     )
                     tag_id = int(cur.lastrowid or 0)
                 else:
@@ -270,6 +274,67 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
         lead = _fetch_lead(conn, lead_id)
     
     return lead
+
+
+@router.get("/leads/convert-check", response_model=LeadConvertCheckOut)
+def convert_check(phone: str | None = None, wechat: str | None = None) -> LeadConvertCheckOut:
+    """转化前检查：手机/微信命中已有客户 → 提示。"""
+    matches = []
+    
+    with db_conn() as conn:
+        # 检查手机
+        if phone:
+            # 检查线索
+            lead_rows = conn.execute(
+                "SELECT id, name FROM leads WHERE phone = ?",
+                (phone,),
+            ).fetchall()
+            for row in lead_rows:
+                matches.append({
+                    "object_type": "lead",
+                    "object_id": row["id"],
+                    "name": row["name"] or "未知"
+                })
+            
+            # 检查客户
+            customer_rows = conn.execute(
+                "SELECT id, name FROM customers WHERE phone = ?",
+                (phone,),
+            ).fetchall()
+            for row in customer_rows:
+                matches.append({
+                    "object_type": "customer",
+                    "object_id": row["id"],
+                    "name": row["name"] or "未知"
+                })
+        
+        # 检查微信
+        if wechat:
+            # 检查线索
+            lead_rows = conn.execute(
+                "SELECT id, name FROM leads WHERE wechat = ?",
+                (wechat,),
+            ).fetchall()
+            for row in lead_rows:
+                matches.append({
+                    "object_type": "lead",
+                    "object_id": row["id"],
+                    "name": row["name"] or "未知"
+                })
+            
+            # 检查客户
+            customer_rows = conn.execute(
+                "SELECT id, name FROM customers WHERE wechat = ?",
+                (wechat,),
+            ).fetchall()
+            for row in customer_rows:
+                matches.append({
+                    "object_type": "customer",
+                    "object_id": row["id"],
+                    "name": row["name"] or "未知"
+                })
+    
+    return LeadConvertCheckOut(has_match=bool(matches), matches=matches)
 
 
 @router.get("/leads/{lead_id}", response_model=LeadDetailOut)
@@ -331,9 +396,9 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
             params.append(lead_update.intent_level)
         
         if updates:
-            params.append(lead_id)
-            updated_at = now_iso()
             updates.append("updated_at = ?")
+            params.append(now_iso())
+            params.append(lead_id)
             sql = f"UPDATE leads SET {', '.join(updates)} WHERE id = ?"
             conn.execute(sql, params)
             
@@ -410,66 +475,6 @@ def invalidate_lead(lead_id: int, reason: dict) -> LeadOut:
         
         return _fetch_lead(conn, lead_id)
 
-
-@router.get("/leads/convert-check", response_model=LeadConvertCheckOut)
-def convert_check(phone: str | None = None, wechat: str | None = None) -> LeadConvertCheckOut:
-    """转化前检查：手机/微信命中已有客户 → 提示。"""
-    matches = []
-    
-    with db_conn() as conn:
-        # 检查手机
-        if phone:
-            # 检查线索
-            lead_rows = conn.execute(
-                "SELECT id, name FROM leads WHERE phone = ?",
-                (phone,),
-            ).fetchall()
-            for row in lead_rows:
-                matches.append({
-                    "object_type": "lead",
-                    "object_id": row["id"],
-                    "name": row["name"] or "未知"
-                })
-            
-            # 检查客户
-            customer_rows = conn.execute(
-                "SELECT id, name FROM customers WHERE phone = ?",
-                (phone,),
-            ).fetchall()
-            for row in customer_rows:
-                matches.append({
-                    "object_type": "customer",
-                    "object_id": row["id"],
-                    "name": row["name"] or "未知"
-                })
-        
-        # 检查微信
-        if wechat:
-            # 检查线索
-            lead_rows = conn.execute(
-                "SELECT id, name FROM leads WHERE wechat = ?",
-                (wechat,),
-            ).fetchall()
-            for row in lead_rows:
-                matches.append({
-                    "object_type": "lead",
-                    "object_id": row["id"],
-                    "name": row["name"] or "未知"
-                })
-            
-            # 检查客户
-            customer_rows = conn.execute(
-                "SELECT id, name FROM customers WHERE wechat = ?",
-                (wechat,),
-            ).fetchall()
-            for row in customer_rows:
-                matches.append({
-                    "object_type": "customer",
-                    "object_id": row["id"],
-                    "name": row["name"] or "未知"
-                })
-    
-    return LeadConvertCheckOut(has_match=bool(matches), matches=matches)
 
 
 @router.post("/leads/{lead_id}/convert", response_model=LeadConvertOut)

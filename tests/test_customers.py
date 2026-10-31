@@ -114,7 +114,7 @@ class CustomersTest(ApiTestCase):
         self.assertEqual(len(detail["deals"]), 1)
         self.assertEqual(detail["deals"][0]["id"], deal_id)
         self.assertEqual(detail["deals"][0]["amount"], 8800.0)
-        self.assertEqual(detail["deals"][0]["stage"], "lead")
+        self.assertEqual(detail["deals"][0]["stage"], "confirm")
         self.assertEqual(len(detail["follow_ups"]), 2)
         self.assertEqual(
             {f["content"] for f in detail["follow_ups"]},
@@ -160,9 +160,10 @@ class CustomersTest(ApiTestCase):
         self.assertEqual(self.client.delete("/api/crm/customers/9999").status_code, 404)
 
     def test_create_requires_non_blank_name(self):
-        self.assertEqual(self.client.post("/api/crm/customers", json={}).status_code, 422)
+        # 计划 §2.6：校验失败统一 400（不用 pydantic 默认 422）
+        self.assertEqual(self.client.post("/api/crm/customers", json={}).status_code, 400)
         self.assertEqual(
-            self.client.post("/api/crm/customers", json={"name": "   "}).status_code, 422
+            self.client.post("/api/crm/customers", json={"name": "   "}).status_code, 400
         )
 
     def test_requires_auth(self):

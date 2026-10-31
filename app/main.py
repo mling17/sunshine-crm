@@ -18,13 +18,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import settings
 from app.db import db_conn
 from app.routers import (
+    aftersales,
     attachments,
     auth,
+    carriers,
     csvimport,
     customers,
     dashboard,
     deals,
     followups,
+    leads,
+    orders,
 )
 from app.schema import ensure_schema
 from app.migrations import run_migrations
@@ -100,3 +104,7 @@ app.include_router(followups.router)
 app.include_router(attachments.router)
 app.include_router(dashboard.router)
 app.include_router(csvimport.router)
+app.include_router(leads.router)
+app.include_router(orders.router)
+app.include_router(carriers.router)
+app.include_router(aftersales.router)

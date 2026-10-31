@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db import db_conn
+from app.errors import ApiError
 from app.models import (
     MAX_TAGS,
     CustomerDetailOut,
@@ -37,6 +38,7 @@ router = APIRouter(
 #: 客户出参的固定列（含两个复购口径子查询）；拼 JOIN / WHERE 时直接接在后面
 _CUSTOMER_SELECT = """
 SELECT c.id, c.name, c.phone, c.wechat, c.location, c.note,
+       c.customer_type, c.source, c.source_other, c.intent_level, c.company_name, c.owner,
        c.created_at, c.updated_at,
        (SELECT COUNT(*) FROM deals d WHERE d.customer_id = c.id) AS deals_total,
        (SELECT COALESCE(SUM(d.amount), 0) FROM deals d
@@ -51,7 +53,8 @@ _TAG_JOIN = (
 )
 
 #: PUT 允许改的列（白名单：列名会拼进 SQL，绝不能用客户端传来的 key 直接拼）
-_UPDATABLE_COLUMNS = ("name", "phone", "wechat", "location", "note")
+_UPDATABLE_COLUMNS = ("name", "phone", "wechat", "location", "note", "customer_type",
+                      "source", "source_other", "intent_level", "company_name", "owner")
 
 _RECENT_FOLLOW_UPS_LIMIT = 20
 
@@ -184,8 +187,10 @@ def create_customer(payload: CustomerIn) -> CustomerOut:
     with db_conn() as conn:
         cur = conn.execute(
             """
-            INSERT INTO customers (name, phone, wechat, location, note, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO customers
+                (name, phone, wechat, location, note, customer_type, source,
+                 source_other, intent_level, company_name, owner, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.name,
@@ -193,6 +198,12 @@ def create_customer(payload: CustomerIn) -> CustomerOut:
                 payload.wechat,
                 payload.location,
                 payload.note,
+                payload.customer_type or "personal",
+                payload.source,
+                payload.source_other,
+                payload.intent_level,
+                payload.company_name,
+                payload.owner,
                 now,
                 now,
             ),
@@ -265,6 +276,25 @@ def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
         tags = _tags_for(conn, [customer_id]).get(customer_id, [])
 
     return _to_out(row, tags)
+
+
+@router.delete("/customers/{customer_id}")
+def delete_customer(customer_id: int) -> dict:
+    """删客户。名下有订单/售后 → 409 customer_has_orders（计划 §2.6）。"""
+    with db_conn() as conn:
+        if conn.execute("SELECT 1 FROM customers WHERE id = ?", (customer_id,)).fetchone() is None:
+            raise _not_found()
+        orders = conn.execute(
+            "SELECT COUNT(*) FROM orders WHERE customer_id = ?", (customer_id,)
+        ).fetchone()[0]
+        afters = conn.execute(
+            "SELECT COUNT(*) FROM aftersales WHERE customer_id = ?", (customer_id,)
+        ).fetchone()[0]
+        if orders or afters:
+            raise ApiError(status_code=409, code="customer_has_orders",
+                           message="客户名下存在订单或售后，不能删除")
+        conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+    return {"deleted": True}
 
 
 @router.get("/customers/{customer_id}/360", response_model=CustomerDetailOut)

@@ -50,13 +50,13 @@ def next_no(conn: Connection, table: str, column: str, prefix: str, day: str) ->
     """SO-20261030-001 / AS-20261030-001。单用户单 worker，事务内 MAX+1 足够；
     UNIQUE 约束是最后一道保险（并发撞号 → IntegrityError → 重试一次再报 409）。
     """
-    like = f"{prefix}{day}-%"
+    like = f"{prefix}-{day}-%"
     row = conn.execute(
         f"SELECT COALESCE(MAX(CAST(substr({column}, -3) AS INTEGER)), 0) AS n "
         f"FROM {table} WHERE {column} LIKE ?",
         (like,),
     ).fetchone()
-    return f"{prefix}{day}-{int(row['n']) + 1:03d}"
+    return f"{prefix}-{day}-{int(row['n']) + 1:03d}"
 
 
 def read_images(photos: list) -> list[tuple[str, str, str, bytes]]:
@@ -172,10 +172,11 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     # 检查是否需要去重提示
     if convert_in.mode == "new" and not convert_in.force_new:
         if duplicate_matches:
-            raise HTTPException(
+            raise ApiError(
                 status_code=409,
-                detail="已存在相同客户",
-                headers={"duplicate_matches": str(duplicate_matches)}
+                code="duplicate_customer",
+                message="已存在相同客户",
+                matches=duplicate_matches,
             )
     
     # 检查 link_customer_id 是否在命中集合
@@ -242,6 +243,10 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     deal_in = convert_in.deal
     created_at = now_iso()
     
+    # 验证商机阶段（非法枚举 → 400 invalid_enum，计划 §2.6）
+    _stages = {"confirm", "quote", "negotiate", "won", "lost"}
+    if deal_in.stage is not None and deal_in.stage not in _stages:
+        raise HTTPException(status_code=400, detail=f"非法阶段 '{deal_in.stage}'，合法值：confirm、quote、negotiate、won、lost")
     # 验证商机信息
     if not deal_in.title:
         raise HTTPException(status_code=400, detail="商机名称不能为空")
@@ -406,17 +411,16 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
                     message="押金金额不能超过订单总额"
                 )
             
-            # 更新订单支付信息
-            new_paid_amount = order_row["paid_amount"] + deposit
+            # 押金落库（DDL 列：deposit_paid）
             conn.execute(
-                "UPDATE orders SET paid_amount = ?, status = ?, updated_at = ? WHERE id = ?",
-                (new_paid_amount, to_status, now_iso(), order_id)
+                "UPDATE orders SET deposit_paid = ?, status = ?, updated_at = ? WHERE id = ?",
+                (deposit, to_status, now_iso(), order_id)
             )
             
         elif to_status == "balance_paid":
             # 支付尾款逻辑
             balance = payload.get("balance", 0)
-            remaining_amount = order_row["amount"] - order_row["paid_amount"]
+            remaining_amount = (order_row["amount"] or 0) - (order_row["deposit_paid"] or 0) - (order_row["balance_paid"] or 0)
             
             # Q1 强制相等：尾款 == 总额 − 已收押金（精确相等，差 1 分也拒绝）
             if balance != remaining_amount:
@@ -426,13 +430,18 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
                     message=f"尾款应为 {remaining_amount} 元，实际支付 {balance} 元"
                 )
             
-            # 更新订单支付信息
-            new_paid_amount = order_row["paid_amount"] + balance
             conn.execute(
-                "UPDATE orders SET paid_amount = ?, status = ?, updated_at = ? WHERE id = ?",
-                (new_paid_amount, to_status, now_iso(), order_id)
+                "UPDATE orders SET balance_paid = ?, status = ?, updated_at = ? WHERE id = ?",
+                (balance, to_status, now_iso(), order_id)
             )
             
+        elif to_status == "producing":
+            # 财务确认（系统外）后点"下一步"：仅推进状态
+            conn.execute(
+                "UPDATE orders SET status = ?, updated_at = ? WHERE id = ?",
+                (to_status, now_iso(), order_id)
+            )
+
         elif to_status == "ready_to_ship":
             # 发货准备逻辑
             logistics_mode = payload.get("logistics_mode")
@@ -471,7 +480,7 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             
             # 更新订单物流信息
             conn.execute(
-                "UPDATE orders SET carrier_id = ?, tracking_number = ?, status = ?, updated_at = ? WHERE id = ?",
+                "UPDATE orders SET carrier_id = ?, tracking_no = ?, status = ?, updated_at = ? WHERE id = ?",
                 (
                     carrier_id,
                     tracking_number,
@@ -482,18 +491,17 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             )
             
         elif to_status == "shipped":
-            # 已发货逻辑
-            # 可以添加确认收货时间等逻辑
+            # 已发货：写发货时间
             conn.execute(
-                "UPDATE orders SET status = ?, updated_at = ? WHERE id = ?",
-                (to_status, now_iso(), order_id)
+                "UPDATE orders SET status = ?, shipped_at = ?, updated_at = ? WHERE id = ?",
+                (to_status, now_local_iso(), now_iso(), order_id)
             )
             
         elif to_status == "completed":
-            # 已完成逻辑
+            # 已完成：写完成时间（客户确认收货）
             conn.execute(
-                "UPDATE orders SET status = ?, updated_at = ? WHERE id = ?",
-                (to_status, now_iso(), order_id)
+                "UPDATE orders SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?",
+                (to_status, payload.get("received_at") or now_local_iso(), now_iso(), order_id)
             )
             
         # 插入状态日志

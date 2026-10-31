@@ -155,10 +155,11 @@ def _to_item(row, photos: list[AttachmentOut]) -> FollowUpItemOut:
 def _fetch_item(conn, follow_up_id: int) -> FollowUpItemOut:
     row = conn.execute(
         """
-        SELECT fu.id, fu.customer_id, fu.deal_id, fu.content, fu.next_date, fu.created_at,
+        SELECT fu.id, fu.customer_id, fu.deal_id, fu.object_type, fu.object_id, fu.method,
+               fu.content, fu.next_date, fu.created_at,
                c.name AS customer_name, d.stage AS deal_stage
         FROM follow_ups fu
-        JOIN customers c ON c.id = fu.customer_id
+        LEFT JOIN customers c ON c.id = fu.customer_id
         LEFT JOIN deals d ON d.id = fu.deal_id
         WHERE fu.id = ?
         """,
@@ -224,8 +225,10 @@ def _check_deal_frozen(conn, deal_id: int) -> None:
 
 @router.post("/follow-ups", response_model=FollowUpItemOut)
 async def create_follow_up(
-    object_type: str = Form(..., description="对象类型"),
-    object_id: str = Form(..., description="对象ID"),
+    object_type: str | None = Form(default=None, description="对象类型（V1 兼容时可省略）"),
+    object_id: str | None = Form(default=None, description="对象ID（V1 兼容时可省略）"),
+    customer_id: str | None = Form(default=None, description="V1 兼容：客户ID"),
+    deal_id: str | None = Form(default=None, description="V1 兼容：商机ID"),
     content: str = Form(..., description="跟进内容"),
     method: str | None = Form(default=None),
     next_date: str | None = Form(default=None),
@@ -237,6 +240,22 @@ async def create_follow_up(
 
     支持多种对象类型挂载：线索/客户/商机/订单/售后
     """
+    # V1 兼容：只传 customer_id / deal_id 时推导 object_type / object_id
+    if not object_type:
+        if deal_id:
+            object_type, object_id = "deal", deal_id
+        elif customer_id:
+            object_type, object_id = "customer", customer_id
+        else:
+            raise HTTPException(status_code=400, detail="object_type 必填")
+    # V1 兼容：客户 + 商机同时传时先校验归属（计划 §2.3：deal 必须属于该客户）
+    if customer_id and deal_id:
+        with db_conn() as _c:
+            _row = _c.execute("SELECT customer_id FROM deals WHERE id = ?", (int(deal_id),)).fetchone()
+            if _row is None:
+                raise HTTPException(status_code=404, detail="商机不存在")
+            if int(_row["customer_id"]) != int(customer_id):
+                raise HTTPException(status_code=400, detail="商机不属于该客户")
     # 校验对象类型
     _validate_object_type(object_type)
     
@@ -251,6 +270,18 @@ async def create_follow_up(
     method_value = (method or "").strip()
     intent_level_value = (intent_level or "").strip()
     
+    # V1 兼容：带 deal_id 时校验存在性与归属（计划 §2.3 / §5.4）
+    deal_row_checked = None
+    if deal_id:
+        with db_conn() as _conn:
+            deal_row_checked = _conn.execute(
+                "SELECT id, customer_id, stage FROM deals WHERE id = ?", (int(deal_id),)
+            ).fetchone()
+        if deal_row_checked is None:
+            raise HTTPException(status_code=404, detail="商机不存在")
+        if object_type == "customer" and int(deal_row_checked["customer_id"]) != object_id_value:
+            raise HTTPException(status_code=400, detail="商机不属于该客户")
+
     # 验证对象类型和ID的合法性
     with db_conn() as conn:
         if object_type == "lead":
@@ -317,6 +348,9 @@ async def create_follow_up(
         deal_id_value = None
         
         # 根据对象类型获取客户ID和商机ID
+        if deal_id and object_type != "deal":
+            # V1 兼容：客户跟进同时挂到商机（已校验归属）
+            deal_id_value = int(deal_id)
         if object_type == "lead":
             # 线索不需要customer_id，但可以获取相关信息
             pass
@@ -442,7 +476,7 @@ def list_follow_ups(
             SELECT fu.id, fu.customer_id, fu.deal_id, fu.content, fu.next_date, fu.created_at,
                    fu.object_type, fu.object_id, c.name AS customer_name, d.stage AS deal_stage
             FROM follow_ups fu
-            JOIN customers c ON c.id = fu.customer_id
+            LEFT JOIN customers c ON c.id = fu.customer_id
             LEFT JOIN deals d ON d.id = fu.deal_id
             {where_sql}
             ORDER BY fu.created_at DESC, fu.id DESC

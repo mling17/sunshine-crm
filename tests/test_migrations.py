@@ -1,60 +1,87 @@
+"""迁移测试（Planner §5.3 / Q2 清空口径）。
+
+本模块**不碰共享测试库**（/tmp/crm-t.db 由 ApiTestCase 使用），
+每个用例在独立临时库上建 V1 结构 → 迁移 → 断言。
 """
-迁移测试（Planner §5.3）。
-"""
-import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
-from tests._bootstrap import reset_db
 from app.migrations import run_migrations
 from app.schema import ensure_schema
 
 
-class TestMigrations(unittest.TestCase):
-    """迁移测试用例。"""
+def _seed_v1(db: Path) -> None:
+    conn = sqlite3.connect(str(db))
+    now = "2026-10-30T10:00:00Z"
+    conn.execute("INSERT INTO users (username, password_hash, created_at) VALUES ('chen', 'x', ?)", (now,))
+    conn.execute("INSERT INTO customers (name, phone, created_at, updated_at) VALUES ('张伟','13800000001',?,?)", (now, now))
+    conn.execute("INSERT INTO customers (name, phone, created_at, updated_at) VALUES ('李娜','13900000002',?,?)", (now, now))
+    conn.execute("INSERT INTO deals (customer_id, amount, stage, created_at, updated_at) VALUES (1, 8800, 'lead', ?, ?)", (now, now))
+    conn.execute("INSERT INTO follow_ups (customer_id, content, created_at) VALUES (1, '首次量尺', ?)", (now,))
+    conn.execute("INSERT INTO follow_ups (customer_id, content, created_at) VALUES (2, '微信沟通', ?)", (now,))
+    conn.execute("INSERT INTO tags (name, created_at) VALUES ('重点客户', ?)", (now,))
+    conn.commit()
+    conn.close()
 
+
+def _rows(db: Path, table: str) -> int:
+    conn = sqlite3.connect(str(db))
+    try:
+        return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    finally:
+        conn.close()
+
+
+class TestMigrations(unittest.TestCase):
     def setUp(self):
-        """测试前准备。"""
-        # 重置测试数据库
-        reset_db()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self._tmp.name) / "mig.db"
+        ensure_schema(self.db)
+        _seed_v1(self.db)
+
+    def tearDown(self):
+        self._tmp.cleanup()
 
     def test_migration_runs(self):
-        """测试迁移能够成功运行。"""
-        # 运行迁移
-        result = run_migrations(None, backup=False)
-        
-        # 检查迁移是否成功
+        result = run_migrations(self.db, backup=False, verbose=False)
         self.assertIn("applied", result)
-        self.assertIn("skipped", result)
-        self.assertIn("counts", result)
-        
-        # 检查版本是否正确
-        # 由于我们使用的是测试环境，直接验证迁移过程即可
+        conn = sqlite3.connect(str(self.db))
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(customers)")]
+        finally:
+            conn.close()
+        self.assertIn("note", cols)
+        self.assertNotIn("house_note", cols)
 
     def test_migration_idempotent(self):
-        """测试迁移的幂等性。"""
-        # 第一次运行
-        result1 = run_migrations(None, backup=False)
-        
-        # 第二次运行（应该跳过已执行的语句）
-        result2 = run_migrations(None, backup=False)
-        
-        # 第二次应该跳过更多语句
-        self.assertGreaterEqual(result2["skipped"], result1["skipped"])
+        r1 = run_migrations(self.db, backup=False, verbose=False)
+        r2 = run_migrations(self.db, backup=False, verbose=False)
+        self.assertGreaterEqual(r2["skipped"], r1["skipped"])
+        self.assertEqual(_rows(self.db, "users"), 1)
 
     def test_migration_structure(self):
-        """测试迁移后的结构是否正确。"""
-        # 这部分在迁移过程中会自动验证
-        run_migrations(None, backup=False)
-        # 验证过程已经在迁移函数内部完成
+        run_migrations(self.db, backup=False, verbose=False)
+        expected = {
+            "leads", "lead_tags", "customer_contacts", "carriers", "orders",
+            "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
+            "customers", "deals", "follow_ups", "attachments",
+        }
+        conn = sqlite3.connect(str(self.db))
+        try:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            triggers = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+        finally:
+            conn.close()
+        self.assertTrue(expected <= tables, f"缺表：{expected - tables}")
+        self.assertIn("trg_fu_object_fill", triggers)
 
     def test_migration_clear_data(self):
-        """测试迁移是否清空了数据（除了 users 表）。"""
-        # 运行迁移
-        run_migrations(None, backup=False)
-        # 迁移完成后，业务表应该为空，除了 users 表
-        # 验证过程在迁移函数中自动完成
+        run_migrations(self.db, backup=False, verbose=False)
+        for t in ("customers", "deals", "follow_ups", "tags"):
+            self.assertEqual(_rows(self.db, t), 0, f"Q2：{t} 应被清空")
+        self.assertEqual(_rows(self.db, "users"), 1, "Q2：users 必须保留")
 
 
 if __name__ == "__main__":

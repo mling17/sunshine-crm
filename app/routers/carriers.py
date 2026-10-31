@@ -114,7 +114,7 @@ def delete_carrier(carrier_id: int):
         if referenced[0] > 0:
             raise ApiError(
                 status_code=409,
-                code="carrier_referenced",
+                code="carrier_in_use",
                 message="物流公司已被订单引用，无法删除"
             )
             

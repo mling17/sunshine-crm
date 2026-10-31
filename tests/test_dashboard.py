@@ -53,7 +53,7 @@ class DashboardTest(ApiTestCase):
         self.assertEqual(item["customer_id"], c["id"])
         self.assertEqual(item["customer_name"], "张伟")
         self.assertEqual(item["deal_id"], deal["id"])
-        self.assertEqual(item["deal_stage"], "lead")
+        self.assertEqual(item["deal_stage"], "confirm")
         self.assertEqual(item["content"], "今天要报价")
         self.assertEqual(item["next_date"], day(0))
         self.assertEqual(item["days_overdue"], 0)
@@ -78,8 +78,8 @@ class DashboardTest(ApiTestCase):
         self.add_follow_up(c["id"], content="lost 后不该提醒", next_date=day(-1), deal_id=lost_deal["id"])
         self.add_follow_up(c["id"], content="只挂客户的跟进要提醒", next_date=day(-1))
 
-        self.client.put(f"/api/crm/deals/{won_deal['id']}", json={"stage": "won"})
-        self.client.put(f"/api/crm/deals/{lost_deal['id']}", json={"stage": "lost"})
+        self.client.post(f"/api/crm/deals/{won_deal['id']}/win")
+        self.client.post(f"/api/crm/deals/{lost_deal['id']}/lose", json={"lost_reason": "price"})
 
         items = self.dashboard()["today_followups"]
         self.assertEqual([i["content"] for i in items], ["只挂客户的跟进要提醒"])
@@ -93,20 +93,20 @@ class DashboardTest(ApiTestCase):
         self.add_follow_up(c["id"], content="回访", next_date=day(-2), deal_id=deal["id"])
         self.assertEqual(len(self.dashboard()["today_followups"]), 1)
 
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.post(f"/api/crm/deals/{deal['id']}/win")
         self.assertEqual(self.dashboard()["today_followups"], [])
 
     # ---------- 本月成交 ----------
     def test_month_won_counts_only_this_month(self):
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=12000.0)
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.post(f"/api/crm/deals/{deal['id']}/win")
 
         # 上月成交（直接落库，closed_at 是本地无时区格式）+ 本月还在 lead 的单
         from tests._util import insert_deal
 
         insert_deal(c["id"], stage="won", amount=9000.0, closed_at=f"{last_month_day()}T10:00:00")
-        self.create_deal(c["id"], amount=3000.0, stage="lead")
+        self.create_deal(c["id"], amount=3000.0, stage="confirm")
 
         board = self.dashboard()
         self.assertEqual(board["month_won"]["count"], 1)
@@ -123,7 +123,7 @@ class DashboardTest(ApiTestCase):
         c = self.create_customer(name="王强")
         for amount in (12000.0, 8000.0):
             deal = self.create_deal(c["id"], amount=amount)
-            self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+            self.client.post(f"/api/crm/deals/{deal['id']}/win")
         board = self.dashboard()
         self.assertEqual(board["month_won"]["count"], 2)
         self.assertEqual(board["month_won"]["amount"], 20000.0)
@@ -135,14 +135,14 @@ class DashboardTest(ApiTestCase):
         self.create_deal(c1["id"], amount=200.0, stage="quote")
         c2 = self.create_customer(name="新客乙")
         deal = self.create_deal(c2["id"], amount=5000.0)
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.post(f"/api/crm/deals/{deal['id']}/win")
 
         stats = self.dashboard()["stats"]
         self.assertEqual(stats["customers_total"], 2)
         self.assertEqual(set(stats["deals_by_stage"]), set(STAGES), "阶段键要全，缺的补 0")
         self.assertEqual(stats["deals_by_stage"]["quote"], 1)
         self.assertEqual(stats["deals_by_stage"]["won"], 1)
-        self.assertEqual(stats["deals_by_stage"]["lead"], 1)
+        self.assertEqual(stats["deals_by_stage"]["confirm"], 1)
         self.assertEqual(stats["deals_by_stage"]["lost"], 0)
         self.assertEqual(stats["month_new_customers"], 2)
         self.assertEqual(stats["repeat_customers"], 1, "老客甲名下 2 单")

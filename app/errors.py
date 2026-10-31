@@ -4,6 +4,7 @@
 """
 
 from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from typing import Any
 
@@ -40,4 +41,25 @@ def install_error_handler(app) -> None:
                 "code": exc.code,
                 **exc.extra,
             }
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        """计划 §2.6：校验失败返回 400（非法枚举 → invalid_enum），不用 pydantic 默认 422。"""
+        errs = exc.errors()
+        first = errs[0] if errs else {}
+        etype = str(first.get("type", ""))
+        loc = ".".join(str(x) for x in first.get("loc", []))
+        code = "invalid_enum" if ("literal" in etype or "enum" in etype) else "validation_failed"
+        msg = first.get("msg", "参数校验失败")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": f"{loc}: {msg}" if loc else msg,
+                "code": code,
+                "errors": [
+                    {"loc": list(e.get("loc", [])), "msg": e.get("msg"), "type": e.get("type")}
+                    for e in errs
+                ],
+            },
         )

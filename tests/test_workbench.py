@@ -13,11 +13,7 @@ class TestWorkbench(ApiTestCase):
         super().setUp()
         # 初始化一些测试数据
         self.customer = insert_customer(name="测试客户")
-        self.order = insert_order(
-            customer_id=self.customer["id"],
-            amount=1000.0,
-            status="completed"
-        )
+        # 注意：setUp 不预置订单，避免污染「订单状态统计/最近订单」的计数断言
 
     def test_dashboard_orders_by_status(self):
         """测试工作台订单状态统计"""
@@ -76,11 +72,12 @@ class TestWorkbench(ApiTestCase):
 
     def test_dashboard_sla_alerts(self):
         """测试工作台SLA告警"""
+        order = insert_order(customer_id=self.customer["id"], amount=1000.0, status="completed")
         # 创建售后单
         resp = self.client.post(
             "/api/crm/aftersales",
             json={
-                "order_id": self.order["id"],
+                "order_id": order["id"],
                 "type": "repair",
                 "description": "产品有质量问题"
             }
