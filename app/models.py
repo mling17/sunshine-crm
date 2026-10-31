@@ -234,6 +234,9 @@ class CustomerDetailOut(CustomerOut):
 
     deals: list[DealOut] = Field(default_factory=list)
     follow_ups: list[FollowUpOut] = Field(default_factory=list)
+    orders: list[dict] = Field(default_factory=list)
+    aftersales: list[dict] = Field(default_factory=list)
+    stats: dict = Field(default_factory=dict)
 
 
 # ---------------- 商机入参 ----------------
@@ -408,6 +411,7 @@ class LeadOut(BaseModel):
     converted_deal_id: int | None = None
     owner: str | None = None
     tags: list[str] = Field(default_factory=list)
+    duplicate_hint: dict | None = None
     created_at: str
     updated_at: str
 

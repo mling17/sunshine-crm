@@ -273,6 +273,8 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
         
         lead = _fetch_lead(conn, lead_id)
     
+    if duplicate_hint:
+        return LeadOut(**lead.model_dump(exclude={"duplicate_hint"}), duplicate_hint=duplicate_hint)
     return lead
 
 

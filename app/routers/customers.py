@@ -236,11 +236,24 @@ def get_customer(customer_id: int) -> CustomerDetailOut:
         ).fetchall()
         tags = _tags_for(conn, [customer_id]).get(customer_id, [])
 
+    with db_conn() as conn:
+        order_rows = conn.execute(
+            "SELECT id, order_no, amount, status, created_at FROM orders WHERE customer_id = ? ORDER BY id DESC",
+            (customer_id,),
+        ).fetchall()
+        asale_rows = conn.execute(
+            "SELECT id, no, type, status, created_at FROM aftersales WHERE customer_id = ? ORDER BY id DESC",
+            (customer_id,),
+        ).fetchall()
     out = _to_out(row, tags)
     return CustomerDetailOut(
         **out.model_dump(),
         deals=[DealOut(**dict(r)) for r in deal_rows],
         follow_ups=[FollowUpOut(**dict(r)) for r in follow_rows],
+        orders=[dict(r) for r in order_rows],
+        aftersales=[dict(r) for r in asale_rows],
+        stats={"deals": len(deal_rows), "orders": len(order_rows),
+               "aftersales": len(asale_rows), "follow_ups": len(follow_rows)},
     )
 
 
@@ -322,9 +335,22 @@ def get_customer_360(customer_id: int) -> CustomerDetailOut:
         
         tags = _tags_for(conn, [customer_id]).get(customer_id, [])
     
+    with db_conn() as conn:
+        order_rows = conn.execute(
+            "SELECT id, order_no, amount, status, created_at FROM orders WHERE customer_id = ? ORDER BY id DESC",
+            (customer_id,),
+        ).fetchall()
+        asale_rows = conn.execute(
+            "SELECT id, no, type, status, created_at FROM aftersales WHERE customer_id = ? ORDER BY id DESC",
+            (customer_id,),
+        ).fetchall()
     out = _to_out(row, tags)
     return CustomerDetailOut(
         **out.model_dump(),
         deals=[DealOut(**dict(r)) for r in deal_rows],
         follow_ups=[FollowUpOut(**dict(r)) for r in follow_rows],
+        orders=[dict(r) for r in order_rows],
+        aftersales=[dict(r) for r in asale_rows],
+        stats={"deals": len(deal_rows), "orders": len(order_rows),
+               "aftersales": len(asale_rows), "follow_ups": len(follow_rows)},
     )

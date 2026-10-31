@@ -427,7 +427,7 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "WHERE customer_type IS NULL OR TRIM(customer_type) = ''"),
     # ---------- 11. customers 表结构变更：移除 house_note，增加 note 列 ----------
     # 注意：这里我们采用重建方式，因为需要移除 house_note 列
-    ("customers_new", None, """
+    ("customers_new", _customers_migrated, """
     CREATE TABLE IF NOT EXISTS customers_new (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
       name             TEXT NOT NULL,
@@ -566,7 +566,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
     for trigger in required_triggers:
         assert has_trigger(conn, trigger), f"缺触发器 {trigger}"
 
-    for leftover in ("follow_ups_new", "attachments_new"):
+    for leftover in ("follow_ups_new", "attachments_new", "customers_new"):
         if table_exists(conn, leftover) and row_count(conn, leftover) == 0:
             conn.execute(f"DROP TABLE {leftover}")
     assert not table_exists(conn, "follow_ups_new") and not table_exists(conn, "attachments_new"), \
