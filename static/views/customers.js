@@ -5,44 +5,14 @@ function viewCustomers(root) {
         root.innerHTML =
             '<div class=\"card\">' +
             '<div class=\"card-head\"><h2>客户档案</h2>' +
-            '<button type=\"button\" class=\"btn btn-primary btn-sm\" id=\"toggleNewCustomer\">+ 新增客户</button></div>' +
+            '<span class=\"small muted\">客户由线索转化，不在此新建</span></div>' +
             '<div class=\"searchbar\">' +
-            '<input id=\"custSearch\" type=\"search\" placeholder=\"搜姓名 / 电话 / 楼盘\" autocomplete=\"off\" value=\"' + esc(st.q) + '\">' +
+            '<input id=\"custSearch\" type=\"search\" placeholder=\"搜姓名 / 电话 / 微信 / 地区\" autocomplete=\"off\" value=\"' + esc(st.q) + '\">' +
             '<button type=\"button\" class=\"btn\" id=\"custSearchBtn\">搜索</button>' +
             '</div>' +
             '<div class=\"chips\" id=\"tagChips\">' + chipHtml(tags, st.tag) + '</div>' +
-            '<div id=\"newCustomerWrap\" hidden>' + customerFormHtml(null) + '</div>' +
             '</div>' +
             '<div class=\"card\"><div id=\"custList\"><p class=\"loading\">加载中…</p></div><div id=\"custPager\"></div></div>';
-
-        var wrap = $('#newCustomerWrap', root);
-        $('#toggleNewCustomer', root).addEventListener('click', function () {
-            wrap.hidden = !wrap.hidden;
-            if (!wrap.hidden) { wrap.querySelector('[name=\"name\"]').focus(); }
-        });
-
-        wrap.querySelector('form').addEventListener('submit', function (ev) {
-            ev.preventDefault();
-            var form = ev.target;
-            var btn = form.querySelector('button[type=\"submit\"]');
-            var payload = readCustomerForm(form);
-            if (!payload.name) { toast('姓名必填', true); return; }
-            btn.disabled = true;
-            api('/customers', { method: 'POST', body: payload }).then(function () {
-                invalidateCustomerIndex();
-                toast('已新增客户');
-                form.reset();
-                wrap.hidden = true;
-                return api('/tags').catch(function () { return []; });
-            }).then(function (newTags) {
-                var chips = $('#tagChips', root);
-                if (chips) { chips.innerHTML = chipHtml(newTags, st.tag); }
-                st.page = 1;
-                return loadCustomers(root);
-            }).catch(function (err) {
-                toast(err.message, true);
-            }).then(function () { btn.disabled = false; });
-        });
 
         var searchEl = $('#custSearch', root);
         var timer = null;
@@ -90,12 +60,36 @@ function loadCustomers(root) {
 
     return api('/customers?' + params.toString()).then(function (res) {
         var items = res.items || [];
-        if (!items.length) {
-            listEl.innerHTML = '<p class=\"empty\">' +
-                (st.q || st.tag ? '没有匹配的客户，换个条件试试' : '还没有客户，点右上「新增客户」开始') + '</p>';
-        } else {
-            listEl.innerHTML = items.map(customerItemHtml).join('');
-        }
+        listEl.innerHTML = dataTable([
+            { title: '名称', render: function (c) {
+                return '<a href="#/customers/' + c.id + '">' + esc(c.name) + '</a>' +
+                    (c.is_repeat ? ' <span class="badge ok">老客</span>' : '') +
+                    (c.company_name && c.customer_type === 'company'
+                        ? '<div class="small muted">' + esc(c.company_name) + '</div>' : '');
+            } },
+            { title: '类型', nowrap: true, render: function (c) {
+                return c.customer_type === 'company' ? '公司' : '个人';
+            } },
+            { title: '地区', render: function (c) { return esc(c.location || '—'); } },
+            { title: '微信号', nowrap: true, render: function (c) { return esc(c.wechat || '—'); } },
+            { title: '联系方式', nowrap: true, render: function (c) { return esc(c.phone || '—'); } },
+            { title: '标签', render: function (c) {
+                return (c.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') || '—';
+            } },
+            { title: '意向', nowrap: true, render: function (c) { return leadIntentBadge(c.intent_level); } },
+            { title: '商机', align: 'center', nowrap: true, render: function (c) { return (c.deals_total || 0) + ' 个'; } },
+            { title: '累计成交', align: 'right', nowrap: true, render: function (c) { return money(c.total_closed_amount); } },
+            { title: '创建时间', nowrap: true, render: function (c) { return fmtDateTime(c.created_at).slice(0, 10); } },
+            { title: '操作', nowrap: true, render: function (c) {
+                return opButtons([
+                    { op: 'edit', arg: c.id, label: '编辑' },
+                    { op: 'follow', arg: c.id, label: '跟进' },
+                    { op: 'toDeal', arg: c.id, label: '转商机' }
+                ]);
+            } }
+        ], items, st.q || st.tag ? '没有匹配的客户，换个条件试试'
+            : '还没有客户：客户由线索转化产生，请先到「线索」把线索转成客户');
+
         pagerEl.innerHTML = pagerHtml(res);
         pagerEl.onclick = function (ev) {
             var btn = ev.target.closest('button[data-page]');
@@ -103,40 +97,63 @@ function loadCustomers(root) {
             st.page = Number(btn.getAttribute('data-page')) || 1;
             loadCustomers(root);
         };
+
+        bindOps(root, {
+            edit: function (id) { return openCustomerEdit(id, root); },
+            follow: function (id) { navigate('#/customers/' + id); },
+            toDeal: function (id) { navigate('#/deals/new?customer=' + id); }
+        });
     }).catch(function (err) {
-        listEl.innerHTML = '<p class=\"err\">' + esc(err.message) + '</p>';
+        listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';
     });
 }
 
-function customerItemHtml(c) {
-    var tags = (c.tags || []).map(function (t) { return '<span class=\"tag\">' + esc(t) + '</span>'; }).join('');
-    var repeat = c.is_repeat ? '<span class=\"badge ok\">老客</span>' : '';
-    var lifecycleBadge = '';
-    switch (c.lifecycle) {
-        case 'potential':
-            lifecycleBadge = '<span class=\"badge muted\">潜在</span>';
-            break;
-        case 'dealing':
-            lifecycleBadge = '<span class=\"badge warn\">商机中</span>';
-            break;
-        case 'won':
-            lifecycleBadge = '<span class=\"badge ok\">已成交</span>';
-            break;
-        case 'repeat':
-            lifecycleBadge = '<span class=\"badge ok\">复购</span>';
-            break;
-    }
-    
-    return '<div class=\"item\">' +
-        '<div class=\"item-main\">' +
-        '<div class=\"item-title\"><a href=\"#/customers/' + c.id + '\">' + esc(c.name) + '</a>' + repeat + lifecycleBadge + '</div>' +
-        '<div class=\"item-sub\">' + esc(c.phone || '无电话') + 
-        (c.location ? ' · ' + esc(c.location) : '') + '</div>' +
-        (tags ? '<div class=\"tags\">' + tags + '</div>' : '') +
-        '</div>' +
-        '<div class=\"item-side\"><div>' + (c.deals_total || 0) + ' 个商机</div>' +
-        '<div class=\"muted small\">成交 ' + money(c.total_closed_amount) + '</div></div>' +
-        '</div>';
+/* ---------------- 编辑客户（弹层；列表/详情共用） ---------------- */
+function openCustomerEdit(id, root) {
+    return api('/customers/' + id).then(function (c) {
+        var modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML =
+            '<div class="modal-overlay"></div>' +
+            '<div class="modal-content wide">' +
+            '<div class="modal-header"><h3>编辑客户 · ' + esc(c.name) + '</h3>' +
+            '<button type="button" class="btn btn-link modal-close">×</button></div>' +
+            '<div class="modal-body">' + customerFormHtml(c) + '</div>' +
+            '</div>';
+        document.body.appendChild(modal);
+
+        function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
+        modal.querySelector('.modal-close').addEventListener('click', close);
+        modal.addEventListener('click', function (ev) {
+            if (ev.target === modal || (ev.target.classList && ev.target.classList.contains('modal-overlay'))) { close(); }
+        });
+
+        var form = modal.querySelector('form');
+        var actions = form.querySelector('.form-actions');
+        var cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn modal-cancel';
+        cancelBtn.textContent = '取消';
+        cancelBtn.addEventListener('click', close);
+        if (actions) { actions.insertBefore(cancelBtn, actions.firstChild); }
+
+        form.addEventListener('submit', function (ev) {
+            ev.preventDefault();
+            var btn = form.querySelector('button[type="submit"]');
+            var payload = readCustomerForm(form);
+            if (!payload.name) { toast('姓名必填', true); return; }
+            btn.disabled = true;
+            api('/customers/' + c.id, { method: 'PUT', body: payload }).then(function () {
+                invalidateCustomerIndex();
+                toast('已保存');
+                close();
+                if (root) { loadCustomers(root); } else { render(); }
+            }).catch(function (err) {
+                toast(err.message, true);
+                btn.disabled = false;
+            });
+        });
+    }).catch(function (err) { toast(err.message, true); });
 }
 
 function customerFormHtml(customer) {
@@ -146,36 +163,22 @@ function customerFormHtml(customer) {
         '<div class=\"field\"><label>姓名 *</label>' +
         '<input name=\"name\" type=\"text\" maxlength=\"64\" required value=\"' + esc(c.name || '') + '\"></div>' +
         '<div class=\"field\"><label>类型</label>' +
-        '<select name=\"customer_type\">' +
-        '<option value=\"personal\"' + (c.customer_type === 'personal' ? ' selected' : '') + '>个人</option>' +
-        '<option value=\"company\"' + (c.customer_type === 'company' ? ' selected' : '') + '>公司</option>' +
-        '</select></div>' +
+                '<select name="customer_type">' + dictOptions('customer_type', c.customer_type || 'personal', '') + '</select></div>' +
         '</div>' +
         '<div class=\"field\"><label>电话</label>' +
         '<input name=\"phone\" type=\"tel\" maxlength=\"32\" inputmode=\"tel\" value=\"' + esc(c.phone || '') + '\"></div>' +
         '<div class=\"field\"><label>微信</label>' +
         '<input name=\"wechat\" type=\"text\" maxlength=\"64\" value=\"' + esc(c.wechat || '') + '\"></div>' +
-        '<div class=\"field\"><label>楼盘 / 安装地址</label>' +
+        '<div class=\"field\"><label>地区</label>' +
         '<input name=\"location\" type=\"text\" maxlength=\"200\" value=\"' + esc(c.location || '') + '\"></div>' +
         '<div class=\"field\"><label>公司名</label>' +
         '<input name=\"company_name\" type=\"text\" maxlength=\"100\" value=\"' + esc(c.company_name || '') + '\"></div>' +
         '<div class=\"field\"><label>来源</label>' +
-        '<select name=\"source\">' +
-        '<option value=\"wechat\"' + (c.source === 'wechat' ? ' selected' : '') + '>微信</option>' +
-        '<option value=\"phone\"' + (c.source === 'phone' ? ' selected' : '') + '>电话</option>' +
-        '<option value=\"referral\"' + (c.source === 'referral' ? ' selected' : '') + '>转介绍</option>' +
-        '<option value=\"existing\"' + (c.source === 'existing' ? ' selected' : '') + '>老客户</option>' +
-        '<option value=\"other\"' + (c.source === 'other' ? ' selected' : '') + '>其他</option>' +
-        '</select></div>' +
-        '<div class=\"field\"><label>来源其他</label>' +
+                '<select name="source">' + dictOptions('customer_source', c.source, '请选择') + '</select></div>' +
+        '<div class=\"field\"><label>来源补充（选“其他”填）</label>' +
         '<input name=\"source_other\" type=\"text\" maxlength=\"100\" value=\"' + esc(c.source_other || '') + '\"></div>' +
-        '<div class=\"field\"><label>意向等级</label>' +
-        '<select name=\"intent_level\">' +
-        '<option value=\"high\"' + (c.intent_level === 'high' ? ' selected' : '') + '>高</option>' +
-        '<option value=\"medium\"' + (c.intent_level === 'medium' ? ' selected' : '') + '>中</option>' +
-        '<option value=\"low\"' + (c.intent_level === 'low' ? ' selected' : '') + '>低</option>' +
-        '<option value=\"none\"' + (c.intent_level === 'none' ? ' selected' : '') + '>无意向</option>' +
-        '</select></div>' +
+        '<div class=\"field\"><label>意向</label>' +
+                '<select name="intent_level">' + dictOptions('intent_level', c.intent_level || 'medium', '') + '</select></div>' +
         '<div class=\"field\"><label>备注</label>' +
         '<textarea name=\"note\" maxlength=\"500\">' + esc(c.note || '') + '</textarea></div>' +
         '<div class=\"field\"><label>标签（逗号分隔，如：重点、转介绍）</label>' +
@@ -261,7 +264,8 @@ function viewCustomerDetail(root, rawId) {
             '<h2><a href=\"#/customers\">‹ 客户</a> ' + esc(c.name) + '</h2>' +
             '<div>' +
             '<a class=\"btn btn-sm\" href=\"#/followups?customer=' + c.id + '\">记跟进</a> ' +
-            '<button type=\"button\" class=\"btn btn-sm\" id=\"toggleEditCustomer\">编辑</button> ' +
+            '<button type=\"button\" class=\"btn btn-sm\" id=\"toggleEditCustomer\">编辑客户</button> ' +
+            '<button type=\"button\" class=\"btn btn-sm btn-primary\" id=\"custToDeal\">转商机</button> ' +
             '<button type=\"button\" class=\"btn btn-sm btn-danger\" id=\"deleteCustomer\">删除</button>' +
             '</div>' +
             '</div>' +
@@ -270,19 +274,17 @@ function viewCustomerDetail(root, rawId) {
             '类型：' + (c.customer_type === 'company' ? '公司' : '个人') + '<br>' +
             '电话：' + esc(c.phone || '—') + '<br>' +
             '微信：' + esc(c.wechat || '—') + '<br>' +
-            '楼盘：' + esc(c.location || '—') + '<br>' +
+            '地区：' + esc(c.location || '—') + '<br>' +
             '公司名：' + esc(c.company_name || '—') + '<br>' +
             '来源：' + (c.source ? esc(SOURCE_LABELS[c.source] || c.source) : '—') + '<br>' +
             '意向：' + (c.intent_level ? esc(INTENT_LABELS[c.intent_level] || c.intent_level) : '—') + '<br>' +
             '备注：' + esc(c.note || '—') + '<br>' +
             '<span class=\"muted small\">建档 ' + fmtDateTime(c.created_at) + ' · 最近更新 ' + fmtDateTime(c.updated_at) + '</span>' +
             '</div>' +
-            '<div id=\"editCustomerWrap\" hidden style=\"margin-top:12px\">' + customerFormHtml(c) + '</div>' +
             '</div>' +
             '<div class=\"card\">' +
             '<div class=\"card-head\"><h2>商机（' + deals.length + '）</h2>' +
-            '<button type=\"button\" class=\"btn btn-sm\" id=\"toggleNewDeal\">+ 新增商机</button></div>' +
-            '<div id=\"newDealWrap\" hidden>' + dealFormHtml() + '</div>' +
+            '<span class=\"small muted\">商机由本客户「转商机」产生</span></div>' +
             dealHtml +
             '</div>' +
             '<div class=\"card\">' +
@@ -291,27 +293,13 @@ function viewCustomerDetail(root, rawId) {
             fuHtml +
             '</div>';
 
-        /* 编辑客户 */
-        var editWrap = $('#editCustomerWrap', root);
+        /* 编辑客户 → 弹层（与列表页同一套逻辑） */
         $('#toggleEditCustomer', root).addEventListener('click', function () {
-            editWrap.hidden = !editWrap.hidden;
-            if (!editWrap.hidden) { editWrap.querySelector('[name=\"name\"]').focus(); }
+            openCustomerEdit(c.id, null);
         });
-        editWrap.querySelector('form').addEventListener('submit', function (ev) {
-            ev.preventDefault();
-            var form = ev.target;
-            var btn = form.querySelector('button[type=\"submit\"]');
-            var payload = readCustomerForm(form);
-            if (!payload.name) { toast('姓名必填', true); return; }
-            btn.disabled = true;
-            api('/customers/' + c.id, { method: 'PUT', body: payload }).then(function () {
-                invalidateCustomerIndex();
-                toast('已保存');
-                return render();
-            }).catch(function (err) {
-                toast(err.message, true);
-                btn.disabled = false;
-            });
+        /* 转商机 → 转商机页面 */
+        $('#custToDeal', root).addEventListener('click', function () {
+            navigate('#/deals/new?customer=' + c.id);
         });
 
         /* 删除客户（级联删商机/跟进/标签） */
@@ -325,38 +313,6 @@ function viewCustomerDetail(root, rawId) {
         });
 
         /* 新增商机 */
-        var newDealWrap = $('#newDealWrap', root);
-        $('#toggleNewDeal', root).addEventListener('click', function () {
-            newDealWrap.hidden = !newDealWrap.hidden;
-        });
-        $('#newDealForm', root).addEventListener('submit', function (ev) {
-            ev.preventDefault();
-            var form = ev.target;
-            var btn = form.querySelector('button[type=\"submit\"]');
-            var amount = numOrNull(form.querySelector('[name=\"amount\"]').value);
-            if (amount === null || amount < 0) { toast('报价金额必填且 ≥0', true); return; }
-            var payload = {
-                customer_id: c.id,
-                product_type: form.querySelector('[name=\"product_type\"]').value.trim() || null,
-                model: form.querySelector('[name=\"model\"]').value.trim() || null,
-                spec: form.querySelector('[name=\"spec\"]').value.trim() || null,
-                amount: amount,
-                deposit: numOrNull(form.querySelector('[name=\"deposit\"]').value) || 0,
-                balance: numOrNull(form.querySelector('[name=\"balance\"]').value) || 0,
-                stage: form.querySelector('[name=\"stage\"]').value
-            };
-            btn.disabled = true;
-            api('/deals', { method: 'POST', body: payload }).then(function () {
-                toast('已新增商机');
-                return render();
-            }).catch(function (err) {
-                toast(err.message, true);
-                btn.disabled = false;
-            });
-        });
-
-        bindDealStageSelects(root);
-
         $$('button[data-del-followup]', root).forEach(function (btn) {
             btn.addEventListener('click', function () {
                 if (!window.confirm('删除这条跟进？照片也会一并无法查看（文件留存于备份）。')) { return; }

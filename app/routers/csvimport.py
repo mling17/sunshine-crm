@@ -52,7 +52,8 @@ FIELD_LABELS: dict[str, str] = {
     "name": "姓名",
     "phone": "电话",
     "wechat": "微信",
-    "location": "楼盘/安装地址",
+    "location": "地区",
+    "source": "来源",
     "note": "备注",
 }
 SYSTEM_FIELDS = [
@@ -75,17 +76,27 @@ HEADER_ALIASES: dict[str, str] = {
     "微信": "wechat",
     "微信号": "wechat",
     "wechat": "wechat",
+    "地区": "location",
+    "区域": "location",
+    "城市": "location",
+    # 旧表头兼容：老 CSV 里的地址列名，别让历史表识别不出来
     "楼盘": "location",
     "小区": "location",
     "地址": "location",
     "项目": "location",
     "安装地址": "location",
     "location": "location",
+    "来源": "source",
+    "渠道": "source",
+    "source": "source",
     "户型": "note",
     "备注": "note",
     "说明": "note",
     "house_note": "note",
 }
+
+#: 导入目标：customers=客户档案（存量客户；客户通常由线索转来），leads=线索池
+TARGETS = ("customers", "leads")
 
 PREVIEW_ROWS = 5
 MAX_CSV_BYTES = 10 * 1024 * 1024
@@ -106,6 +117,23 @@ class ParsedCsv:
 
 
 # ---------------- 解析 ----------------
+
+#: Excel 里让单元格强制为文本的写法：="13800000000"
+_PLAIN_TEXT_WRAP = re.compile(r'^=\s*"(.*)"$', re.S)
+
+
+def _clean_cell(raw: str) -> str:
+    """剥掉 ="..." 文本外壳（模板里每个单元格都这么写，防止手机号变科学计数）。
+
+    顺带兼容 Excel 另存 CSV 时可能出现的多余引号与两侧空白。
+    """
+    text = (raw or "").strip()
+    match = _PLAIN_TEXT_WRAP.match(text)
+    if match:
+        text = match.group(1).replace('""', '"').strip()
+    return text
+
+
 
 
 def _cache_dir() -> Path:
@@ -160,7 +188,7 @@ def _parse_csv(data: bytes) -> ParsedCsv:
     if not raw_rows:
         raise HTTPException(status_code=400, detail="文件只有空行，没有表头")
 
-    headers = [(cell or "").strip() for cell in raw_rows[0]]
+    headers = [_clean_cell(cell) for cell in raw_rows[0]]
     if not any(headers):
         raise HTTPException(status_code=400, detail="第一行必须是表头（列名）")
     duplicates = {name for name in headers if headers.count(name) > 1}
@@ -173,7 +201,7 @@ def _parse_csv(data: bytes) -> ParsedCsv:
     width = len(headers)
     rows: list[list[str]] = []
     for row in raw_rows[1:]:
-        normalized = [(cell or "").strip() for cell in row[:width]]
+        normalized = [_clean_cell(cell) for cell in row[:width]]
         normalized += [""] * (width - len(normalized))
         rows.append(normalized)
 
@@ -284,6 +312,35 @@ def _normalize_mapping(raw: dict | None, headers: list[str]) -> dict[str, str]:
     return mapping
 
 
+# ---------------- 来源解析 ----------------
+
+def _resolve_source(raw: str | None) -> str | None:
+    """把模板里填的「来源」转成字典 key。
+
+    接受字典名称（微信 / 抖音 / 小红书）或 key 本身（wechat / douyin）；
+    认不出来返回 None（调用方决定兜底值）。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    from app import dicts as dict_svc
+
+    try:
+        items = dict_svc.items("customer_source")
+    except Exception:
+        items = []
+    for item in items:
+        key = str(item.get("key") or "")
+        label = str(item.get("label") or "")
+        if text == key or text == label:
+            return key
+    lowered = text.lower()
+    for item in items:
+        if lowered == str(item.get("key") or "").lower():
+            return str(item.get("key"))
+    return None
+
+
 # ---------------- 路由 ----------------
 
 
@@ -328,8 +385,13 @@ async def preview_import(file: UploadFile = File(..., description="CSV 文件"))
     )
 
 
-async def _read_commit_request(request: Request) -> tuple[bytes | None, str | None, dict | None, str | None]:
-    """兼容 JSON 与 multipart 两种提交方式，返回 ``(file_bytes, file_ref, mapping, source_name)``。"""
+async def _read_commit_request(
+    request: Request,
+) -> tuple[bytes | None, str | None, dict | None, str | None, str]:
+    """兼容 JSON 与 multipart 两种提交方式。
+
+    返回 ``(file_bytes, file_ref, mapping, source_name, target)``；target ∈ {customers, leads}。
+    """
     content_type = (request.headers.get("content-type") or "").lower()
 
     if content_type.startswith("multipart/form-data") or content_type.startswith(
@@ -356,7 +418,9 @@ async def _read_commit_request(request: Request) -> tuple[bytes | None, str | No
         source = raw_source if isinstance(raw_source, str) and raw_source else upload_name
         raw_ref = form.get("file_ref")
         file_ref = raw_ref if isinstance(raw_ref, str) and raw_ref else None
-        return data, file_ref, mapping, source
+        raw_target = form.get("target")
+        target = raw_target if isinstance(raw_target, str) and raw_target in TARGETS else "customers"
+        return data, file_ref, mapping, source, target
 
     try:
         body = await request.json()
@@ -368,12 +432,15 @@ async def _read_commit_request(request: Request) -> tuple[bytes | None, str | No
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"参数错误：{exc.errors()}") from None
 
-    return None, payload.file_ref, payload.column_mapping, payload.source_name
+    target = body.get("target") if isinstance(body.get("target"), str) else "customers"
+    if target not in TARGETS:
+        raise HTTPException(status_code=400, detail="target 只能是 customers（客户）或 leads（线索）")
+    return None, payload.file_ref, payload.column_mapping, payload.source_name, target
 
 
 @router.post("/import/commit", response_model=ImportCommitOut)
 async def commit_import(request: Request) -> ImportCommitOut:
-    data, file_ref, mapping_raw, source_name = await _read_commit_request(request)
+    data, file_ref, mapping_raw, source_name, target = await _read_commit_request(request)
 
     if data is None:
         if not file_ref:
@@ -421,21 +488,44 @@ async def commit_import(request: Request) -> ImportCommitOut:
                 field: (row[index].strip() or None) if field != "name" else name
                 for field, index in field_index.items()
             }
-            conn.execute(
-                """
-                INSERT INTO customers (name, phone, wechat, location, note, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    values["name"],
-                    values.get("phone"),
-                    values.get("wechat"),
-                    values.get("location"),
-                    values.get("note"),
-                    now,
-                    now,
-                ),
-            )
+            # 来源：模板里填的名称 → 字典 key（认不出就按「存量」记，方便事后在详情里改）
+            source_key = _resolve_source(values.get("source")) if "source" in field_index else None
+            if target == "leads":
+                # 导进线索池：来源统一记「存量」(stock)，后续可在详情里改
+                conn.execute(
+                    """
+                    INSERT INTO leads (name, phone, wechat, location, note, lead_type, source,
+                                       status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'personal', ?, 'new', ?, ?)
+                    """,
+                    (
+                        values["name"],
+                        values.get("phone"),
+                        values.get("wechat"),
+                        values.get("location"),
+                        values.get("note"),
+                        source_key or "stock",
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO customers (name, phone, wechat, location, note, source, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        values["name"],
+                        values.get("phone"),
+                        values.get("wechat"),
+                        values.get("location"),
+                        values.get("note"),
+                        source_key,
+                        now,
+                        now,
+                    ),
+                )
             imported += 1
 
         cur = conn.execute(

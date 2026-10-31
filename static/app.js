@@ -66,7 +66,7 @@
     'pending': '待处理', 'processing': '处理中', 'done': '已完成', 'rejected': '已拒绝'
   };
 
-  /* 来源标签映射 */
+  /* 来源标签映射（兜底；登录后由数据字典 customer_source 覆盖） */
   var SOURCE_LABELS = {
     'wechat': '微信',
     'phone': '电话',
@@ -76,13 +76,92 @@
     'other': '其他'
   };
 
-  /* 意向等级标签映射 */
+  /* 意向等级标签映射（兜底；登录后由数据字典 intent_level 覆盖） */
   var INTENT_LABELS = {
     'high': '高',
     'medium': '中',
     'low': '低',
     'none': '无意向'
   };
+
+  /* ================= 数据字典（唯一真源：GET /dicts）=================
+   * 规矩：前端任何「业务标签/下拉」都必须走这里，不许再硬编码。
+   * 反例（2026-10-31 用户报的 bug）：来源下拉写死 5 个 option，用户在
+   * 「数据字典」里改了来源，新建线索时还是旧值 —— 因为页面根本没读字典。
+   * 字典在登录后加载一次；拉不到就回退上面的兜底常量，不阻塞页面。
+   */
+  var DICTS = {};
+  var dictsReady = false;
+
+  function dictItems(code) {
+    return (DICTS[code] || []).filter(function (it) { return it.enabled !== false; });
+  }
+
+  function dictLabel(code, key, fallback) {
+    if (key === null || key === undefined || key === '') { return fallback || '—'; }
+    var hit = (DICTS[code] || []).filter(function (it) { return it.key === key; })[0];
+    if (hit) { return hit.label; }
+    return fallback || key;
+  }
+
+  /* 生成 <option> 串。empty 传字符串则加一个「不选」项；
+     当前值在字典里已停用/已删时补一条，避免编辑时把老数据静默清空 */
+  function dictOptions(code, current, empty) {
+    var items = dictItems(code);
+    var html = '';
+    if (empty !== undefined && empty !== null) {
+      html += '<option value="">' + esc(empty) + '</option>';
+    }
+    html += items.map(function (it) {
+      return '<option value="' + esc(it.key) + '"' +
+        (String(current || '') === String(it.key) ? ' selected' : '') + '>' + esc(it.label) + '</option>';
+    }).join('');
+    var known = items.some(function (it) { return String(it.key) === String(current || ''); });
+    if (current && !known && items.length) {
+      html += '<option value="' + esc(current) + '" selected>' + esc(current) + '（已停用）</option>';
+    }
+    return html;
+  }
+
+  /* 字典到手后改写 ID→标签 常量（原地改内容，views 里的裸名引用继续有效） */
+  function applyDictLabels() {
+    if (!dictsReady) { return; }
+    function refill(target, code) {
+      var items = DICTS[code];
+      if (!items || !items.length) { return; }
+      Object.keys(target).forEach(function (k) { delete target[k]; });
+      items.forEach(function (it) { target[it.key] = it.label; });
+    }
+    function refillPairs(target, code) {
+      var items = DICTS[code];
+      if (!items || !items.length) { return; }
+      target.length = 0;
+      items.slice().sort(function (a, b) { return (a.sort || 0) - (b.sort || 0); })
+        .forEach(function (it) { target.push([it.key, it.label]); });
+    }
+    refill(SOURCE_LABELS, 'customer_source');
+    refill(INTENT_LABELS, 'intent_level');
+    refill(STAGE_LABEL, 'deal_stage');
+    refill(ORDER_STATUS_LABEL, 'order_status');
+    refill(AFTERSALE_TYPE_LABEL, 'aftersale_type');
+    refill(AFTERSALE_STATUS_LABEL, 'aftersale_status');
+    refillPairs(STAGES, 'deal_stage');
+    refillPairs(ORDER_STATUS, 'order_status');
+  }
+
+  function ensureDicts(force) {
+    if (dictsReady && !force) { return Promise.resolve(DICTS); }
+    return api('/dicts').then(function (list) {
+      var next = {};
+      (list || []).forEach(function (d) { next[d.code] = d.items || []; });
+      DICTS = next;
+      dictsReady = true;
+      applyDictLabels();
+      return DICTS;
+    }).catch(function () {
+      return DICTS;  // 降级：用兜底常量；下次进页面再试
+    });
+  }
 
   var state = {
     me: null,
@@ -258,7 +337,8 @@
             document.getElementById('whoami').textContent = state.displayName;
           }
         }).catch(function () { /* 忽略 */ });
-        return render();
+        // 字典必须用新会话重新拉（登录前 /dicts 是 401）
+        return ensureDicts(true).then(render);
       })
       .catch(function (err) {
         errEl.textContent = err.status === 401 ? '账号或密码错误' : err.message;
@@ -312,6 +392,14 @@
     var seq = ++renderSeq;
     var root = document.getElementById('app');
 
+    // 脚本版本自检：app.js 与 views/*.js 版本不一致（强缓存混版）时，
+    // 页面会调不到 dictOptions/ensureDicts 而表现为「点按钮没反应」，这里提前拦下来。
+    if (typeof window.dictOptions !== 'function' || typeof window.ensureDicts !== 'function') {
+      root.innerHTML = '<div class="notice warn">页面脚本版本不一致（浏览器缓存了旧文件），' +
+        '请按 <b>Ctrl + F5</b> 强制刷新一次再操作。</div>';
+      return Promise.resolve();
+    }
+
     setActiveNav(view === 'customers' && route.parts[1] ? 'customers' : view);
     root.innerHTML = '<p class="loading">加载中…</p>';
 
@@ -321,7 +409,9 @@
     } else if (view === 'customers') {
       job = route.parts[1] ? viewCustomerDetail(root, route.parts[1]) : viewCustomers(root);
     } else if (view === 'deals') {
-      job = route.parts[1] ? viewDealDetail(root, route.parts[1]) : viewDeals(root, route);
+      if (route.parts[1] === 'new') { job = viewDealNew(root, route); }
+      else if (route.parts[1]) { job = viewDealDetail(root, route.parts[1]); }
+      else { job = viewDeals(root, route); }
     } else if (view === 'followups') {
       job = viewFollowups(root, route);
     } else if (view === 'orders') {
@@ -411,6 +501,10 @@
     AFTERSALE_STATUS_LABEL: AFTERSALE_STATUS_LABEL,
     SOURCE_LABELS: SOURCE_LABELS,
     INTENT_LABELS: INTENT_LABELS,
+    ensureDicts: ensureDicts,
+    dictItems: dictItems,
+    dictLabel: dictLabel,
+    dictOptions: dictOptions,
     state: state,
     esc: esc,
     pad2: pad2,
@@ -612,7 +706,7 @@
       state.me = (me && me.username) || '';
       state.displayName = (me && me.display_name) || state.me;
       showApp();
-      return render();
+      return ensureDicts(true).then(render);
     }).catch(function (err) {
       if (err.status === 401) { showLogin(); } else { showLogin('连不上服务：' + err.message); }
     });

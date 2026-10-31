@@ -29,6 +29,25 @@ from app.routers.auth import require_auth
 from app.security import now_iso
 from app.services import convert_lead, read_images
 
+_FALLBACK_SOURCES = ("wechat", "phone", "referral", "existing", "stock", "other")
+
+
+def _source_allowed(key: str) -> bool:
+    """来源是否合法：**以数据字典 customer_source 为准**（A 级，用户可自由增删）。
+
+    以前这里写死 6 个 key，导致用户在字典里加了「抖音」后新建线索直接 400。
+    """
+    from app import dicts as dict_svc
+
+    try:
+        keys = {str(item["key"]) for item in dict_svc.items("customer_source")}
+    except Exception:  # 字典表还没建好 → 退回内置清单
+        keys = set(_FALLBACK_SOURCES)
+    if not keys:
+        keys = set(_FALLBACK_SOURCES)
+    return key in keys
+
+
 router = APIRouter(
     prefix="/api/crm",
     tags=["leads"],
@@ -115,6 +134,10 @@ def list_leads(
     search: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
+    include_converted: bool = Query(
+        default=False,
+        description="默认不看已转化线索（转化后档案在客户页）；传 true 或明确传 status=converted 才返回",
+    ),
 ) -> LeadListOut:
     """线索列表。"""
     where_parts: list[str] = []
@@ -123,6 +146,10 @@ def list_leads(
     if status is not None:
         where_parts.append("l.status = ?")
         params.append(status)
+    elif not include_converted:
+        # 2026-10-31 用户定稿：线索一旦转商机（status=converted）就不再出现在线索池，
+        # 它的档案去客户页看；要查历史转化记录就点「已转化」页签或带 include_converted=true
+        where_parts.append("(l.status IS NULL OR l.status <> 'converted')")
     if source is not None:
         where_parts.append("l.source = ?")
         params.append(source)
@@ -130,8 +157,16 @@ def list_leads(
         where_parts.append("l.intent_level = ?")
         params.append(intent_level)
     if search is not None:
-        where_parts.append("(name LIKE ? OR phone LIKE ? OR wechat LIKE ? OR location LIKE ?)")
-        params.extend([f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%"])
+        kw = search.strip()
+        if kw:
+            # 通配符要转义：否则搜 "%" 或 "_" 会命中全部（2026-10-31 实测发现）
+            escaped = kw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like = f"%{escaped}%"
+            where_parts.append(
+                "(name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\'"
+                " OR wechat LIKE ? ESCAPE '\\' OR location LIKE ? ESCAPE '\\')"
+            )
+            params.extend([like, like, like, like])
     
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     
@@ -164,9 +199,26 @@ def list_leads(
         from app import labels
         from app.timeline import load_overdue_days
 
+        # 列表也要带标签：LeadOut.tags 默认空数组，不显式查就是永远空（2026-10-31 修）
+        lead_ids = [row["id"] for row in rows]
+        tags_map: dict[int, list[str]] = {}
+        if lead_ids:
+            placeholders = ",".join("?" * len(lead_ids))
+            for tag_row in conn.execute(
+                f"""
+                SELECT lt.lead_id, t.name FROM lead_tags lt
+                JOIN tags t ON t.id = lt.tag_id
+                WHERE lt.lead_id IN ({placeholders})
+                ORDER BY t.id
+                """,
+                lead_ids,
+            ).fetchall():
+                tags_map.setdefault(int(tag_row["lead_id"]), []).append(tag_row["name"])
+
         items = []
         for row in rows:
             data = dict(row)
+            data["tags"] = tags_map.get(int(row["id"]), [])
             data["intent_level_label"] = labels.intent_level(data.get("intent_level"))
             data["days_overdue"] = load_overdue_days(data.get("next_date"))
             items.append(LeadOut(**data))
@@ -182,8 +234,8 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
         raise HTTPException(status_code=400, detail="手机和微信至少填一个")
     
     # 验证来源枚举
-    if lead_in.source not in ["wechat", "phone", "referral", "existing", "stock", "other"]:
-        raise HTTPException(status_code=400, detail="来源无效")
+    if not _source_allowed(lead_in.source):
+        raise HTTPException(status_code=400, detail="来源无效：请先在「数据字典 → 客户来源」里添加该来源")
     
     created_at = now_iso()
     # 定稿：新建线索意向默认「中」（PAGES-V2 §7.3）
@@ -290,6 +342,16 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
                     (lead_id, tag_id),
                 )
         
+        # 系统履历：创建（跟进页时间线要能看到「✨创建」，与 demo 一致）
+        from app.timeline import add_entry as _add_entry
+        _add_entry(
+            conn,
+            object_type="lead",
+            object_id=lead_id,
+            kind="create",
+            content="创建线索：" + (lead_in.name or lead_in.phone or lead_in.wechat or ""),
+        )
+
         lead = _fetch_lead(conn, lead_id)
     
     if duplicate_hint:
@@ -422,6 +484,25 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
             params.append(lead_id)
             sql = f"UPDATE leads SET {', '.join(updates)} WHERE id = ?"
             conn.execute(sql, params)
+
+            # 系统履历：编辑（列出改了哪些字段）
+            field_labels = [
+                ("姓名", lead_update.name), ("电话", lead_update.phone),
+                ("微信", lead_update.wechat), ("类型", lead_update.lead_type),
+                ("公司名", lead_update.company_name), ("来源", lead_update.source),
+                ("地区", lead_update.location), ("备注", lead_update.note),
+                ("意向", lead_update.intent_level), ("标签", lead_update.tags),
+            ]
+            changed = [label for label, value in field_labels if value is not None]
+            if changed:
+                from app.timeline import add_entry as _add_entry
+                _add_entry(
+                    conn,
+                    object_type="lead",
+                    object_id=lead_id,
+                    kind="change",
+                    content="编辑线索：" + "、".join(changed),
+                )
             
             # 处理标签更新
             if lead_update.tags is not None:
@@ -493,7 +574,17 @@ def invalidate_lead(lead_id: int, reason: dict) -> LeadOut:
             """,
             (invalid_reason, invalid_reason_other, updated_at, lead_id),
         )
-        
+
+        from app.timeline import add_entry as _add_entry
+        _add_entry(
+            conn,
+            object_type="lead",
+            object_id=lead_id,
+            kind="stage",
+            content="标记失效：" + str(invalid_reason) +
+                    ("（" + str(invalid_reason_other) + "）" if invalid_reason_other else ""),
+        )
+
         return _fetch_lead(conn, lead_id)
 
 

@@ -163,7 +163,7 @@ def _to_item(row, photos: list[AttachmentOut]) -> FollowUpItemOut:
 def _fetch_item(conn, follow_up_id: int) -> FollowUpItemOut:
     row = conn.execute(
         """
-        SELECT fu.id, fu.customer_id, fu.deal_id, fu.object_type, fu.object_id, fu.method,
+        SELECT fu.id, fu.customer_id, fu.deal_id, fu.object_type, fu.object_id, fu.method, fu.kind,
                fu.content, fu.next_date, fu.created_at,
                c.name AS customer_name, d.stage AS deal_stage
         FROM follow_ups fu
@@ -514,8 +514,9 @@ def list_follow_ups(
     with db_conn() as conn:
         rows = conn.execute(
             f"""
-            SELECT fu.id, fu.customer_id, fu.deal_id, fu.content, fu.next_date, fu.created_at,
-                   fu.object_type, fu.object_id, c.name AS customer_name, d.stage AS deal_stage
+            SELECT fu.id, fu.customer_id, fu.deal_id, fu.method, fu.kind, fu.content, fu.next_date,
+                   fu.created_at, fu.object_type, fu.object_id,
+                   c.name AS customer_name, d.stage AS deal_stage
             FROM follow_ups fu
             LEFT JOIN customers c ON c.id = fu.customer_id
             LEFT JOIN deals d ON d.id = fu.deal_id

@@ -346,6 +346,16 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
         """,
         (customer_id, deal_id, updated_at, lead_id),
     )
+
+    # 系统履历：转化（线索页时间线能看到「🚩 转商机」，历史跟进已搬到客户名下）
+    from app.timeline import add_entry as _add_entry
+    _add_entry(
+        conn,
+        object_type="lead",
+        object_id=lead_id,
+        kind="stage",
+        content="转商机：已生成客户档案与商机 #" + str(deal_id),
+    )
     
     # 8. 构造返回结果
     # 获取线索详情

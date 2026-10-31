@@ -32,7 +32,7 @@ ENSURE_SQL: list[str] = [
       name        TEXT NOT NULL,
       phone       TEXT,                       -- 隐私字段：公网必须登录后可见
       wechat      TEXT,
-      location    TEXT,                       -- 楼盘 / 安装地址
+      location    TEXT,                       -- 地区
       house_note  TEXT,
       created_at  TEXT NOT NULL,
       updated_at  TEXT NOT NULL

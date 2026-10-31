@@ -95,7 +95,7 @@ class CustomerIn(BaseModel):
     customer_type: CUSTOMER_TYPE = Field(default="personal")
     source: OptionalText = Field(default=None, max_length=32)
     source_other: OptionalText = Field(default=None, max_length=100)
-    intent_level: INTENT_LEVEL | None = None
+    intent_level: OptionalText = Field(default=None, max_length=32)
     company_name: OptionalText = Field(default=None, max_length=100)
     owner: OptionalText = Field(default=None, max_length=32)
     tags: list[TagName] = Field(default_factory=list, max_length=MAX_TAGS)
@@ -112,7 +112,7 @@ class CustomerUpdate(BaseModel):
     customer_type: CUSTOMER_TYPE | None = None
     source: OptionalText = Field(default=None, max_length=32)
     source_other: OptionalText = Field(default=None, max_length=100)
-    intent_level: INTENT_LEVEL | None = None
+    intent_level: OptionalText = Field(default=None, max_length=32)
     company_name: OptionalText = Field(default=None, max_length=100)
     owner: OptionalText = Field(default=None, max_length=32)
     # None = 不改标签；[] = 清空标签
@@ -239,6 +239,10 @@ class FollowUpOut(BaseModel):
     object_type: str | None = None
     object_id: int | None = None
     method: str | None = None
+    #: 方式中文（走数据字典 follow_method）
+    method_label: str | None = None
+    #: follow=人工跟进；create/change/stage/order/aftersale/pay/ship=系统履历
+    kind: str | None = None
     content: str
     next_date: str | None = None
     created_at: str
@@ -390,6 +394,8 @@ class ImportCommitIn(BaseModel):
     file_ref: str | None = None
     column_mapping: dict[str, str] | None = None
     source_name: str | None = None
+    #: 导入目标：customers（客户档案，默认）/ leads（线索池）
+    target: str = "customers"
 
 
 class ImportCommitOut(BaseModel):
@@ -414,11 +420,12 @@ class LeadIn(BaseModel):
     wechat: OptionalText = Field(default=None, max_length=64)
     lead_type: CUSTOMER_TYPE = Field(default="personal")
     company_name: OptionalText = Field(default=None, max_length=100)
-    source: SOURCE
+    #: 来源取数据字典 customer_source（A 级可自由增删），不能用 Literal 锁死
+    source: str = Field(min_length=1, max_length=32)
     source_other: OptionalText = Field(default=None, max_length=100)
     location: OptionalText = Field(default=None, max_length=200)
     note: OptionalText = Field(default=None, max_length=500)
-    intent_level: INTENT_LEVEL | None = None
+    intent_level: OptionalText = Field(default=None, max_length=32)
     owner: OptionalText = Field(default=None, max_length=32)
     tags: list[TagName] = Field(default_factory=list, max_length=MAX_TAGS)
 
@@ -431,11 +438,11 @@ class LeadUpdate(BaseModel):
     wechat: OptionalText = Field(default=None, max_length=64)
     lead_type: CUSTOMER_TYPE | None = None
     company_name: OptionalText = Field(default=None, max_length=100)
-    source: SOURCE | None = None
+    source: OptionalText = Field(default=None, max_length=32)
     source_other: OptionalText = Field(default=None, max_length=100)
     location: OptionalText = Field(default=None, max_length=200)
     note: OptionalText = Field(default=None, max_length=500)
-    intent_level: INTENT_LEVEL | None = None
+    intent_level: OptionalText = Field(default=None, max_length=32)
     owner: OptionalText = Field(default=None, max_length=32)
     # None = 不改标签；[] = 清空标签
     tags: Optional[list[TagName]] = Field(default=None, max_length=MAX_TAGS)

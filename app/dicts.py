@@ -150,9 +150,10 @@ DICT_SEEDS = {
         {"key": "processing", "label": "处理中", "sort": 2, "enabled": True, "used": 0},
         {"key": "done", "label": "已完成", "sort": 3, "enabled": True, "used": 0},
     ],
+    # 2026-10-31 用户定稿：公司排第 1，个人排第 2
     "customer_type": [
-        {"key": "personal", "label": "个人", "sort": 1, "enabled": True, "used": 0},
-        {"key": "company", "label": "公司", "sort": 2, "enabled": True, "used": 0},
+        {"key": "company", "label": "公司", "sort": 1, "enabled": True, "used": 0},
+        {"key": "personal", "label": "个人", "sort": 2, "enabled": True, "used": 0},
     ],
     "follow_object": [
         {"key": "lead", "label": "线索", "sort": 1, "enabled": True, "used": 0},
