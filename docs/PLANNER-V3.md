@@ -258,6 +258,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_cust   ON orders(customer_id);
 **物流方式迁移**：`UPDATE orders SET logistics_mode='agent' WHERE logistics_mode='carrier';`（`self` 语义仍是自提，保留）。
 
 > 收款口径：`deposit_paid`/`balance_paid` 仍是「已收」，`deposit_amount`/`balance_amount` 是「应收」。
+> **恒等式（Q-D）**：`amount = deposit_amount + balance_amount`，由服务端强制，写库前 `round(x,2)` 后比对，不允许差 1 分钱。
 > 订单详情「收款五个数字」= `amount`(总额) / `deposit_amount`(押金) / `balance_amount`(尾款) / `deposit_paid+balance_paid`(已收) / `amount - 已收`(未收)。
 
 ### 3.4 物流公司多联系人（G-16）
@@ -474,7 +475,7 @@ DICT_REGISTRY = {
 ```jsonc
 {
   "amount": 12000.0,          // 默认 = deals.amount，可改
-  "deposit": 20000.0,         // 必填，>0 且 ≤ amount
+  "deposit": 20000.0,         // 必填，0 ≤ deposit ≤ amount；balance 由服务端算（Q-D 恒等式）
   "logistics_mode": "agent",  // free|agent|self
   "carrier_id": 2,            // agent/free 时必填；self 时忽略
   "logistics_fee": 800.0,     // free/self 默认 0，可改
@@ -498,8 +499,8 @@ DICT_REGISTRY = {
 | POST | `/orders` | 固定 405（订单只能由商机生成） |
 | PUT | `/orders/{id}` | 允许改 `tracking_number/receiver_*/note`；收货信息变化写 `event_type='address'` |
 | POST | `/orders/{id}/transition` | 7 态机不变；`shipped` 需 `tracking_number`；每次写 `event_type='stage'` |
-| POST | `/orders/{id}/pay-deposit` | ★ 入参 `{amount, note, screenshots[]}`；金额与 `deposit_amount` 不一致时**只提示不拦**（返回 `warnings[]`），写 `event_type='pay'` |
-| POST | `/orders/{id}/pay-balance` | 同上（对 `balance_amount`） |
+| POST | `/orders/{id}/pay-deposit` | ★ 入参 `{amount, note, screenshots[]}`；**`amount` 必须等于 `deposit_amount`**，否则 400 `amount_mismatch`「押金应收 ¥X，实收 ¥Y」；已收过押金再调 → 409 `already_paid`；写 `event_type='pay'` |
+| POST | `/orders/{id}/pay-balance` | 同上，对 `balance_amount`；尾款必须在押金已收之后收（`deposit_paid < deposit_amount` → 409 `deposit_unpaid`） |
 | GET | `/orders/{id}/status_log` | 保留（等价于 `timeline` 的 `type='stage'` 子集） |
 
 **订单号**：`SO-YYYYMMDD-NNN`（当日序号，事务内 `MAX+1`，`next_no` 内部规整日期，见 G-05）。
@@ -615,7 +616,12 @@ ORDER BY date(l.next_date) ASC, c.id ASC;
 ### 6.3 订单收款与状态机（不变部分照旧）
 
 - 7 态机 `ORDER_FLOW` 不变，`transition` 只允许走下一态，跳态 409 `invalid_transition`；
-- `deposit_amount`（应收押金）与 `deposit_paid`（已收）**分开存**；收款金额 ≠ 应收时返回 `warnings[]` 但不拦（用户可能分两次收）；
+- **恒等式（Q-D 决议，硬约束）**：`amount = deposit_amount + balance_amount`，且 `amount = deposit_paid + balance_paid` 才能标记完成。
+  - 生成订单：`deposit_amount` 必填（`0 ≤ deposit ≤ amount`，等于 amount 即全款），`balance_amount` **服务端强制** `= amount − deposit_amount`，前端传什么都不采信；
+  - 改 `amount` 或 `deposit_amount`（未收款前允许改）：在同一事务里**重算** `balance_amount`，并校验已收款不超过新值（`deposit_paid > deposit_amount` → 409 `paid_exceeds_due`）；
+  - 收款：`amount` 必须**等于**对应应收（`deposit_amount` / `balance_amount`），不等即 400 `amount_mismatch`，**不做 warnings、不落半截数据**；
+  - 完成：`completed` 前置校验 `deposit_paid = deposit_amount AND balance_paid = balance_amount`，否则 409 `payment_incomplete`「还差 ¥N 未收」；
+  - 定金为 0（`deposit_amount=0`）时跳过收押金，直接收尾款；
 - `pay-deposit` / `pay-balance` 支持 `screenshots[]`（图片，≤3 张），写入 `attachments.object_type='order_payment'`；
 - `shipped` 必须已有 `tracking_number`（可后补，但发货时必须填）；
 - 订单完成后才能加售后（`order_not_completed`）；
@@ -778,7 +784,7 @@ curl -s http://10.113.9.77:8000/crm/ | grep -o 'app.js?v=[0-9]*'      # 版本�
 |---|---|---|
 | `leads.js` | `window.DEMO.leads` → `GET /leads`；新增/编辑/导入 → `POST/PUT`；转商机 → `POST /leads/{id}/convert` | §5.3 |
 | `customers.js` | → `GET /customers`、`GET /customers/{id}/360`、`PUT`（含 profile） | §5.4 |
-| `deals.js` | → `GET /deals`、`GET /deals/{id}`（timeline）；新建/编辑 → `POST/PUT`；生成订单 → `POST /deals/{id}/orders` | §5.5 |
+| `deals.js` | → `GET /deals`、`GET /deals/{id}`（timeline）；新建/编辑 → `POST/PUT`；生成订单 → `POST /deals/{id}/orders`；**生成订单按钮：押金合法且「押金+尾款=总额」成立才可点**（Q-D 硬约束） | §5.5 |
 | `orders.js` | → `GET /orders`、`GET /orders/{id}`；收款 → `pay-deposit|pay-balance`；推进 → `transition` | §5.6 |
 | `aftersales.js` | → `GET /aftersales`；完成 → `POST /aftersales/{id}/finish`；新建只从订单页调 | §5.8 |
 | `logistics.js` | → `GET/POST/PUT/DELETE /carriers`（`contacts[]` 整体提交） | §5.8 |
@@ -837,13 +843,13 @@ env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -m unittest discover -s tests 
 
 > 目标：**182 条旧用例 → 全部转绿（允许改断言，不允许删覆盖）**，另加 §9.3 新增用例。
 
-### 9.3 新增测试文件（目标 96 条）
+### 9.3 新增测试文件（目标 102 条）
 
 | 文件 | 覆盖 | 目标条数 |
 |---|---|---|
 | `tests/test_dicts.py` | 12 张字典、A/B/C/D 越权 403、key 不可改、被引用不可删、改名即时生效、型号搜索 | 22 |
-| `tests/test_deal_orders.py` | 非成交阶段 409、生成订单全字段落库、押金/尾款计算、锁定后改字段 409、履历 5 类齐全 | 20 |
-| `tests/test_order_timeline.py` | 6 类事件写入、时间线排序、改收货写 address、发货需运单号 | 14 |
+| `tests/test_deal_orders.py` | 非成交阶段 409、生成订单全字段落库、押金/尾款恒等式（含全款/押金 0/改金额重算）、锁定后改字段 409、履历 5 类齐全 | 24 |
+| `tests/test_order_timeline.py` | 6 类事件写入、时间线排序、改收货写 address、发货需运单号、收款金额不符 400 / 重复收 409 / 未收齐不许完成 409 | 18 |
 | `tests/test_addresses_contacts.py` | 地址簿 CRUD + 默认地址唯一 + 下单快照 + 地址被删不影响历史单；多联系人 + 标签 + 被引用不可删 | 16 |
 | `tests/test_files.py` | 任意类型上传、20MB 边界、10 个上限、`.html/.svg` 拒绝、下载 `attachment`+`nosniff` | 14 |
 | `tests/test_stats_workbench.py` | 待跟进按最近一条（旧记录消失）、8 块统计口径、漏斗累计到达、线索转化 ≤100% | 10 |
@@ -882,6 +888,10 @@ env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -m unittest discover -s tests 
 | A28 | 数据字典 12 张、`product_model` 30 条种子 | G-12 |
 | A29 | `/crm/` 首页导航 9 项，`#/dict` 可打开，`#/stats` 有 8 块 | G-21 |
 | A30 | 金额默认遮罩 `¥••••`，点 👁 显示真值，切页面保持 | PAGES §0.3 |
+| A31 | 生成订单后 `deposit_amount + balance_amount == amount`（含全款、押金 0 两种边界） | Q-D |
+| A32 | 收押金传错金额 → 400 `amount_mismatch`，且订单状态与已收金额**都没变** | Q-D |
+| A33 | 只收押金就调 `transition → completed` → 409 `payment_incomplete`；收齐后才成功 | Q-D |
+| A34 | 未收款前把 `amount` 从 12000 改 13000 → `balance_amount` 自动变，等式仍成立 | Q-D |
 
 ### 9.5 手工冒烟（浏览器 10 分钟，上线前必做）
 
@@ -918,7 +928,7 @@ T2 迁移 v2_002  ──┘   T4 订单/物流/地址簿 ─┘   T6 售后
 | **T6** | 售后 3 态收口：下线 start/reject、finish、done 锁定 | 契约 §5.8、§6.4 | 0.5 人日 | T5 |
 | **T7** | 工作台改造（5 卡 + 动态 + 逾期口径）+ `/stats` 8 块 + 线索列表派生字段 | 契约 §5.2、§5.9、§5.3 | 1.5 人日 | T2 |
 | **T8** | 正式前端接管：覆盖 10 个视图 + **93 处 `window.DEMO` 直读改接口** + 假写改真写 + 字典驱动下拉 + 金额遮罩 + `sw.js` 升版 | `/crm/` 与 demo 视觉一致且数据来自后端 | 4 人日 | T3–T7 |
-| **T9** | 全量回归（182 旧 + 96 新）+ 迁移验收 + 冒烟 + 发布 + 回滚演练 | 验收记录 | 1 人日 | 全部 |
+| **T9** | 全量回归（182 旧 + 102 新）+ 迁移验收 + 冒烟 + 发布 + 回滚演练 | 验收记录 | 1 人日 | 全部 |
 
 **合计 ≈ 15.5 人日**（1 人顺序做，含 20% 缓冲 ≈ 19 人日）。最高风险卡：**T5**（附件放开 + 履历双写）与 **T8**（93 处前端改造，容易漏视图），建议各单独一轮 review。
 
@@ -946,14 +956,16 @@ T2 迁移 v2_002  ──┘   T4 订单/物流/地址簿 ─┘   T6 售后
 | R8 | 迁移半途失败 | 多语句被截断 | 全部幂等 SQL + 事务 + `executescript`；失败即回滚备份 |
 | R9 | 前端接管被低估 | 以为「只换 `api()`」，实际 93 处直读（实测） | §8.2 按视图逐张过；每张卡完成即用真实后端点一遍该页；验收 A29/A30 |
 
-### 11.2 待你拍板（不阻塞 T1/T2 开工，但 T3/T5 前必须定）
+### 11.2 Q-A…Q-D 拍板决议（用户确认，2026-10-31，**实现按此，不再讨论**）
 
-| # | 问题 | 建议默认值 |
+| # | 问题 | 决议 |
 |---|---|---|
-| Q-A | 型号字典的「尺寸」是否随型号锁定？手工改尺寸后统计按哪个算 | **允许手改，统计按 `deals.spec`（实际尺寸）**；型号只用于带出初值与筛选 |
-| Q-B | 售后 `rejected` 历史值如何处置（当前库 0 行） | **保留可读、不可写入**，页面不显示该状态 |
-| Q-C | 金额遮罩是否需要「登录后默认遮住」以外记忆（如按页面记住） | **仅会话内记忆，重新登录恢复遮罩**（PAGES §0.3 原话） |
-| Q-D | 订单收款金额与应收不一致时是否留痕告警 | **允许并记 `warnings`，写入订单时间线备注** |
+| Q-A | 型号带出的尺寸能否手改、统计按哪个算 | ✅ **允许手改；统计口径一律按 `deals.spec`（实际尺寸）**。型号只负责带出初值与筛选，不参与统计 |
+| Q-B | 售后 `rejected` 历史值处置 | ✅ **保留可读、不可写入**，页面不显示该状态 |
+| Q-C | 金额遮罩记忆范围 | ✅ **仅会话内记忆**，重新登录恢复遮罩 |
+| Q-D | 收款金额与应收不一致怎么办 | ✅ **不存在「不一致」这种情况**：订单金额必须恒等于「押金 + 尾款」，见 §6.3 三条强制校验（改金额/改押金→重算尾款；收款金额≠应收→400；未收齐不许完成） |
+
+> Q-D 是**规则收紧**，不是告警：`warnings[]` 机制作废，一律 400/409 拦死。前端生成订单页「合计校验」从「只提示」改为**提交前就禁用按钮**。
 
 ---
 
