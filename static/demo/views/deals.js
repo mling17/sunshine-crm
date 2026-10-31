@@ -71,13 +71,9 @@ function viewDeals(root, route) {
       navigate('#/deals' + (b.getAttribute('data-stage') ? '?stage=' + b.getAttribute('data-stage') : ''));
     });
   });
-  $$('[data-op]', root).forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      if (btn.disabled) { return; }
-      var op = btn.getAttribute('data-op'), id = Number(btn.getAttribute('data-arg'));
-      if (op === 'follow') { navigate('#/deals/' + id); }
-      else if (op === 'order') { openOrderModal(id); }
-    });
+  bindOps(root, {
+    follow: function (id) { navigate('#/deals/' + id); },
+    order: function (id) { openOrderModal(id); }
   });
 }
 

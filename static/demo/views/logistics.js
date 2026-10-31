@@ -48,25 +48,23 @@ function viewLogistics(root, route) {
       ], list, '还没有物流公司，点右上「新增物流公司」') +
     '</div>';
 
-  $$('[data-op]', root).forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      if (btn.disabled) { return; }
-      var op = btn.getAttribute('data-op');
-      var id = Number(btn.getAttribute('data-arg'));
+  bindOps(root, {
+    edit: function (id) { openCarrierForm(id); },
+    toggle: function (id) {
       var c = (window.DEMO.carriers || []).filter(function (x) { return x.id === id; })[0];
       if (!c) { return; }
-      if (op === 'edit') { openCarrierForm(id); }
-      else if (op === 'toggle') {
-        c.is_active = !c.is_active;
-        toast(c.is_active ? '已启用' : '已停用（历史订单仍显示原名）');
-        render();
-      } else if (op === 'del') {
-        if (!window.confirm('删除物流公司「' + c.name + '」？')) { return; }
-        window.DEMO.carriers = window.DEMO.carriers.filter(function (x) { return x.id !== id; });
-        toast('已删除（演示）');
-        render();
-      }
-    });
+      c.is_active = !c.is_active;
+      toast(c.is_active ? '已启用' : '已停用（历史订单仍显示原名）');
+      render();
+    },
+    del: function (id) {
+      var c = (window.DEMO.carriers || []).filter(function (x) { return x.id === id; })[0];
+      if (!c) { return; }
+      if (!window.confirm('删除物流公司「' + c.name + '」？')) { return; }
+      window.DEMO.carriers = window.DEMO.carriers.filter(function (x) { return x.id !== id; });
+      toast('已删除（演示）');
+      render();
+    }
   });
 
   $('#btnNewCarrier', root).addEventListener('click', function () { openCarrierForm(null); });

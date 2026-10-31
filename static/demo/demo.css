@@ -281,3 +281,13 @@ a.kpi-link:active { transform: scale(0.98); }
   .chip-due-num { font-size: 17px; }
   .chip-due-label { font-size: 11px; }
 }
+
+/* 表格「操作」列吸右：手机上表格很宽时，编辑/跟进/转商机 永远看得见 */
+.data-table th:last-child,
+.data-table td:last-child {
+  position: sticky;
+  right: 0;
+  background: #fff;
+  box-shadow: -8px 0 8px -8px rgba(0, 0, 0, .18);
+}
+.data-table th:last-child { background: #fafafa; }

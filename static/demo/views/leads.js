@@ -100,16 +100,11 @@ function viewLeads(root, route) {
     });
   });
 
-  /* --- 操作按钮 --- */
-  $$('[data-op]', root).forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      if (btn.disabled) { return; }
-      var op = btn.getAttribute('data-op');
-      var id = Number(btn.getAttribute('data-arg'));
-      if (op === 'edit') { openLeadForm(id); }
-      else if (op === 'follow') { navigate('#/leads/' + id + '/follow'); }
-      else if (op === 'toDeal') { navigate('#/deals/new?lead=' + id); }
-    });
+  /* --- 操作按钮（事件委托，避免重新渲染后监听丢失） --- */
+  bindOps(root, {
+    edit: function (id) { openLeadForm(id); },
+    follow: function (id) { navigate('#/leads/' + id + '/follow'); },
+    toDeal: function (id) { navigate('#/deals/new?lead=' + id); }
   });
 
   $('#btnNewLead', root).addEventListener('click', function () { openLeadForm(null); });

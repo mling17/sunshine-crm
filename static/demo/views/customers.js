@@ -70,14 +70,10 @@ function viewCustomers(root, route) {
     if (ev.key === 'Enter') { st.q = ev.target.value.trim(); render(); }
   });
 
-  $$('[data-op]', root).forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var op = btn.getAttribute('data-op');
-      var id = Number(btn.getAttribute('data-arg'));
-      if (op === 'edit') { openCustomerForm(id); }
-      else if (op === 'follow') { navigate('#/customers/' + id + '/follow'); }
-      else if (op === 'toDeal') { navigate('#/deals/new?customer=' + id); }
-    });
+  bindOps(root, {
+    edit: function (id) { openCustomerForm(id); },
+    follow: function (id) { navigate('#/customers/' + id + '/follow'); },
+    toDeal: function (id) { navigate('#/deals/new?customer=' + id); }
   });
 }
 

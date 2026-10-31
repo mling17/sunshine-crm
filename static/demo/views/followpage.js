@@ -192,3 +192,20 @@ function pagerHtml(res) {
     ((res.page || 1) >= pages ? ' disabled' : '') + '>下一页</button>' +
     '</div>';
 }
+
+
+/* 表格「操作」列的事件委托：绑在 #app 上（onclick 覆盖式，多次 render 不会叠加监听） */
+function bindOps(root, map) {
+  root.onclick = function (ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('[data-op]') : null;
+    if (!btn || btn.disabled || !root.contains(btn)) { return; }
+    var fn = map[btn.getAttribute('data-op')];
+    if (!fn) { return; }
+    ev.preventDefault();
+    try {
+      fn(Number(btn.getAttribute('data-arg')), btn);
+    } catch (e) {
+      toast('操作失败：' + (e && e.message ? e.message : e), true);
+    }
+  };
+}
