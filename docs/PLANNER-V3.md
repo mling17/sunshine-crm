@@ -741,7 +741,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/api/crm/health
 
 # 前端（nginx 读的是 /root/nginx/html/crm，不是源码目录）
 bash ops/deploy-frontend.sh
-curl -s http://10.113.9.77:8000/crm/ | grep -o 'app.js?v=[0-9]*'      # 版本号应为新值
+curl -s http://<内网服务器IP>:8000/crm/ | grep -o 'app.js?v=[0-9]*'      # 版本号应为新值
 ```
 
 ### 7.4 回滚

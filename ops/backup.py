@@ -37,7 +37,7 @@ BACKUP_ROOT   = os.environ.get("CRM_BACKUP_ROOT", "/opt/data/crm/backups")
 LOG_FILE      = os.environ.get("CRM_BACKUP_LOG", "/opt/data/crm/logs/backup.log")
 RETENTION_DAYS = int(os.environ.get("CRM_BACKUP_KEEP_DAYS", "14"))
 
-MINIO_ENDPOINT = os.environ.get("CRM_MINIO_ENDPOINT", "101.200.62.239:9000")
+MINIO_ENDPOINT = os.environ.get("CRM_MINIO_ENDPOINT", "<公网中转IP>:9000")
 MINIO_ACCESS   = os.environ.get("CRM_MINIO_ACCESS", "")
 MINIO_SECRET   = os.environ.get("CRM_MINIO_SECRET", "")
 MINIO_BUCKET   = os.environ.get("CRM_MINIO_BUCKET", "crm-backups")
@@ -129,7 +129,7 @@ def prune_local(keep_days):
 
 
 def upload_offsite(local_file, stamp):
-    """上传 MinIO 并回读校验大小（异机 = 101.200.62.239，与本机不是同一台磁盘）"""
+    """上传 MinIO 并回读校验大小（异机 = <公网中转IP>，与本机不是同一台磁盘）"""
     from minio import Minio
     from minio.error import S3Error
 

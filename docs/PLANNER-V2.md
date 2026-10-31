@@ -989,7 +989,7 @@ curl -s -c /tmp/crm.jar -X POST http://127.0.0.1:8010/api/crm/login \
 curl -s -b /tmp/crm.jar http://127.0.0.1:8010/api/crm/customers | head -c 300         # 2 个客户
 curl -s -b /tmp/crm.jar http://127.0.0.1:8010/api/crm/deals                           # stage=confirm
 curl -s -b /tmp/crm.jar http://127.0.0.1:8010/api/crm/dashboard | head -c 400
-# 页面：浏览器打开 http://10.113.9.77:8000/crm/ ，登录后逐个点 §4.2 的 15 个路由
+# 页面：浏览器打开 http://<内网服务器IP>:8000/crm/ ，登录后逐个点 §4.2 的 15 个路由
 ```
 
 > **密码**：生产密码只在 `/opt/data/crm/.env` 的 `ADMIN_PASSWORD`（且 DB 里已是哈希，改 .env 不影响现有账号）。升级验收不要打印密码，用 `grep -c ADMIN_PASSWORD /opt/data/crm/.env` 确认存在即可，实际登录由用户手点。
@@ -1360,10 +1360,10 @@ cd /opt/data/crm/docs/planner-v2-checks
 
 ```bash
 curl -s -o /dev/null -w 'health=%{http_code}\n' http://127.0.0.1:8010/health
-curl -s -o /dev/null -w 'crm-page=%{http_code}\n' http://10.113.9.77:8000/crm/
+curl -s -o /dev/null -w 'crm-page=%{http_code}\n' http://<内网服务器IP>:8000/crm/
 ```
 
-1. 打开 `http://10.113.9.77:8000/crm/` → 登录页（**应为 V1 原样，未改版**）→ 登录。
+1. 打开 `http://<内网服务器IP>:8000/crm/` → 登录页（**应为 V1 原样，未改版**）→ 登录。
 2. 工作台：今日待跟进显示 2 条历史跟进；七态卡片齐全。
 3. 客户：2 个存量客户可见，类型=个人、来源=存量、生命周期=潜在（无订单）。
 4. 新建线索（手机 13900000001）→ 记跟进（带照片）→ 建商机转化 → 客户 360 看到商机。

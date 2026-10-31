@@ -2,7 +2,7 @@
 
 > 版本：v1.0（2026-10-29）
 > 对应规格：`/root/crm-v1-planner-spec.md`
-> 本机：10.113.9.77（内网） / 出网通道 101.200.62.239
+> 本机：<内网服务器IP>（内网） / 出网通道 <公网中转IP>
 
 ---
 
@@ -14,7 +14,7 @@
 | 公网 80/443 | 被 `kbms-nuzar-nginx-external-1` 占用；容器内只 `listen 80`，**443 无 TLS 监听**（openssl 握手失败） | 443 是"名义占用"，**没有任何可用证书** |
 | 全机证书 | `/etc/letsencrypt` 不存在，无业务 `.crt/.pem` | 公网 HTTPS 必须从零申请 |
 | 公网通道 | frpc 隧道 6000→22、6001→9119、6002→8000、6003→8001、6004→8002，**全明文 TCP** | 传输层无加密 |
-| 云主机 | 101.200.62.239：80 开、443 **关**、7000(frps) 开、9000(MinIO) 开 | 443 可用，需放行安全组 |
+| 云主机 | <公网中转IP>：80 开、443 **关**、7000(frps) 开、9000(MinIO) 开 | 443 可用，需放行安全组 |
 | 磁盘 | 468G，可用 280G | 充足 |
 | 内存 | 15G，已用 11G，**free 仅 791M，swap 2G 已用满（剩 18M）** | **硬约束**：单进程、不加容器、不做多 worker |
 | 系统 python | `/usr/bin/python3` = 3.10.12，dist-packages 内有 fastapi 0.141.1 / pydantic 2.13.2 / minio 7.2.20 | 可直跑，但见 §2 的坑 |
@@ -54,7 +54,7 @@ env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -c 'import fastapi,pydantic;pr
 | 用途 | 值 | 说明 |
 |---|---|---|
 | 后端监听 | `0.0.0.0:8010` | 单进程 uvicorn，**不占 8001/8002/80** |
-| 对外路径 | `http://10.113.9.77:8000/crm/` | 现有 nginx `location /crm/` |
+| 对外路径 | `http://<内网服务器IP>:8000/crm/` | 现有 nginx `location /crm/` |
 | API 路径 | `/crm/api/...` → `127.0.0.1:8010/api/crm/...` | 片段见 `nginx-crm-location.conf` |
 | 前端静态 | `/root/nginx/html/crm/` | 容器内 `/usr/share/nginx/html/crm/` |
 | 数据库 | `/opt/data/crm/crm.db` | SQLite 单文件 |
@@ -79,17 +79,17 @@ docker exec nginx nginx -t && docker exec nginx nginx -s reload
 
 # 3) 启服务并验证
 systemctl enable --now crm-api
-curl -s http://10.113.9.77:8010/health        # 期望 200
-curl -s http://10.113.9.77:8000/crm/health    # 期望 200（走 nginx）
-curl -s -o /dev/null -w '%{http_code}\n' http://10.113.9.77:8000/crm/   # 期望 200
+curl -s http://<内网服务器IP>:8010/health        # 期望 200
+curl -s http://<内网服务器IP>:8000/crm/health    # 期望 200（走 nginx）
+curl -s -o /dev/null -w '%{http_code}\n' http://<内网服务器IP>:8000/crm/   # 期望 200
 
 # 4) 开备份定时器（crm.db 已存在才可开）
 systemctl enable --now crm-backup.timer
 systemctl start crm-backup && journalctl -u crm-backup -n 20
 
 # 5) 回归：确认没碰坏既有服务
-curl -s http://10.113.9.77:8001/health        # learning_kb 必须仍健康
-curl -s -o /dev/null -w '%{http_code}\n' http://10.113.9.77:8000/kb/
+curl -s http://<内网服务器IP>:8001/health        # learning_kb 必须仍健康
+curl -s -o /dev/null -w '%{http_code}\n' http://<内网服务器IP>:8000/kb/
 ```
 
 ---
@@ -111,7 +111,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://10.113.9.77:8000/kb/
 - 脚本：`/opt/data/crm/ops/backup.py`（SQLite 在线备份 API，非 cp）
 - 计划：`crm-backup.timer` 每日 **03:10**（`Persistent=true`，关机错过会补跑）
 - 本地：`/opt/data/crm/backups/YYYY-MM-DD/crm-<stamp>.tar.gz`，保留 **14 天**
-- 异机：MinIO `101.200.62.239:9000` / bucket `crm-backups` / 前缀 `YYYY/MM/`，保留 **90 天**
+- 异机：MinIO `<公网中转IP>:9000` / bucket `crm-backups` / 前缀 `YYYY/MM/`，保留 **90 天**
   （该机与本机不是同一块磁盘，满足"异机存放"）
 - 校验：快照做 `PRAGMA integrity_check`，上传后 `stat_object` 比对大小，不符即失败
 - 退出码：`0` 成功 / `1` 备份或校验失败（本地无备份，**必须告警**）/ `2` 本地成功但异机失败
@@ -147,7 +147,7 @@ systemctl start crm-api && curl -s http://127.0.0.1:8010/health
 | **域名 + Let's Encrypt** | **唯一稳的路径**，成本 30–60 元/年 |
 
 ### 7.2 落地路径（用户买完域名后，我这边约 1 小时）
-1. 域名 A 记录 → `101.200.62.239`
+1. 域名 A 记录 → `<公网中转IP>`
 2. 云主机安全组放行 **80 和 443**（实测 443 当前是关的）
 3. 云主机装 nginx + certbot，`certbot --nginx -d crm.xxx.com`（HTTP-01 验证走 80）
 4. 加一段 frp TCP 隧道：云机 443 → 本机 8010（或 8000 走现有网关）
@@ -155,7 +155,7 @@ systemctl start crm-api && curl -s http://127.0.0.1:8010/health
 6. 证书自动续期：certbot timer，需监控"到期前 15 天"告警
 
 ### 7.3 过渡方案（不买域名也能先给她用）
-用 frp 新增一条 `web-8010 → remotePort 6005`，她手机访问 `http://101.200.62.239:6005/crm/`。
+用 frp 新增一条 `web-8010 → remotePort 6005`，她手机访问 `http://<公网中转IP>:6005/crm/`。
 **能立刻用，但明文传输**，只适合"先试用、数据先录、不填敏感信息"，**正式用之前必须切 HTTPS**。
 这条我可以在 10 分钟内加上，等 @manager 说要不要。
 
@@ -163,11 +163,11 @@ systemctl start crm-api && curl -s http://127.0.0.1:8010/health
 
 ## 8. 安全发现（需要团队处理，我没有擅自改）
 
-**`101.200.62.239:9000` 的 MinIO 对公网开放，且用的是默认口令 `minioadmin/minioadmin`。**
+**`<公网中转IP>:9000` 的 MinIO 对公网开放，且用的是默认口令 `<MinIO账号>/<MinIO口令>`。**
 实测从本机可直接列出全部 bucket（`a-bucket`、`yeahteams`）。任何人都能读写 learning_kb 的照片数据。
 
 建议处置顺序（改动会影响 8001 现有服务，需 @manager 批准后由我执行）：
-1. 云主机安全组把 9000 限定为仅 `10.113.9.77` 出口 IP 可访问；
+1. 云主机安全组把 9000 限定为仅 `<内网服务器IP>` 出口 IP 可访问；
 2. 轮换 MinIO 凭据，同步更新 learning_kb 配置并重启 8001（安排低峰）；
 3. 我的备份脚本凭据放 `backup.env`（已 `chmod 600`，不进 git）。
 

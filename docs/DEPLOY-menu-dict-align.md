@@ -47,7 +47,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/crm/views/dict.js
 
 ## 4. 生产只读冒烟（GET，不改字典数据）
 
-生产 API 实际监听 **127.0.0.1:8010**（nginx `proxy_pass http://10.113.9.77:8010/api/`），
+生产 API 实际监听 **127.0.0.1:8010**（nginx `proxy_pass http://<内网服务器IP>:8010/api/`），
 路由前缀是 `/api/crm/dicts`（不是任务卡里写的 `/api/dicts`；`8002` 是 `/opt/data/platform` 服务）。
 
 ```bash

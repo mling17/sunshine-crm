@@ -64,9 +64,9 @@ find /opt/data/crm/uploads -type f -name '*.png' -mtime +90 -print
 cd /opt/data/crm
 git log --oneline -3                      # 确认 a0acf6b / d517a1c / 7342a5f
 systemctl restart crm-api                 # 只重启，无迁移
-curl -s http://10.113.9.77:8010/health    # {"status":"ok",...}
+curl -s http://<内网服务器IP>:8010/health    # {"status":"ok",...}
 # 经 nginx 验收（登录后）
-curl -s -o /dev/null -w '%{http_code}\n' http://10.113.9.77:8000/crm/api/crm/dashboard   # 404/401 均说明路由通
+curl -s -o /dev/null -w '%{http_code}\n' http://<内网服务器IP>:8000/crm/api/crm/dashboard   # 404/401 均说明路由通
 ```
 
 前端（T8）调用注意：
