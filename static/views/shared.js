@@ -543,6 +543,25 @@ function productDriveText(product) {
   return product.drive_type === 'electric' ? '电动' : '手动';
 }
 
+function syncProductDriveField(product, driveSelect, hint) {
+  var linkedDrive = product && product.drive_type ? product.drive_type : '';
+  if (product) {
+    driveSelect.value = linkedDrive;
+  }
+  driveSelect.disabled = !!linkedDrive;
+  driveSelect.setAttribute('aria-disabled', linkedDrive ? 'true' : 'false');
+  var field = driveSelect.closest('.field');
+  if (field) {
+    field.classList.toggle('deal-field-product-locked', !!linkedDrive);
+  }
+  if (hint) {
+    hint.textContent = linkedDrive
+      ? '已与关联产品一致，不可单独修改'
+      : (product ? '该产品未标注驱动方式，请补充后创建' : '选择产品后会同步产品驱动方式');
+  }
+  return linkedDrive;
+}
+
 function productSearchText(product) {
   return [
     product.code,
@@ -786,17 +805,20 @@ function dealConvertFormHtml(formId, products, sourceName, sourceType) {
     '<section class="deal-convert-section">' +
       '<div class="deal-convert-section-head">' +
         '<div><span class="deal-convert-step">02</span>' +
-          '<div><h4>项目参数</h4><p>补充现场量尺和本次报价</p></div></div>' +
+          '<div><h4>项目参数</h4><p>产品参数随关联产品同步，再补充现场量尺和报价</p></div></div>' +
         '<span class="deal-convert-required">报价必填</span>' +
       '</div>' +
       '<div class="deal-convert-field-grid">' +
-        '<div class="field"><label>手动 / 电动 *</label>' +
+        '<div class="field deal-product-sync-field"><label>手动 / 电动 * ' +
+          '<span class="deal-inline-badge">随产品</span></label>' +
           '<select name="drive_type" required>' +
             '<option value="">请选择驱动方式</option>' +
             '<option value="manual">手动</option>' +
             '<option value="electric">电动</option>' +
           '</select>' +
-          '<div class="small muted deal-field-tip" data-drive-hint>选择产品后会优先带出产品配置</div>' +
+          '<div class="small muted deal-field-tip" data-drive-hint>' +
+            '选择产品后会同步产品驱动方式' +
+          '</div>' +
         '</div>' +
         '<div class="field"><label>尺寸/洞口尺寸 *</label>' +
           '<input name="spec" maxlength="32" required placeholder="例：1480*2350">' +
@@ -837,17 +859,11 @@ function bindDealConvertForm(form, products, onSubmit) {
   var picker = bindProductPicker(form.querySelector('[data-product-picker]'), products, {
     onChange: function (product) {
       if (!product) {
-        driveSelect.value = '';
-        if (driveHint) { driveHint.textContent = '选择产品后会优先带出产品配置'; }
+        syncProductDriveField(null, driveSelect, driveHint);
         if (productHint) { productHint.textContent = '请选择一个在售且已上传下单表的产品。'; }
         return;
       }
-      driveSelect.value = product.drive_type || '';
-      if (driveHint) {
-        driveHint.textContent = product.drive_type
-          ? '已按产品带出，可按实际配置调整'
-          : '该产品未标注驱动方式，请按实际配置选择';
-      }
+      syncProductDriveField(product, driveSelect, driveHint);
       if (productHint) {
         productHint.textContent = product.config_summary ||
           [product.series, product.structure, product.opening_mode].filter(Boolean).join(' · ');
@@ -859,7 +875,7 @@ function bindDealConvertForm(form, products, onSubmit) {
     ev.preventDefault();
     var product = picker.getProduct();
     var model = String(form.querySelector('[name="spec"]').value || '').trim();
-    var drive = String(driveSelect.value || '').trim();
+    var drive = product.drive_type || String(driveSelect.value || '').trim();
     var amount = numOrNull(form.querySelector('[name="amount"]').value);
     if (!product) { toast('请搜索并选择产品', true); picker.focus(); return; }
     if (!drive) { toast('请选择手动 / 电动', true); driveSelect.focus(); return; }

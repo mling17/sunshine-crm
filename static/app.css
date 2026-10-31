@@ -2715,6 +2715,20 @@ table.data-table a:hover { text-decoration: underline; }
   line-height: 1.4;
 }
 
+.deal-field-product-locked select:disabled {
+  color: #31506f;
+  background:
+    linear-gradient(90deg, #eef5ff, #f8fbff);
+  border-color: #d5e2f2;
+  opacity: 1;
+  -webkit-text-fill-color: #31506f;
+  cursor: default;
+}
+
+.deal-field-product-locked {
+  position: relative;
+}
+
 .deal-convert-field-grid .field > label {
   margin-bottom: 6px;
   color: #41526a;

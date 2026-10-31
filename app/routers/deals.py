@@ -209,7 +209,8 @@ def create_deal(payload: DealIn) -> DealOut:
         product = _product(conn, payload.product_id) if payload.product_id else None
 
     linked_drive = product.get("drive_type") if product else None
-    drive = _drive_type(payload.drive_type or linked_drive)
+    # 产品已标注驱动方式时以产品参数为准，禁止请求参数造成商机与产品不一致。
+    drive = _drive_type(linked_drive or payload.drive_type)
     if product:
         product_type = product["category"]
         model = product["code"]
@@ -322,9 +323,19 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
                     "product_type": snapshot["product_type"],
                     "model": snapshot["model"],
                 })
-                if "drive_type" not in updates and snapshot.get("drive_type"):
+                if snapshot.get("drive_type"):
                     updates["drive_type"] = snapshot["drive_type"]
+                elif "drive_type" not in updates:
+                    updates["drive_type"] = None
                 linked_product_id = snapshot["product_id"]
+
+        if linked_product_id:
+            linked_product = conn.execute(
+                "SELECT drive_type FROM products WHERE id = ? AND is_delete = 0",
+                (linked_product_id,),
+            ).fetchone()
+            if linked_product and linked_product["drive_type"]:
+                updates["drive_type"] = linked_product["drive_type"]
 
         # ③ 再校验取值
         if "stage" in updates and updates["stage"] is None:

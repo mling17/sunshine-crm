@@ -214,12 +214,15 @@ function openDealEdit(deal, products, done) {
         modelComboHtml(deal.model || '') + '</div>' +
         '</div>' +
         '<div class="row-2">' +
-        '<div class="field"><label>手动 / 电动</label>' +
+        '<div class="field deal-product-sync-field"><label>手动 / 电动 ' +
+        '<span class="deal-inline-badge">随产品</span></label>' +
         '<select name="drive_type">' +
         '<option value=""' + (deal.drive_type ? '' : ' selected') + '>不指定</option>' +
         '<option value="manual"' + (deal.drive_type === 'manual' ? ' selected' : '') + '>手动</option>' +
         '<option value="electric"' + (deal.drive_type === 'electric' ? ' selected' : '') + '>电动</option>' +
-        '</select></div>' +
+        '</select>' +
+        '<div class="small muted deal-field-tip" data-drive-hint>' +
+        '关联产品后，驱动方式会与产品参数保持一致</div></div>' +
         '<div class="field"><label>尺寸/洞口尺寸</label>' +
         '<input name="spec" maxlength="200" placeholder="如 1200*2400" value="' + esc(deal.spec || '') + '"></div>' +
         '</div>' +
@@ -250,6 +253,8 @@ function openDealEdit(deal, products, done) {
     var form = modal.querySelector('form');
     var productTypeSelect = form.querySelector('[name="product_type"]');
     var modelInput = form.querySelector('[data-model-combo] .combo-input');
+    var driveSelect = form.querySelector('[name="drive_type"]');
+    var driveHint = form.querySelector('[data-drive-hint]');
 
     var modelCombo = bindModelCombo(form.querySelector('[data-model-combo]'), dictItems('product_model'), function (hit) {
         if (hit && hit.meta) {
@@ -262,6 +267,7 @@ function openDealEdit(deal, products, done) {
         var linked = !!product;
         productTypeSelect.disabled = linked;
         if (modelInput) { modelInput.disabled = linked; modelInput.title = linked ? '型号随关联产品自动同步' : ''; }
+        syncProductDriveField(product, driveSelect, driveHint);
     }
 
     var productPicker = bindProductPicker(form.querySelector('[data-product-picker]'), products, {
@@ -273,7 +279,6 @@ function openDealEdit(deal, products, done) {
                 return;
             }
             productTypeSelect.value = product.category || '';
-            form.querySelector('[name="drive_type"]').value = product.drive_type || '';
             modelCombo.set(product.code);
             if (hint) {
                 hint.textContent = product.config_summary ||
@@ -296,7 +301,8 @@ function openDealEdit(deal, products, done) {
         var payload = {
             product_type: val('product_type') || null,
             model: val('model') || null,
-            drive_type: val('drive_type') || null,
+            drive_type: (productPicker.getProduct() && productPicker.getProduct().drive_type) ||
+                val('drive_type') || null,
             spec: val('spec') || null,
             amount: amount,
             deposit: numOrNull(form.querySelector('[name="deposit"]').value) || 0,

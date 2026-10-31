@@ -139,7 +139,8 @@ class FormLayoutStructureTest(unittest.TestCase):
             "产品可随沟通阶段调整",
             "productPickerHtml(products || [], deal.product_id",
             "syncProductFields(product)",
-            "form.querySelector('[name=\"drive_type\"]').value = product.drive_type || ''",
+            "syncProductDriveField(product, driveSelect, driveHint)",
+            "productPicker.getProduct().drive_type",
             "payload.product_id = productPicker.getValue()",
         ):
             self.assertIn(marker, edit)

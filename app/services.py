@@ -322,7 +322,8 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     if deal_in.stage is not None and deal_in.stage not in ("quote", ""):
         raise HTTPException(status_code=400, detail="转化生成的商机阶段固定为「报价」")
     # 「手动/电动」必填（定稿 §7.5 关键属性）
-    resolved_drive = deal_in.drive_type or snapshot.get("drive_type")
+    # 关联产品已标注驱动方式时以产品为准；仅缺字段的产品允许人工补全。
+    resolved_drive = snapshot.get("drive_type") or deal_in.drive_type
     if not resolved_drive:
         raise ApiError(status_code=400, code="drive_type_required", message="请选择手动 / 电动")
     if resolved_drive not in ("manual", "electric"):
