@@ -1,9 +1,9 @@
-"""CRM V2 枚举常量。
+"""
+CRM V2 枚举常量。
 
 所有枚举都使用英文小写蛇形命名，中文只出现在 *_LABELS 与出参 *_label 字段。
 """
 from typing import Literal, Dict
-
 
 # ---------------- 客户类型 ----------------
 CUSTOMER_TYPE = Literal["personal", "company"]
@@ -11,7 +11,6 @@ CUSTOMER_TYPE_LABELS: Dict[str, str] = {
     "personal": "个人",
     "company": "公司",
 }
-
 
 # ---------------- 线索状态 ----------------
 LEAD_STATUS = Literal["new", "following", "converted", "invalid"]
@@ -21,7 +20,6 @@ LEAD_STATUS_LABELS: Dict[str, str] = {
     "converted": "已转化",
     "invalid": "已失效",
 }
-
 
 # ---------------- 线索失效原因 ----------------
 LEAD_INVALID_REASON = Literal[
@@ -34,7 +32,6 @@ LEAD_INVALID_REASON_LABELS: Dict[str, str] = {
     "duplicate": "重复",
     "other": "其他",
 }
-
 
 # ---------------- 来源 ----------------
 SOURCE = Literal[
@@ -49,7 +46,6 @@ SOURCE_LABELS: Dict[str, str] = {
     "other": "其他",
 }
 
-
 # ---------------- 意向等级 ----------------
 INTENT_LEVEL = Literal["high", "medium", "low", "none"]
 INTENT_LEVEL_LABELS: Dict[str, str] = {
@@ -59,17 +55,15 @@ INTENT_LEVEL_LABELS: Dict[str, str] = {
     "none": "无意向",
 }
 
-
 # ---------------- 商机阶段 ----------------
-DEAL_STAGE = Literal["confirm", "quote", "negotiate", "won", "lost"]
+DEAL_STAGE = Literal["quote", "confirm", "won", "lost"]
+DEAL_STAGE_ORDER = ("quote", "confirm", "won", "lost")
 DEAL_STAGE_LABELS: Dict[str, str] = {
-    "confirm": "需求确认",
     "quote": "报价",
-    "negotiate": "成交洽谈",
-    "won": "赢单",
+    "confirm": "待客户确认",
+    "won": "成交",
     "lost": "流失",
 }
-
 
 # ---------------- 商机流失原因 ----------------
 DEAL_LOST_REASON = Literal["price", "competitor", "give_up", "budget", "other"]
@@ -80,7 +74,6 @@ DEAL_LOST_REASON_LABELS: Dict[str, str] = {
     "budget": "预算不足",
     "other": "其他",
 }
-
 
 # ---------------- 订单状态 ----------------
 ORDER_STATUS = Literal[
@@ -97,14 +90,14 @@ ORDER_STATUS_LABELS: Dict[str, str] = {
     "completed": "已完成",
 }
 
-
 # ---------------- 物流方式 ----------------
-LOGISTICS_MODE = Literal["carrier", "self"]
+LOGISTICS_MODE = Literal["free", "agent", "self"]
+LOGISTICS_MODE_ORDER = ("free", "agent", "self")
 LOGISTICS_MODE_LABELS: Dict[str, str] = {
-    "carrier": "物流公司",
-    "self": "自送",
+    "free": "包邮",
+    "agent": "代办",
+    "self": "自提",
 }
-
 
 # ---------------- 售后类型 ----------------
 AFTERSALE_TYPE = Literal["return", "exchange", "repair", "complaint", "other"]
@@ -116,16 +109,16 @@ AFTERSALE_TYPE_LABELS: Dict[str, str] = {
     "other": "其他",
 }
 
-
 # ---------------- 售后状态 ----------------
-AFTERSALE_STATUS = Literal["pending", "processing", "done", "rejected"]
+AFTERSALE_STATUS = Literal["pending", "processing", "done"]
+AFTERSALE_STATUS_ORDER = ("pending", "processing", "done")
 AFTERSALE_STATUS_LABELS: Dict[str, str] = {
     "pending": "待处理",
     "processing": "处理中",
     "done": "已完成",
-    "rejected": "已拒绝",
 }
-
+# 保留的历史数据标签（用于显示）
+AFTERSALE_STATUS_LEGACY_LABELS = {"rejected": "已拒绝"}
 
 # ---------------- 跟进对象类型 ----------------
 FOLLOW_OBJECT = Literal["lead", "customer", "deal", "order", "aftersale"]
@@ -137,16 +130,13 @@ FOLLOW_OBJECT_LABELS: Dict[str, str] = {
     "aftersale": "售后",
 }
 
-
 # ---------------- 跟进方式 ----------------
-FOLLOW_METHOD = Literal["phone", "wechat", "visit", "online"]
+FOLLOW_METHOD = Literal["wechat", "phone"]
+FOLLOW_METHOD_ORDER = ("wechat", "phone")
 FOLLOW_METHOD_LABELS: Dict[str, str] = {
-    "phone": "电话",
     "wechat": "微信",
-    "visit": "到面",
-    "online": "线上",
+    "phone": "电话",
 }
-
 
 # ---------------- 附件对象类型 ----------------
 ATTACH_OBJECT = Literal["follow_up", "order_payment", "aftersale"]
@@ -155,7 +145,6 @@ ATTACH_OBJECT_LABELS: Dict[str, str] = {
     "order_payment": "支付截图",
     "aftersale": "售后凭证",
 }
-
 
 # ---------------- 客户生命周期 ----------------
 CUSTOMER_LIFECYCLE = Literal["potential", "dealing", "won", "repeat"]
@@ -166,6 +155,28 @@ CUSTOMER_LIFECYCLE_LABELS: Dict[str, str] = {
     "repeat": "复购",
 }
 
+# ---------------- 产品驱动类型 ----------------
+DRIVE_TYPE = Literal["manual", "electric"]
+DRIVE_TYPE_ORDER = ("manual", "electric")
+DRIVE_TYPE_LABELS: Dict[str, str] = {
+    "manual": "手动",
+    "electric": "电动",
+}
+
+# ---------------- 时间线类型 ----------------
+TIMELINE_TYPE = Literal["follow", "create", "change", "stage", "order", "aftersale", "pay", "ship", "address"]
+TIMELINE_TYPE_ORDER = ("follow", "create", "change", "stage", "order", "aftersale", "pay", "ship", "address")
+TIMELINE_TYPE_LABELS: Dict[str, str] = {
+    "follow": "跟进",
+    "create": "创建",
+    "change": "编辑",
+    "stage": "状态变更",
+    "order": "生成订单",
+    "aftersale": "售后",
+    "pay": "收款",
+    "ship": "发货",
+    "address": "修改收货",
+}
 
 # ---------------- 订单状态流 ----------------
 ORDER_FLOW: Dict[str, str | None] = {
@@ -178,20 +189,18 @@ ORDER_FLOW: Dict[str, str | None] = {
     "completed": None,
 }
 
-
 # ---------------- 售后单 SLA 天数 ----------------
 AFTERSALE_SLA_DAYS = 3
 
-
 # ---------------- 旧阶段映射 ----------------
 LEGACY_STAGE_MAP: Dict[str, str] = {
-    "lead": "confirm",
+    "lead": "quote",
     "quoted": "quote",
-    "confirmed": "negotiate",
-    "deposit": "negotiate",
-    "producing": "negotiate",
-    "balance": "negotiate",
-    "shipped": "negotiate",
+    "confirmed": "confirm",
+    "deposit": "confirm",
+    "producing": "confirm",
+    "balance": "confirm",
+    "shipped": "confirm",
     "won": "won",
     "lost": "lost",
 }

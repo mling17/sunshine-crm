@@ -12,6 +12,7 @@ from pydantic import BaseModel, BeforeValidator, Field, model_validator
 from app.enums import (
     DEAL_STAGE,
     DEAL_STAGE_LABELS,
+    DEAL_STAGE_ORDER,
     CUSTOMER_TYPE,
     CUSTOMER_TYPE_LABELS,
     SOURCE,
@@ -44,7 +45,7 @@ from app.enums import (
 
 # 商机阶段枚举
 STAGE_LABELS = DEAL_STAGE_LABELS
-STAGES = tuple(DEAL_STAGE_LABELS.keys())
+STAGES = DEAL_STAGE_ORDER
 DEFAULT_STAGE = "confirm"  # V2 默认阶段改为 confirm
 
 

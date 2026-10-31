@@ -26,6 +26,7 @@ from app.routers import (
     customers,
     dashboard,
     deals,
+    dicts,
     followups,
     leads,
     orders,
@@ -108,3 +109,4 @@ app.include_router(leads.router)
 app.include_router(orders.router)
 app.include_router(carriers.router)
 app.include_router(aftersales.router)
+app.include_router(dicts.router)
