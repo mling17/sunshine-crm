@@ -160,17 +160,41 @@ function openFollowModal(opts) {
   $('.modal-close', modal).addEventListener('click', close);
   $('.modal-cancel', modal).addEventListener('click', close);
 
-  /* 选图 → 立即出缩略图 */
+  /* 附件：可以反复添加，后选的不覆盖前面选的；每个都能单独移除 */
   var input = modal.querySelector('[name="photos"]');
+  var box = $('#fuThumbs', modal);
+
+  function renderPicked() {
+    if (!picked.length) { box.innerHTML = ''; return; }
+    box.innerHTML = picked.map(function (p, i) {
+      var body = (p.url && isImageFile(p))
+        ? '<button type="button" class="thumb" data-img="' + esc(p.url) + '" data-name="' + esc(p.name) + '">' +
+            '<img src="' + esc(p.url) + '" alt="' + esc(p.name) + '"></button>'
+        : '<span class="file-chip" title="' + esc(p.name) + '">' + fileIcon(p.name) + ' ' + esc(p.name) + '</span>';
+      return '<span class="attach-item">' + body +
+        '<button type="button" class="attach-del" data-del-idx="' + i + '" title="移除这个附件">×</button></span>';
+    }).join('');
+  }
+
   input.addEventListener('change', function () {
-    picked = Array.prototype.map.call(input.files, function (f) {
-      return {
+    Array.prototype.forEach.call(input.files, function (f) {
+      picked.push({
         name: f.name,
         url: URL.createObjectURL(f),
         isImage: /^image\//.test(f.type || '')
-      };
+      });
     });
-    $('#fuThumbs', modal).innerHTML = photoThumbs(picked);
+    input.value = '';   /* 清空，允许再次选同一个文件 */
+    renderPicked();
+  });
+
+  box.addEventListener('click', function (ev) {
+    var del = ev.target.closest('[data-del-idx]');
+    if (!del) { return; }          /* 点图片本身留给大图查看器处理 */
+    ev.preventDefault();
+    ev.stopPropagation();
+    picked.splice(Number(del.getAttribute('data-del-idx')), 1);
+    renderPicked();
   });
 
   /* 下次跟进开关 */
@@ -307,4 +331,63 @@ function pagerHtml(res) {
     '<button type="button" class="btn btn-sm" data-page="' + ((res.page || 1) + 1) + '"' +
     ((res.page || 1) >= pages ? ' disabled' : '') + '>下一页</button>' +
     '</div>';
+}
+
+/* ============================================================================
+ * 通用：可搜索的型号下拉（型号会越来越多，不能用长下拉）
+ *   html = modelComboHtml(models, currentKey)
+ *   bindModelCombo(comboEl, models, onPick)
+ * ==========================================================================*/
+function modelComboHtml(currentKey) {
+  return '<div class="combo" data-model-combo>' +
+    '<input type="text" class="combo-input" autocomplete="off" ' +
+      'placeholder="输入型号 / 尺寸 搜索，如 XW 或 1200" value="' + esc(currentKey || '') + '">' +
+    '<input type="hidden" name="model" value="' + esc(currentKey || '') + '">' +
+    '<div class="combo-list"></div>' +
+  '</div>';
+}
+
+function bindModelCombo(comboEl, models, onPick) {
+  var input = comboEl.querySelector('.combo-input');
+  var hidden = comboEl.querySelector('input[name="model"]');
+  var list = comboEl.querySelector('.combo-list');
+
+  function render(kw) {
+    var q = String(kw || '').trim().toUpperCase();
+    var hits = models.filter(function (m) {
+      if (!q) { return true; }
+      return (m.key + ' ' + m.label).toUpperCase().indexOf(q) >= 0;
+    }).slice(0, 40);
+    list.innerHTML = hits.length ? hits.map(function (m) {
+      var size = (m.label.match(/\d+×\d+/) || [''])[0];
+      return '<button type="button" class="combo-item" data-key="' + esc(m.key) + '" data-size="' + esc(size) + '">' +
+        '<span class="combo-key">' + esc(m.key) + '</span>' +
+        '<span class="combo-label">' + esc(m.label) + '</span></button>';
+    }).join('') : '<div class="combo-empty small muted">没有匹配的型号</div>';
+  }
+
+  input.addEventListener('focus', function () { list.classList.add('open'); render(input.value); });
+  input.addEventListener('input', function () { list.classList.add('open'); render(input.value); });
+  input.addEventListener('blur', function () { setTimeout(function () { list.classList.remove('open'); }, 180); });
+
+  list.addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-key]');
+    if (!b) { return; }
+    var key = b.getAttribute('data-key');
+    hidden.value = key;
+    input.value = key;
+    list.classList.remove('open');
+    if (typeof onPick === 'function') {
+      onPick({
+        key: key,
+        size: b.getAttribute('data-size'),
+        label: b.querySelector('.combo-label').innerText
+      });
+    }
+  });
+
+  return {
+    value: function () { return hidden.value; },
+    set: function (key) { hidden.value = key; input.value = key; }
+  };
 }

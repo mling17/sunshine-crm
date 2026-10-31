@@ -82,10 +82,11 @@ function viewAftersaleDetail(root, rawId) {
       };
     });
 
+  /* 2026-10-31：不再需要「开始处理」——加了跟进记录就自动进入处理中 */
   var ops = [];
   if (a.status === 'pending') {
-    ops.push('<button type="button" class="btn btn-sm btn-primary" id="asStart">开始处理</button>');
     ops.push('<button type="button" class="btn btn-sm" id="asReject">拒绝</button>');
+    ops.push('<span class="small muted">记一条跟进后会自动进入「处理中」</span>');
   } else if (a.status === 'processing') {
     ops.push('<button type="button" class="btn btn-sm btn-primary" id="asFinish">标记完成</button>');
   }

@@ -172,11 +172,7 @@ function viewDealNew(root, route) {
             '</select></div>' +
         '</div>' +
         '<div class="field"><label>产品型号（可搜索，共 ' + models.length + ' 个）*</label>' +
-          '<div class="combo" id="modelCombo">' +
-            '<input type="text" id="modelSearch" autocomplete="off" placeholder="输入型号 / 尺寸 搜索，如 XW 或 1200" >' +
-            '<input type="hidden" name="model" id="dpModel">' +
-            '<div class="combo-list" id="modelList"></div>' +
-          '</div></div>' +
+          modelComboHtml('') + '</div>' +
         '<div class="row-2">' +
           '<div class="field"><label>尺寸（宽×高 mm）*</label>' +
             '<input name="size" id="dpSize" required maxlength="32" placeholder="1200×2400"></div>' +
@@ -197,47 +193,14 @@ function viewDealNew(root, route) {
       '</form>' +
     '</div>';
 
-  /* 型号：可搜索下拉（型号会越来越多，不能用长下拉） */
-  var searchEl = $('#modelSearch', root);
-  var hiddenEl = $('#dpModel', root);
-  var listEl = $('#modelList', root);
-
-  function renderModelList(kw) {
-    var q = String(kw || '').trim().toUpperCase();
-    var hits = models.filter(function (m) {
-      if (!q) { return true; }
-      return (m.key + ' ' + m.label).toUpperCase().indexOf(q) >= 0;
-    }).slice(0, 40);
-    listEl.innerHTML = hits.length ? hits.map(function (m) {
-      var size = (m.label.match(/\d+×\d+/) || [''])[0];
-      return '<button type="button" class="combo-item" data-key="' + esc(m.key) + '" data-size="' + esc(size) + '">' +
-        '<span class="combo-key">' + esc(m.key) + '</span>' +
-        '<span class="combo-label">' + esc(m.label) + '</span></button>';
-    }).join('') : '<div class="combo-empty small muted">没有匹配的型号</div>';
-  }
-
-  function openList() { listEl.classList.add('open'); renderModelList(searchEl.value); }
-  function closeList() { listEl.classList.remove('open'); }
-
-  searchEl.addEventListener('focus', openList);
-  searchEl.addEventListener('input', function () { openList(); });
-  searchEl.addEventListener('blur', function () { setTimeout(closeList, 180); });
-
-  listEl.addEventListener('click', function (ev) {
-    var b = ev.target.closest('[data-key]');
-    if (!b) { return; }
-    var key = b.getAttribute('data-key');
-    hiddenEl.value = key;
-    searchEl.value = key;
-    var size = b.getAttribute('data-size');
-    if (size) { $('#dpSize', root).value = size; }
-    closeList();
+  /* 型号：可搜索下拉 */
+  var comboEl = document.querySelector('#dealNewForm [data-model-combo]');
+  var combo = bindModelCombo(comboEl, models, function (pick) {
+    if (pick.size) { $('#dpSize', root).value = pick.size; }
   });
-
-  /* 默认选第一个 */
+  /* 默认选第一个型号并带出尺寸 */
   if (models.length) {
-    hiddenEl.value = models[0].key;
-    searchEl.value = models[0].key;
+    combo.set(models[0].key);
     var s0 = (models[0].label.match(/\d+×\d+/) || [''])[0];
     if (s0) { $('#dpSize', root).value = s0; }
   }
@@ -330,10 +293,8 @@ function openDealForm(id) {
           '</select></div>' +
         '</div>' +
         '<div class="row-2">' +
-          '<div class="field"><label>型号</label><select name="model">' +
-            (window.DEMO.models || []).map(function (m) {
-              return '<option value="' + esc(m.key) + '"' + (d.model === m.key ? ' selected' : '') + '>' + esc(m.label) + '</option>';
-            }).join('') + '</select></div>' +
+          '<div class="field"><label>型号（可搜索）</label>' +
+            modelComboHtml(d.model || '') + '</div>' +
           '<div class="field"><label>尺寸</label><input name="size" value="' + esc(d.size || '') + '" maxlength="32"></div>' +
         '</div>' +
         '<div class="row-2">' +
@@ -357,6 +318,11 @@ function openDealForm(id) {
   $('.modal-close', modal).addEventListener('click', close);
   $('.modal-cancel', modal).addEventListener('click', close);
 
+  var editComboEl = modal.querySelector('#dealFormEl [data-model-combo]');
+  bindModelCombo(editComboEl, (window.DEMO.models || []), function (pick) {
+    if (pick.size) { modal.querySelector('[name="size"]').value = pick.size; }
+  });
+
   $('#dealFormEl', modal).addEventListener('submit', function (ev) {
     ev.preventDefault();
     var f = ev.target;
@@ -370,6 +336,7 @@ function openDealForm(id) {
 
     var nType = String(f.product_type.value || '').trim();
     var nModel = f.model.value;
+    if (!nModel) { toast('请选择产品型号（可输入关键字搜索）', true); return; }
     var nSize = String(f.size.value || '').trim();
     var nAmount = Number(f.amount.value || 0);
     var nNote = String(f.note ? f.note.value : '').trim() || null;

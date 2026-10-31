@@ -642,3 +642,23 @@ button.dict-row:active { background: #f7f9fc; }
 }
 .label-with-switch .switch { font-weight: 400; }
 .label-with-switch .switch input { width: 16px; height: 16px; }
+
+/* 附件项：可单独移除 */
+.attach-item { position: relative; display: inline-flex; align-items: center; }
+.attach-item .thumb { margin: 0; }
+.attach-del {
+  position: absolute;
+  top: -6px; right: -6px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: 1px solid #fff;
+  background: rgba(31, 35, 41, .72);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.attach-del:hover { background: var(--danger, #d9363e); }
+.attach-item .file-chip { padding-right: 18px; }
