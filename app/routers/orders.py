@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from app.db import db_conn
@@ -163,42 +163,6 @@ def transition_order(order_id: int, payload: OrderTransitionIn) -> OrderTransiti
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/orders/{order_id}/pay-deposit", response_model=OrderOut)
-def pay_deposit(order_id: int, payload: OrderTransitionIn) -> OrderOut:
-    """支付押金"""
-    # 验证押金金额
-    if payload.deposit is None:
-        raise HTTPException(status_code=400, detail="押金金额不能为空")
-    
-    # 调用状态转换函数
-    from app.services import transition
-    try:
-        result = transition(db_conn(), order_id, "deposit_paid", payload.dict(exclude_unset=True))
-        return result["order"]
-    except Exception as e:
-        if isinstance(e, ApiError):
-            raise e
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/orders/{order_id}/pay-balance", response_model=OrderOut)
-def pay_balance(order_id: int, payload: OrderTransitionIn) -> OrderOut:
-    """支付尾款"""
-    # 验证尾款金额
-    if payload.balance is None:
-        raise HTTPException(status_code=400, detail="尾款金额不能为空")
-    
-    # 调用状态转换函数
-    from app.services import transition
-    try:
-        result = transition(db_conn(), order_id, "balance_paid", payload.dict(exclude_unset=True))
-        return result["order"]
-    except Exception as e:
-        if isinstance(e, ApiError):
-            raise e
-        raise HTTPException(status_code=400, detail=str(e))
-
-
 @router.get("/orders/{order_id}/status_log", response_model=list[OrderStatusLogOut])
 def get_order_status_log(order_id: int) -> list[OrderStatusLogOut]:
     """获取订单状态变更日志"""
@@ -257,3 +221,64 @@ def upload_payment_screenshots(
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
     
     return OrderOut(**dict(row))
+
+# ---------------- 前端契约：押金 / 尾款支付（multipart） ----------------
+async def _save_order_screenshots(conn, order_id: int, screenshots) -> list[int]:
+    """存订单支付截图到 attachments（object_type=order_payment）。async：UploadFile.read 是协程。"""
+    from app.storage import MAX_PHOTO_BYTES, ext_and_mime, new_storage_key, save_photo
+
+    ids: list[int] = []
+    prepared = []
+    for uf in screenshots or []:
+        data = await uf.read()
+        if not data and not getattr(uf, "filename", ""):
+            continue
+        ext, mime = ext_and_mime(getattr(uf, "filename", None), getattr(uf, "content_type", None))
+        if not data:
+            raise HTTPException(status_code=400, detail=f"截图 {getattr(uf, 'filename', '')} 是空文件")
+        if len(data) > MAX_PHOTO_BYTES:
+            raise HTTPException(status_code=400, detail=f"截图超过 {MAX_PHOTO_BYTES // (1024 * 1024)}MB")
+        prepared.append((getattr(uf, "filename", "") or f"shot{ext}", mime, ext, data))
+    for file_name, mime, ext, data in prepared:
+        key = new_storage_key(ext)
+        save_photo(key, data)
+        cur = conn.execute(
+            """INSERT INTO attachments
+                 (object_type, object_id, file_name, mime_type, size, storage_key, created_at)
+               VALUES ('order_payment', ?, ?, ?, ?, ?, ?)""",
+            (order_id, file_name, mime, len(data), key, now_iso()),
+        )
+        ids.append(int(cur.lastrowid or 0))
+    return ids
+
+
+@router.post("/orders/{order_id}/pay-deposit", response_model=OrderTransitionOut)
+async def pay_deposit(
+    order_id: int,
+    amount: float = Form(..., description="押金金额"),
+    note: str | None = Form(default=None),
+    screenshots: list[UploadFile] = File(default=[]),
+) -> OrderTransitionOut:
+    from app.services import transition
+
+    with db_conn() as conn:
+        if screenshots:
+            await _save_order_screenshots(conn, order_id, screenshots)
+        result = transition(conn, order_id, "deposit_paid", {"deposit": amount, "note": note})
+    return OrderTransitionOut(**result)
+
+
+@router.post("/orders/{order_id}/pay-balance", response_model=OrderTransitionOut)
+async def pay_balance(
+    order_id: int,
+    amount: float = Form(..., description="尾款金额（必须等于总额-已收押金）"),
+    note: str | None = Form(default=None),
+    screenshots: list[UploadFile] = File(default=[]),
+) -> OrderTransitionOut:
+    from app.services import transition
+
+    with db_conn() as conn:
+        if screenshots:
+            await _save_order_screenshots(conn, order_id, screenshots)
+        result = transition(conn, order_id, "balance_paid", {"balance": amount, "note": note})
+    return OrderTransitionOut(**result)

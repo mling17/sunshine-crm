@@ -391,7 +391,11 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
     
     # 开始事务
     try:
-        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except Exception:
+            # 调用方可能已开启事务（如先落附件再跃迁）：沿用外层事务
+            pass
         
         # 根据目标状态执行相应的逻辑
         if to_status == "deposit_paid":
