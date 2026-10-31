@@ -82,13 +82,15 @@ function viewAftersaleDetail(root, rawId) {
       };
     });
 
-  /* 2026-10-31：不再需要「开始处理」——加了跟进记录就自动进入处理中 */
+  /* 2026-10-31：无「开始处理」也无「拒绝」；完成后不允许再加跟进 */
+  var finished = (a.status === 'done' || a.status === 'rejected');
   var ops = [];
   if (a.status === 'pending') {
-    ops.push('<button type="button" class="btn btn-sm" id="asReject">拒绝</button>');
     ops.push('<span class="small muted">记一条跟进后会自动进入「处理中」</span>');
   } else if (a.status === 'processing') {
     ops.push('<button type="button" class="btn btn-sm btn-primary" id="asFinish">标记完成</button>');
+  } else {
+    ops.push('<span class="small muted">售后已结束</span>');
   }
 
   renderEntityFollowPage(root, {
@@ -108,6 +110,8 @@ function viewAftersaleDetail(root, rawId) {
       ['处理结果', a.result]
     ]),
     actionsHtml: ops.join(''),
+    canFollow: !finished,
+    lockedText: a.status === 'done' ? '已完成，不能再添加跟进记录' : '已拒绝，不能再添加跟进记录',
     placeholder: '和客户沟通了什么？处理到哪一步了？',
     records: records,
     onSubmit: function (p) {
@@ -152,22 +156,20 @@ function viewAftersaleDetail(root, rawId) {
   var finish = $('#asFinish', root);
   if (finish) {
     finish.addEventListener('click', function () {
-      a.status = 'done';
-      a.closed_at = new Date().toISOString().slice(0, 19);
-      a.result = a.result || '已处理完成（演示）';
-      addStatusLog('状态变更：处理中 → 已完成' + (a.result ? '（' + a.result + '）' : ''));
-      toast('售后已完成');
-      render();
-    });
-  }
-  var reject = $('#asReject', root);
-  if (reject) {
-    reject.addEventListener('click', function () {
-      a.status = 'rejected';
-      a.reject_reason = a.reject_reason || '不符合售后条件（演示）';
-      addStatusLog('状态变更：待处理 → 已拒绝（' + a.reject_reason + '）');
-      toast('已拒绝');
-      render();
+      openConfirm({
+        title: '标记完成',
+        text: '确认这单售后已经处理完了吗？标记完成后将不能再添加跟进记录。',
+        okText: '确认完成',
+        cancelText: '再看看',
+        onOk: function () {
+          a.status = 'done';
+          a.closed_at = new Date().toISOString().slice(0, 19);
+          a.result = a.result || '已处理完成（演示）';
+          addStatusLog('状态变更：处理中 → 已完成' + (a.result ? '（' + a.result + '）' : ''));
+          toast('售后已完成');
+          render();
+        }
+      });
     });
   }
 }

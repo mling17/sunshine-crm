@@ -662,3 +662,10 @@ button.dict-row:active { background: #f7f9fc; }
 }
 .attach-del:hover { background: var(--danger, #d9363e); }
 .attach-item .file-chip { padding-right: 18px; }
+
+/* 资料汇总卡 */
+.files-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.files-item { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.files-meta { font-size: 10px; }
+.confirm-text { margin: 0; font-size: 14px; line-height: 1.7; }
+.modal-content.confirm { max-width: 400px; }

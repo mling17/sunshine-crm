@@ -90,6 +90,14 @@ function viewDealDetail(root, rawId) {
   var orderLink = d.order_id
     ? '<a class="badge ok" href="#/orders/' + d.order_id + '">已生成订单 ›</a>' : '';
 
+  var fuRows = (window.DEMO.followups || [])
+    .filter(function (f) { return f.deal_id === d.id; })
+    .map(function (f) { return { at: f.created_at, files: f.files || [] }; });
+  var logRows = (((window.DEMO.dealLogs || {})[d.id]) || []).map(function (g) {
+    return { at: g.at, files: g.files || [] };
+  });
+  var dealFiles = collectFiles(fuRows.concat(logRows));
+
   renderEntityFollowPage(root, {
     backHash: '#/deals',
     backLabel: '商机',
@@ -110,6 +118,7 @@ function viewDealDetail(root, rawId) {
       ['成交时间', d.closed_at ? fmtDateTime(d.closed_at) : '—']
     ]),
     placeholder: '报了方案？客户对尺寸/价格什么反馈？下一步做什么？',
+    extraHtml: filesCardHtml(dealFiles, '这个商机还没有上传图纸 / 报价单'),
     actionsHtml:
       (d.locked
         ? '<button type="button" class="btn btn-sm" disabled title="已生成订单，商机不可修改">编辑商机</button>' +

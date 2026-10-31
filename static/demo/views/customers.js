@@ -77,6 +77,26 @@ function viewCustomers(root, route) {
   });
 }
 
+/* 客户名下所有跟进（含其商机、订单、售后的跟进）的附件汇总 */
+function customerFiles(c) {
+  var dealIds = (window.DEMO.deals || []).filter(function (d) { return d.customer_id === c.id; }).map(function (d) { return d.id; });
+  var rows = (window.DEMO.followups || []).filter(function (f) {
+    return f.customer_id === c.id || (f.deal_id && dealIds.indexOf(f.deal_id) >= 0);
+  }).map(function (f) { return { at: f.created_at, files: f.files || [] }; });
+  dealIds.forEach(function (did) {
+    (((window.DEMO.dealLogs || {})[did]) || []).forEach(function (g) {
+      if (g.files && g.files.length) { rows.push({ at: g.at, files: g.files }); }
+    });
+  });
+  (window.DEMO.aftersaleFollows || []).forEach(function (f) {
+    var as = (window.DEMO.aftersales || []).filter(function (x) { return x.id === f.aftersale_id; })[0];
+    if (as && as.customer_id === c.id && f.files && f.files.length) {
+      rows.push({ at: f.created_at, files: f.files });
+    }
+  });
+  return collectFiles(rows);
+}
+
 /* ---------------- 客户详情：档案 + 画像 + 商机 ---------------- */
 function viewCustomerDetail(root, rawId) {
   var c = (window.DEMO.customers || []).filter(function (x) { return x.id === Number(rawId); })[0];
@@ -132,7 +152,8 @@ function viewCustomerDetail(root, rawId) {
       '<div class="card-head"><h2>商机（' + r.deals.length + '）</h2>' +
         '<button type="button" class="btn btn-sm" id="custToDeal2">＋ 转商机</button></div>' +
       dealsHtml +
-    '</div>';
+    '</div>' +
+    filesCardHtml(customerFiles(c), '这个客户还没有上传图纸 / 报价单 / 现场照片');
 
   $('#custEdit', root).addEventListener('click', function () { openCustomerForm(c.id); });
   $('#custFollow', root).addEventListener('click', function () { navigate('#/customers/' + c.id + '/follow'); });

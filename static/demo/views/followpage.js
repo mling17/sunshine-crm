@@ -144,7 +144,7 @@ function openFollowModal(opts) {
             '<div class="small muted" id="fuNextHint">关掉则表示这次不需要再跟进</div>' +
           '</div>' +
         '</div>' +
-        '<div class="field"><label>附件（图片 / Excel / PDF，可多选）</label>' +
+        '<div class="field"><label>附件（图片 / Excel / PDF，可多次添加，最多 10 个、单个 ≤20MB）</label>' +
           '<input type="file" name="photos" multiple></div>' +
         '<div id="fuThumbs" class="attach-strip"></div>' +
         '</div>' +
@@ -176,8 +176,14 @@ function openFollowModal(opts) {
     }).join('');
   }
 
+  var MAX_FILES = 10;
+  var MAX_MB = 20;
+
   input.addEventListener('change', function () {
+    var skipped = [];
     Array.prototype.forEach.call(input.files, function (f) {
+      if (f.size > MAX_MB * 1024 * 1024) { skipped.push(f.name + '（超过 ' + MAX_MB + 'MB）'); return; }
+      if (picked.length >= MAX_FILES) { skipped.push(f.name + '（已达 ' + MAX_FILES + ' 个上限）'); return; }
       picked.push({
         name: f.name,
         url: URL.createObjectURL(f),
@@ -186,6 +192,7 @@ function openFollowModal(opts) {
     });
     input.value = '';   /* 清空，允许再次选同一个文件 */
     renderPicked();
+    if (skipped.length) { toast('未添加：' + skipped.join('、'), true); }
   });
 
   box.addEventListener('click', function (ev) {
@@ -242,10 +249,14 @@ function renderEntityFollowPage(root, opts) {
     '<div class="card">' +
       '<div class="card-head"><h2>跟进履历 <span class="badge muted">' +
         (opts.records || []).length + '</span></h2>' +
-        '<button type="button" class="btn btn-sm btn-primary" id="btnAddFollow">' +
-          esc(opts.addLabel || '＋ 记一条跟进') + '</button></div>' +
+        (opts.canFollow === false
+          ? '<span class="small muted">' + esc(opts.lockedText || '已完成，不能再添加跟进') + '</span>'
+          : '<button type="button" class="btn btn-sm btn-primary" id="btnAddFollow">' +
+            esc(opts.addLabel || '＋ 记一条跟进') + '</button>') +
+      '</div>' +
       timelineHtml(opts.records) +
-    '</div>';
+    '</div>' +
+    (opts.extraHtml || '');
 
   var btn = $('#btnAddFollow', root);
   if (btn) {
@@ -391,3 +402,67 @@ function bindModelCombo(comboEl, models, onPick) {
     set: function (key) { hidden.value = key; input.value = key; }
   };
 }
+
+
+/* 通用二次确认框 */
+function openConfirm(opts) {
+  var modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML =
+    '<div class="modal-content confirm">' +
+      '<div class="modal-header"><h3>' + esc(opts.title || '确认操作') + '</h3>' +
+        '<button type="button" class="btn-link modal-close">×</button></div>' +
+      '<div class="modal-body"><p class="confirm-text">' + esc(opts.text || '确定要继续吗？') + '</p></div>' +
+      '<div class="form-actions">' +
+        '<button type="button" class="btn modal-cancel">' + esc(opts.cancelText || '取消') + '</button>' +
+        '<button type="button" class="btn btn-primary" id="btnConfirmOk">' + esc(opts.okText || '确定') + '</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
+  $('.modal-close', modal).addEventListener('click', close);
+  $('.modal-cancel', modal).addEventListener('click', close);
+  $('#btnConfirmOk', modal).addEventListener('click', function () {
+    close();
+    if (typeof opts.onOk === 'function') { opts.onOk(); }
+  });
+}
+
+/* 资料汇总：从若干跟进记录里抽出所有附件 */
+function collectFiles(records) {
+  var out = [];
+  (records || []).forEach(function (r) {
+    (r.files || []).forEach(function (f) {
+      if (!f || (!f.url && !f.name)) { return; }
+      out.push({
+        name: typeof f === 'string' ? f : f.name,
+        url: typeof f === 'string' ? null : f.url,
+        isImage: typeof f === 'string' ? /\\.(jpg|jpeg|png|gif|webp)$/i.test(f) : f.isImage,
+        at: r.at || r.created_at
+      });
+    });
+  });
+  return out.sort(function (a, b) { return String(a.at) < String(b.at) ? 1 : -1; });
+}
+
+/* 资料卡片（客户 / 商机详情里汇总全部附件） */
+function filesCardHtml(files, emptyText) {
+  if (!files.length) {
+    return '<div class="card"><div class="card-head"><h2>资料 <span class="badge muted">0</span></h2></div>' +
+      '<p class="empty">' + esc(emptyText || '还没有上传过图纸 / 报价单 / 现场照片') + '</p></div>';
+  }
+  return '<div class="card">' +
+    '<div class="card-head"><h2>资料 <span class="badge muted">' + files.length + '</span></h2>' +
+      '<span class="small muted">来自各条跟进，按时间倒序</span></div>' +
+    '<div class="files-grid">' + files.map(function (f) {
+      var body = (f.url && isImageFile(f))
+        ? '<button type="button" class="thumb" data-img="' + esc(f.url) + '" data-name="' + esc(f.name) + '">' +
+            '<img src="' + esc(f.url) + '" alt="' + esc(f.name) + '" loading="lazy"></button>'
+        : '<span class="file-chip">' + fileIcon(f.name) + ' ' + esc(f.name) + '</span>';
+      return '<div class="files-item">' + body +
+        '<div class="files-meta small muted">' + esc(fmtDateTime(f.at).slice(5, 10)) + '</div></div>';
+    }).join('') + '</div>' +
+  '</div>';
+}
+
+/* 跟进页支持「不可跟进」状态 */
