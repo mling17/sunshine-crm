@@ -1537,6 +1537,8 @@ table.data-table th.nowrap { white-space: nowrap; }
 .modal .row-3 { display: grid; gap: 12px; }
 .modal .row-2 { grid-template-columns: 1fr 1fr; }
 .modal .row-3 { grid-template-columns: repeat(3, 1fr); }
+.lead-form .row-2 { align-items: start; }
+.lead-form .row-2 .field { margin-bottom: 12px; }
 
 /* 底部按钮区：吸底、细分隔、按钮等宽 */
 .modal .form-actions {
@@ -1893,6 +1895,50 @@ table.data-table tbody tr:hover { background: #f8fbff; }
 table.data-table tbody tr:last-child td { border-bottom: none; }
 table.data-table a { color: #174fbd; font-weight: 650; text-decoration: none; }
 table.data-table a:hover { text-decoration: underline; }
+table.lead-table { table-layout: auto; min-width: 900px; }
+table.lead-table th,
+table.lead-table td { padding-left: 10px; padding-right: 10px; }
+.lead-name-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 360px;
+}
+.lead-name-main {
+  display: flex;
+  flex: 0 1 180px;
+  min-width: 110px;
+  flex-direction: column;
+  gap: 2px;
+}
+.lead-name-main > a { line-height: 1.35; }
+.lead-company-name {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lead-name-tags {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.lead-name-tags .tag { margin: 0; white-space: nowrap; }
+.lead-name-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+.lead-table .op-group { flex-wrap: wrap; gap: 6px 10px; }
 .op-group { gap: 12px; }
 .op-group .btn-link { font-size: 12px; text-underline-offset: 3px; }
 .tag { margin: 0 5px 3px 0; background: #eef3fb; color: #42526b; border: 1px solid #e0e8f3; }
@@ -2035,6 +2081,7 @@ table.data-table a:hover { text-decoration: underline; }
   table.data-table tbody,
   table.data-table tr,
   table.data-table td { display: block; width: 100%; box-sizing: border-box; }
+  table.lead-table { min-width: 0; }
   table.data-table thead { display: none; }
   table.data-table tbody { display: grid; gap: 10px; background: transparent; }
   table.data-table tbody tr {
@@ -2077,7 +2124,30 @@ table.data-table a:hover { text-decoration: underline; }
   table.data-table tr.empty-row { display: block; }
   table.data-table tr.empty-row td { display: block; grid-column: 1 / -1; }
   table.data-table tr.empty-row td::before { display: none; }
+  .lead-name-row {
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 7px 10px;
+  }
+  .lead-name-main { flex: 1 1 120px; max-width: none; }
+  .lead-company-name { max-width: none; }
+  .lead-name-tags { flex: 1 1 90px; }
+  .lead-name-meta { margin-left: auto; }
   .op-group { gap: 14px; }
   .pager { gap: 6px; flex-wrap: wrap; }
   .pager .small { width: 100%; text-align: center; order: 3; }
+}
+
+@media (max-width: 640px) {
+  /* 线索字段多数较短，手机端也保留双列；标签和备注仍各占整行。 */
+  .modal .lead-form .row-2 {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px 10px;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1100px) {
+  /* 中等窗口优先保证姓名、标签、状态/意向与操作可用，创建时间在名下信息卡中仍可查看。 */
+  table.lead-table th:nth-child(7),
+  table.lead-table td:nth-child(7) { display: none; }
 }

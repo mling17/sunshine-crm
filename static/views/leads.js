@@ -1,6 +1,6 @@
 /* 线索列表页面逻辑 */
 /* ---------------- 线索列表（表格，对齐 demo 定稿） ----------------
- * 定稿口径：表格列 = 名称 / 来源 / 地区 / 微信号 / 联系方式 / 标签 / 意向 / 上次跟进 / 创建时间 / 操作
+ * 定稿口径：表格列 = 名称（含标签、状态、意向） / 来源 / 地区 / 微信号 / 联系方式 / 上次跟进 / 创建时间 / 操作
  *           操作 = 编辑（弹层）/ 跟进（详情页）/ 转商机（独立页面 #/deals/new?lead=）
  */
 function viewLeads(root) {
@@ -90,6 +90,27 @@ function leadStatusBadge(status) {
     return '<span class="badge ' + v[0] + '">' + v[1] + '</span>';
 }
 
+function leadTagBadges(tags) {
+    if (!tags || !tags.length) { return '<span class="small muted">暂无标签</span>'; }
+    return tags.map(function (tag) {
+        return '<span class="tag">' + esc(tag) + '</span>';
+    }).join('');
+}
+
+function leadNameCell(l) {
+    var name = l.name || (l.lead_type === 'company' ? l.company_name : '') || '—';
+    var company = l.company_name && l.lead_type === 'company' && l.company_name !== name
+        ? '<span class="lead-company-name">' + esc(l.company_name) + '</span>'
+        : '';
+    return '<div class="lead-name-row">' +
+        '<div class="lead-name-main"><a href="#/leads/' + l.id + '">' + esc(name) + '</a>' +
+        company + '</div>' +
+        '<div class="lead-name-tags">' + leadTagBadges(l.tags) + '</div>' +
+        '<div class="lead-name-meta">' + leadStatusBadge(l.status) +
+        leadIntentBadge(l.intent_level) + '</div>' +
+        '</div>';
+}
+
 function invalidReasonLabel(reason, other) {
     if (reason === 'other') { return other || '其他'; }
     var map = {
@@ -118,20 +139,12 @@ function loadLeads(root) {
         var items = res.items || [];
         listEl.innerHTML = dataTable([
             { title: '名称', render: function (l) {
-                var name = l.name || (l.lead_type === 'company' ? l.company_name : '') || '—';
-                return '<a href="#/leads/' + l.id + '">' + esc(name) + '</a>' +
-                    (l.company_name && l.lead_type === 'company' && l.company_name !== name
-                        ? '<div class="small muted">' + esc(l.company_name) + '</div>' : '') +
-                    ' ' + leadStatusBadge(l.status);
+                return leadNameCell(l);
             } },
             { title: '来源', render: function (l) { return esc(leadSourceText(l)); }, nowrap: true },
-            { title: '地区', render: function (l) { return esc(l.location || '—'); } },
+            { title: '地区', nowrap: true, render: function (l) { return esc(l.location || '—'); } },
             { title: '微信号', render: function (l) { return esc(l.wechat || '—'); }, nowrap: true },
             { title: '联系方式', render: function (l) { return esc(l.phone || '—'); }, nowrap: true },
-            { title: '标签', render: function (l) {
-                return (l.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') || '—';
-            } },
-            { title: '意向', render: function (l) { return leadIntentBadge(l.intent_level); }, nowrap: true },
             { title: '上次跟进', nowrap: true, render: function (l) {
                 return l.last_follow_at ? fmtDateTime(l.last_follow_at).slice(5, 16) : '—';
             } },
@@ -152,7 +165,7 @@ function loadLeads(root) {
                 return opButtons(ops);
             } }
         ], items, st.q || st.status ? '没有匹配的线索，换个条件试试'
-            : '还没有线索，点右上「新增线索」开始');
+            : '还没有线索，点右上「新增线索」开始', 'lead-table');
 
         pagerEl.innerHTML = pagerHtml(res);
         pagerEl.onclick = function (ev) {
@@ -185,18 +198,24 @@ function leadFormHtml(lead) {
         '<div class=\"field\"><label>类型</label>' +
                 '<select name="lead_type">' + dictOptions('customer_type', l.lead_type || 'company') + '</select></div>' +
         '</div>' +
+        '<div class=\"row-2\">' +
         '<div class=\"field\"><label>电话</label>' +
         '<input name=\"phone\" type=\"tel\" maxlength=\"32\" inputmode=\"tel\" value=\"' + esc(l.phone || '') + '\"></div>' +
         '<div class=\"field\"><label>微信</label>' +
         '<input name=\"wechat\" type=\"text\" maxlength=\"64\" value=\"' + esc(l.wechat || '') + '\"></div>' +
+        '</div>' +
+        '<div class=\"row-2\">' +
         '<div class=\"field\"><label>公司名</label>' +
         '<input name=\"company_name\" type=\"text\" maxlength=\"100\" value=\"' + esc(l.company_name || '') + '\"></div>' +
         '<div class=\"field\"><label>地区</label>' +
-        '<input name=\"location\" type=\"text\" maxlength=\"200\" value=\"' + esc(l.location || '') + '\"></div>' +
+        '<input name=\"location\" type=\"text\" maxlength=\"200\" value=\"' + esc(l.location || '') + '\" placeholder=\"省份.城市\"></div>' +
+        '</div>' +
+        '<div class=\"row-2\">' +
         '<div class=\"field\"><label>来源</label>' +
         '<select name="source">' + dictOptions('customer_source', l.source, '请选择') + '</select></div>' +
         '<div class=\"field\"><label>意向</label>' +
         '<select name="intent_level">' + dictOptions('intent_level', l.intent_level || 'medium', '') + '</select></div>' +
+        '</div>' +
         '<div class=\"field\"><label>标签</label>' +
         '<input name=\"tags\" type=\"text\" maxlength=\"400\" value=\"' + esc((l.tags || []).join('，')) + '" ' +
         'placeholder="多个标签可用中文或英文逗号分隔"></div>' +
