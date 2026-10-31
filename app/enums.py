@@ -35,7 +35,8 @@ LEAD_INVALID_REASON_LABELS: Dict[str, str] = {
 
 # ---------------- 来源 ----------------
 SOURCE = Literal[
-    "wechat", "phone", "referral", "existing", "stock", "other"
+    "wechat", "phone", "referral", "existing", "stock", "other",
+    "video_account", "xianyu",
 ]
 SOURCE_LABELS: Dict[str, str] = {
     "wechat": "微信",
@@ -44,6 +45,8 @@ SOURCE_LABELS: Dict[str, str] = {
     "existing": "老客户",
     "stock": "存量",
     "other": "其他",
+    "video_account": "视频号",
+    "xianyu": "咸鱼",
 }
 
 # ---------------- 意向等级 ----------------

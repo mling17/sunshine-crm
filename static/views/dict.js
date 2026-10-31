@@ -125,8 +125,13 @@ function openDictModal(dict) {
   /* 从服务器重新拉这张字典（写操作的唯一收尾动作：成功失败都回读，绝不本地直改） */
   function reload() {
     return api('/dicts/' + encodeURIComponent(dict.code)).then(function (fresh) {
-      if (fresh && fresh.code) { dict = fresh; }
+      /* 保留原对象引用，关闭后再次打开也不会拿总览里的旧顺序。 */
+      if (fresh && fresh.code) { Object.assign(dict, fresh); }
       renderBody();
+      /* 排序会影响线索/客户等页面的下拉顺序，同步刷新全局字典缓存。 */
+      if (typeof ensureDicts === 'function') {
+        ensureDicts(true).catch(function () {});
+      }
     });
   }
 
@@ -153,19 +158,26 @@ function openDictModal(dict) {
 
   function renderBody() {
     var items = itemsSorted();
-    var rows = items.map(function (it) {
+    var rows = items.map(function (it, index) {
       var delDisabled = !editable || (it.used || 0) > 0;
       var delTip = (it.used || 0) > 0
         ? ('有 ' + it.used + ' 条数据在用，只能停用')
         : (editable ? '删除' : '该字典不允许删除');
+      var orderCell = canSort
+        ? '<div class="dict-order-control">' +
+            '<span class="dict-order-no">' + (index + 1) + '</span>' +
+            '<button type="button" class="dict-order-btn" data-move="up" data-key="' + esc(it.key) + '"' +
+              (index === 0 ? ' disabled' : '') + ' aria-label="上移 ' + esc(it.label) + '" title="上移">↑</button>' +
+            '<button type="button" class="dict-order-btn" data-move="down" data-key="' + esc(it.key) + '"' +
+              (index === items.length - 1 ? ' disabled' : '') + ' aria-label="下移 ' + esc(it.label) + '" title="下移">↓</button>' +
+          '</div>'
+        : '<span class="dict-order-no" title="该字典不允许排序">' + (index + 1) + '</span>';
       return '<tr>' +
         '<td><code class="dict-key">' + esc(it.key) + '</code></td>' +
         '<td>' + (canRename
           ? '<input class="dict-input" data-rename="' + esc(it.key) + '" value="' + esc(it.label) + '" maxlength="20">'
           : esc(it.label)) + '</td>' +
-        '<td>' + (canSort
-          ? '<input class="dict-sort" type="number" data-sort="' + esc(it.key) + '" value="' + Number(it.sort || 0) + '" min="1" max="99">'
-          : Number(it.sort || 0)) + '</td>' +
+        '<td class="dict-order-cell">' + orderCell + '</td>' +
         '<td>' + (editable
           ? '<label class="switch"><input type="checkbox" data-toggle="' + esc(it.key) + '"' + (it.enabled ? ' checked' : '') +
             '><span>' + (it.enabled ? '启用' : '停用') + '</span></label>'
@@ -194,8 +206,11 @@ function openDictModal(dict) {
         '</div>' +
         '<div class="modal-body">' +
           (dict.desc ? '<p class="small muted" style="margin-top:0">' + esc(dict.desc) + '</p>' : '') +
+          (canSort
+            ? '<div class="dict-order-tip"><b>调整顺序：</b>直接点 ↑ / ↓，整组顺序会立即保存，不用再填数字。</div>'
+            : '') +
           '<div class="table-wrap"><table class="dict-table">' +
-            '<thead><tr><th>值(key)</th><th>显示名</th><th>排序</th><th>状态</th><th>被引用</th><th>操作</th></tr></thead>' +
+            '<thead><tr><th>值(key)</th><th>显示名</th><th>顺序</th><th>状态</th><th>被引用</th><th>操作</th></tr></thead>' +
             '<tbody>' + (rows || '<tr><td colspan="6" class="small muted">暂无选项</td></tr>') + '</tbody>' +
           '</table></div>' +
           newRow +
@@ -235,14 +250,27 @@ function openDictModal(dict) {
       });
     });
 
-    $$('[data-sort]', modal).forEach(function (inp) {
-      inp.addEventListener('change', function () {
-        var key = inp.getAttribute('data-sort');
-        var sort = Number(inp.value);
-        if (isNaN(sort) || sort < 1) { sort = 1; }
-        inp.value = sort;
-        inp.disabled = true;
-        putItem(key, { sort: sort }, '排序已更新');
+    $$('[data-move]', modal).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (btn.disabled || busy) { return; }
+        var key = btn.getAttribute('data-key');
+        var direction = btn.getAttribute('data-move');
+        var ordered = itemsSorted();
+        var index = ordered.map(function (it) { return it.key; }).indexOf(key);
+        var target = direction === 'up' ? index - 1 : index + 1;
+        if (index < 0 || target < 0 || target >= ordered.length) { return; }
+
+        var moved = ordered[index];
+        ordered[index] = ordered[target];
+        ordered[target] = moved;
+        var keys = ordered.map(function (it) { return it.key; });
+        $$('[data-move]', modal).forEach(function (button) { button.disabled = true; });
+        write(function () {
+          return api(dictItemUrl(dict.code, 'order'), {
+            method: 'PUT',
+            body: { keys: keys }
+          });
+        }, '顺序已更新');
       });
     });
 

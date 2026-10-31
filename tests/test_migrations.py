@@ -207,6 +207,35 @@ class TestMigrationsIdempotent(unittest.TestCase):
             conn.close()
         self.assertEqual(first, second, "字典种子不能重复插入")
 
+    def test_seed_adds_new_sources_without_overwriting_renames(self):
+        conn = sqlite3.connect(str(self.db))
+        try:
+            conn.execute(
+                "DELETE FROM dict_items WHERE dict_code = 'customer_source' AND key = 'video_account'"
+            )
+            conn.execute(
+                "UPDATE dict_items SET label = '私域微信'"
+                " WHERE dict_code = 'customer_source' AND key = 'wechat'"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            labels = dict(
+                conn.execute(
+                    "SELECT key, label FROM dict_items"
+                    " WHERE dict_code = 'customer_source' AND key IN ('wechat', 'video_account', 'xianyu')"
+                ).fetchall()
+            )
+        finally:
+            conn.close()
+        self.assertEqual(labels["video_account"], "视频号")
+        self.assertEqual(labels["xianyu"], "咸鱼")
+        self.assertEqual(labels["wechat"], "私域微信", "补种不能覆盖用户改过的显示名")
+
     def test_following_backfill_runs_once_without_overwriting_later_status(self):
         conn = sqlite3.connect(str(self.db))
         now = "2026-10-31T10:00:00Z"

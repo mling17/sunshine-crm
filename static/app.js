@@ -73,7 +73,9 @@
     'referral': '转介绍',
     'existing': '老客户',
     'stock': '存量',
-    'other': '其他'
+    'other': '其他',
+    'video_account': '视频号',
+    'xianyu': '咸鱼'
   };
 
   /* 意向等级标签映射（兜底；登录后由数据字典 intent_level 覆盖） */

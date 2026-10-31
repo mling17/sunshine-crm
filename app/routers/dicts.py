@@ -110,6 +110,49 @@ def create_item(code: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+@router.put("/{code}/items/order", response_model=Dict[str, Any])
+def reorder_items(code: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """一次性提交整张字典的启用项顺序，避免逐项改数字造成重复/断号。"""
+    info = _dict_or_404(code)
+    if info["level"] not in {"A", "B"}:
+        raise ApiError(
+            status_code=403,
+            code="dict_level_forbidden",
+            message=f"「{info['name']}」是 {info['level']} 类字典，不能排序",
+        )
+
+    raw_keys = payload.get("keys")
+    if not isinstance(raw_keys, list):
+        raise ApiError(
+            status_code=400,
+            code="dict_order_invalid",
+            message="keys 必须是字典项 key 数组",
+        )
+    keys = [str(key).strip() for key in raw_keys]
+    if any(not key for key in keys):
+        raise ApiError(
+            status_code=400,
+            code="dict_order_invalid",
+            message="排序列表里不能有空 key",
+        )
+    if len(keys) != len(set(keys)):
+        raise ApiError(
+            status_code=400,
+            code="dict_order_duplicate",
+            message="排序列表里有重复项",
+        )
+
+    try:
+        dict_svc.reorder_items(code, keys)
+    except ValueError as exc:
+        raise ApiError(
+            status_code=400,
+            code="dict_order_incomplete",
+            message=str(exc),
+        ) from exc
+    return _pack(code)
+
+
 #: 各分级允许修改的字段（PLANNER-V3 §1.3 / §4.2）
 _LEVEL_FIELDS = {
     "A": {"label", "sort", "enabled", "meta"},

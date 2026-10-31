@@ -99,6 +99,8 @@ DICT_SEEDS = {
         {"key": "existing", "label": "老客户", "sort": 4, "enabled": True, "used": 0},
         {"key": "stock", "label": "存量", "sort": 5, "enabled": True, "used": 0},
         {"key": "other", "label": "其他", "sort": 6, "enabled": True, "used": 0},
+        {"key": "video_account", "label": "视频号", "sort": 1001, "enabled": True, "used": 0},
+        {"key": "xianyu", "label": "咸鱼", "sort": 1002, "enabled": True, "used": 0},
     ],
     "intent_level": [
         {"key": "high", "label": "高", "sort": 1, "enabled": True, "used": 0},
@@ -380,6 +382,23 @@ def update_item(code: str, key: str, **fields: Any) -> Dict[str, Any]:
         )
     label_map.cache_clear()
     return get_item(code, key)
+
+
+def reorder_items(code: str, keys: List[str]) -> List[Dict[str, Any]]:
+    """按传入的 key 顺序重排当前启用项；整批更新在同一事务内完成。"""
+    current_keys = [item["key"] for item in items(code)]
+    if len(keys) != len(current_keys) or set(keys) != set(current_keys):
+        raise ValueError("排序列表必须包含当前全部启用选项，且不能重复")
+
+    with db_conn() as conn:
+        for sort, key in enumerate(keys, start=1):
+            conn.execute(
+                "UPDATE dict_items SET sort = ?, updated_at = datetime('now')"
+                " WHERE dict_code = ? AND key = ? AND enabled = 1 AND is_delete = 0",
+                (sort, code, key),
+            )
+    label_map.cache_clear()
+    return items(code)
 
 
 def delete_item(code: str, key: str) -> None:

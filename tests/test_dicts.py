@@ -74,6 +74,10 @@ class TestDicts(unittest.TestCase):
         self.assertEqual(len(xw60), 1, "产品型号 XW-60 必须存在且唯一")
         self.assertEqual(xw60[0]["label"], "XW-60 天窗 600×1200")
         self.assertEqual(xw60[0]["meta"]["size"], "600×1200", "型号必须带出尺寸")
+
+        sources = {item["key"]: item["label"] for item in DICT_SEEDS["customer_source"]}
+        self.assertEqual(sources["video_account"], "视频号")
+        self.assertEqual(sources["xianyu"], "咸鱼")
         
     def test_items_function(self):
         """测试 items 函数"""
@@ -142,6 +146,16 @@ class TestDicts(unittest.TestCase):
 
 class DictHttpTest(ApiTestCase):
     """字典的 HTTP 行为（R1 断言表 A17–A20 的可执行版本）。"""
+
+    def test_new_default_sources_are_usable(self):
+        sources = ["video_account", "xianyu"]
+        for index, source in enumerate(sources):
+            cust = self.client.post(
+                "/api/crm/customers",
+                json={"name": f"新来源客户{index}", "source": source},
+            )
+            self.assertEqual(cust.status_code, 200, cust.text)
+            self.assertEqual(cust.json()["source"], source)
 
     def test_add_source_immediately_usable(self):
         created = self.client.post(
@@ -230,6 +244,49 @@ class DictHttpTest(ApiTestCase):
             "/api/crm/dicts/customer_source/items", json={"key": "a b/c", "label": "坏 key"}
         )
         self.assertEqual(bad_key.status_code, 400, bad_key.text)
+
+    def test_reorder_items_updates_whole_enabled_list(self):
+        before = self.client.get("/api/crm/dicts/customer_source").json()["items"]
+        before_keys = [item["key"] for item in before]
+        reversed_keys = list(reversed(before_keys))
+
+        try:
+            resp = self.client.put(
+                "/api/crm/dicts/customer_source/items/order",
+                json={"keys": reversed_keys},
+            )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            items = resp.json()["items"]
+            self.assertEqual([item["key"] for item in items], reversed_keys)
+            self.assertEqual([item["sort"] for item in items], list(range(1, len(items) + 1)))
+
+            duplicate = self.client.put(
+                "/api/crm/dicts/customer_source/items/order",
+                json={"keys": [reversed_keys[0], reversed_keys[0]]},
+            )
+            self.assertEqual(duplicate.status_code, 400, duplicate.text)
+            self.assertEqual(duplicate.json()["code"], "dict_order_duplicate")
+
+            incomplete = self.client.put(
+                "/api/crm/dicts/customer_source/items/order",
+                json={"keys": reversed_keys[:-1]},
+            )
+            self.assertEqual(incomplete.status_code, 400, incomplete.text)
+            self.assertEqual(incomplete.json()["code"], "dict_order_incomplete")
+        finally:
+            self.client.put(
+                "/api/crm/dicts/customer_source/items/order",
+                json={"keys": before_keys},
+            )
+
+    def test_reorder_rejects_level_c_dictionary(self):
+        keys = [item["key"] for item in self.client.get("/api/crm/dicts/customer_type").json()["items"]]
+        resp = self.client.put(
+            "/api/crm/dicts/customer_type/items/order",
+            json={"keys": list(reversed(keys))},
+        )
+        self.assertEqual(resp.status_code, 403, resp.text)
+        self.assertEqual(resp.json()["code"], "dict_level_forbidden")
 
 
 if __name__ == '__main__':
