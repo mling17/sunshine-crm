@@ -117,7 +117,7 @@
         '<div class=\"card\">' +
           '<div class=\"card-head\"><h2>商机详情</h2></div>' +
           '<div class=\"item-sub\">' +
-            '商机名称：' + esc(deal.title || '未命名') + '<br>' +
+            '商机：' + esc(deal.title || ([deal.product_type, deal.model, deal.spec].filter(Boolean).join(' ') || ('#' + deal.id))) + '<br>' +
             '客户：' + esc(customerName) + '<br>' +
             '产品：' + esc(deal.product_type + ' ' + deal.model + ' ' + deal.spec) + '<br>' +
             '阶段：' + esc(stageLabel) + '<br>' +

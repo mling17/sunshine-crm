@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>天窗天幕 CRM · 页面 Demo v2.1</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#1f6feb">
+  <link rel="stylesheet" href="/crm/app.css">
+  <link rel="stylesheet" href="/crm/demo/demo.css">
+</head>
+<body>
+
+<div class="demo-banner">
+  <b>演示版 v2.1（Mock 数据）</b>：假数据、不连后端、刷新即还原。用来定稿页面。
+  正式版 <a href="/crm/">/crm/</a>
+</div>
+
+<header id="topbar" class="topbar">
+  <div class="brand">天幕 CRM <span class="small muted">demo</span></div>
+  <nav id="nav" class="nav">
+    <a href="#/dashboard" data-view="dashboard">工作台</a>
+    <a href="#/leads" data-view="leads">线索</a>
+    <a href="#/customers" data-view="customers">客户</a>
+    <a href="#/deals" data-view="deals">商机</a>
+    <a href="#/orders" data-view="orders">订单</a>
+    <a href="#/aftersales" data-view="aftersales">售后</a>
+    <a href="#/logistics" data-view="logistics">物流</a>
+    <a href="#/stats" data-view="stats">统计</a>
+    <a href="#/dict" data-view="dict">数据字典</a>
+  </nav>
+  <div class="who">
+    <button type="button" id="btnMoney" class="money-btn" title="点一下查看金额">👁</button>
+    <span id="whoami" class="small muted"></span>
+  </div>
+</header>
+
+<main id="app"></main>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- 内核（mock 数据 + 工具 + 路由），必须最先加载 -->
+<script src="/crm/demo/core.js"></script>
+
+<!-- 通用组件（表格 / 时间线 / 信息网格 / 跟进表单） -->
+<script src="/crm/views/shared.js"></script>
+<script src="/crm/demo/views/followpage.js"></script>
+
+<!-- 按 2026-10-31 定稿重写的页面（放在正式版之后会覆盖同名函数） -->
+<script src="/crm/demo/views/leads.js"></script>
+<script src="/crm/demo/views/customers.js"></script>
+<script src="/crm/demo/views/deals.js"></script>
+<script src="/crm/demo/views/logistics.js"></script>
+
+<!-- 沿用正式版、本轮不改的页面 -->
+<script src="/crm/views/orders.js"></script>
+<script src="/crm/views/aftersales.js"></script>
+<script src="/crm/views/stats.js"></script>
+<script src="/crm/demo/views/dict.js"></script>
+
+<!-- 工作台（Demo 改版） -->
+<script src="/crm/demo/views/dashboard.js"></script>
+
+</body>
+</html>

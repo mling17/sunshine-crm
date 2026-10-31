@@ -136,7 +136,8 @@ function leadItemHtml(l) {
 
     var sourceBadge = '';
     if (l.source) {
-        sourceBadge = '<span class=\"badge muted\">' + esc(SOURCE_LABELS[l.source] || l.source) + '</span>';
+        var srcText = (l.source === 'other' && l.source_other) ? l.source_other : (SOURCE_LABELS[l.source] || l.source);
+        sourceBadge = '<span class=\"badge muted\">' + esc(srcText) + '</span>';
     }
 
     var intentBadge = '';

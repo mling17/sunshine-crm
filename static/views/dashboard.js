@@ -21,15 +21,18 @@ function viewDashboard(root) {
                 '</div>';
         }).join('') : '<p class=\"empty\">今天没有待跟进，清爽 👌</p>';
 
-        // 售后 SLA 红条
+        // 售后 SLA 红条（V2：挂在 stats 下）
+        var slaAlerts = stats.aftersale_sla_alerts || [];
         var slaAlertHtml = '';
-        if (d.aftersale_sla_alerts && d.aftersale_sla_alerts.length > 0) {
-            var alert = d.aftersale_sla_alerts[0];
-            slaAlertHtml = '<div class=\"sla-alert\">' +
+        if (slaAlerts.length > 0) {
+            var alert = slaAlerts[0];
+            slaAlertHtml = '<div class="sla-alert">' +
                 '⚠ 售后单 ' + esc(alert.no) + ' 已挂 ' + esc(alert.days_pending) + ' 天未处理' +
-                '<a href=\"#/aftersales/' + alert.id + '\" class=\"btn btn-sm\">查看详情</a>' +
+                '<a href="#/aftersales/' + alert.id + '" class="btn btn-sm">查看详情</a>' +
                 '</div>';
         }
+
+        var recentOrders = stats.recent_orders || [];
 
         root.innerHTML =
             slaAlertHtml +
@@ -48,22 +51,23 @@ function viewDashboard(root) {
             '<a class=\"btn btn-sm\" href=\"#/followups\">全部跟进</a></div>' +
             todoHtml +
             '</div>' +
-            '<div class=\"card\">' +
-            '<div class=\"card-head\"><h2>订单状态分布</h2><a class=\"btn btn-sm\" href=\"#/orders\">管理订单</a></div>' +
-            barsHtml(d.orders.by_status) +
+            '<div class="card">' +
+            '<div class="card-head"><h2>订单状态分布</h2><a class="btn btn-sm" href="#/orders">管理订单</a></div>' +
+            barsHtml(stats.orders_by_status, ORDER_STATUS) +
             '</div>' +
-            '<div class=\"card\">' +
-            '<div class=\"card-head\"><h2>最近订单</h2><a class=\"btn btn-sm\" href=\"#/orders\">全部订单</a></div>' +
-            (d.recent_orders && d.recent_orders.length ? d.recent_orders.map(function (order) {
-                return '<div class=\"item\">' +
-                    '<div class=\"item-main\">' +
-                    '<div class=\"item-title\">' + esc(order.order_no) + '</div>' +
-                    '<div class=\"item-sub\">' + esc(order.customer_name) + '</div>' +
-                    '<div class=\"item-sub\">' + money(order.amount) + '</div>' +
+            '<div class="card">' +
+            '<div class="card-head"><h2>最近订单</h2><a class="btn btn-sm" href="#/orders">全部订单</a></div>' +
+            (recentOrders.length ? recentOrders.map(function (order) {
+                return '<div class="item">' +
+                    '<div class="item-main">' +
+                    '<div class="item-title">' + esc(order.order_no) + '</div>' +
+                    '<div class="item-sub">' + esc(order.customer_name) + '</div>' +
+                    '<div class="item-sub">' + money(order.amount) + '</div>' +
                     '</div>' +
-                    '<div class=\"item-side\"><span class=\"badge muted\">' + esc(order.status_label) + '</span></div>' +
+                    '<div class="item-side"><span class="badge muted">' +
+                    esc(orderStatusLabel(order.status, order.status_label)) + '</span></div>' +
                     '</div>';
-            }).join('') : '<p class=\"empty\">暂无订单</p>') +
+            }).join('') : '<p class="empty">暂无订单</p>') +
             '</div>';
     });
 }

@@ -23,20 +23,49 @@
   var MAX_PHOTO_MB = 20;
   var MAX_TAGS = 20;
 
-  /* 与后端 app/models.py::STAGE_LABELS 一致（唯一来源在后端，这里只做展示映射） */
+  /* 与后端 app/enums.py::DEAL_STAGE_LABELS 一致（V2 阶段：需求确认→报价→成交洽谈→赢单/流失）
+     唯一来源在后端，这里只做展示映射；改名务必同步 enums.py */
   var STAGES = [
-    ['lead', '线索'],
-    ['quoted', '已报价'],
-    ['confirmed', '客户确认'],
-    ['deposit', '已收定金'],
-    ['producing', '已下单生产'],
-    ['balance', '待付尾款'],
-    ['shipped', '已发货'],
-    ['won', '已成交'],
-    ['lost', '已流失']
+    ['confirm', '需求确认'],
+    ['quote', '报价'],
+    ['negotiate', '成交洽谈'],
+    ['won', '赢单'],
+    ['lost', '流失']
   ];
   var STAGE_LABEL = {};
   STAGES.forEach(function (pair) { STAGE_LABEL[pair[0]] = pair[1]; });
+
+  /* 订单状态：与后端 enums.py::ORDER_STATUS_LABELS 一致（顺序=状态机推进顺序） */
+  var ORDER_STATUS = [
+    ['pending_payment', '待支付'],
+    ['deposit_paid', '已付押金'],
+    ['producing', '生产中'],
+    ['balance_paid', '已付尾款'],
+    ['ready_to_ship', '待发货'],
+    ['shipped', '已发货'],
+    ['completed', '已完成']
+  ];
+  var ORDER_STATUS_LABEL = {};
+  ORDER_STATUS.forEach(function (pair) { ORDER_STATUS_LABEL[pair[0]] = pair[1]; });
+
+  /* 订单状态机（与后端 enums.py::ORDER_FLOW 一致）；后端不下发 next_status，前端自己算 */
+  var ORDER_FLOW = {
+    'pending_payment': 'deposit_paid',
+    'deposit_paid': 'producing',
+    'producing': 'balance_paid',
+    'balance_paid': 'ready_to_ship',
+    'ready_to_ship': 'shipped',
+    'shipped': 'completed',
+    'completed': null
+  };
+
+  /* 售后类型/状态：与后端 enums.py 一致（后端未下发 *_label，前端映射） */
+  var AFTERSALE_TYPE_LABEL = {
+    'return': '退货', 'exchange': '换货', 'repair': '维修', 'complaint': '投诉', 'other': '其他'
+  };
+  var AFTERSALE_STATUS_LABEL = {
+    'pending': '待处理', 'processing': '处理中', 'done': '已完成', 'rejected': '已拒绝'
+  };
 
   /* 来源标签映射 */
   var SOURCE_LABELS = {
@@ -44,6 +73,7 @@
     'phone': '电话',
     'referral': '转介绍',
     'existing': '老客户',
+    'stock': '存量',
     'other': '其他'
   };
 
@@ -274,9 +304,15 @@
     } else if (view === 'customers') {
       job = route.parts[1] ? viewCustomerDetail(root, route.parts[1]) : viewCustomers(root);
     } else if (view === 'deals') {
-      job = viewDeals(root, route);
+      job = route.parts[1] ? viewDealDetail(root, route.parts[1]) : viewDeals(root, route);
     } else if (view === 'followups') {
       job = viewFollowups(root, route);
+    } else if (view === 'orders') {
+      job = route.parts[1] ? viewOrderDetail(root, route.parts[1]) : viewOrders(root, route);
+    } else if (view === 'aftersales') {
+      job = route.parts[1] ? viewAftersaleDetail(root, route.parts[1]) : viewAftersales(root, route);
+    } else if (view === 'logistics') {
+      job = viewLogistics(root, route);
     } else if (view === 'stats') {
       job = viewStats(root);
     } else if (view === 'import') {
@@ -335,6 +371,47 @@
         esc(index[id]) + '</option>';
     }).join('');
   }
+
+  /* ================= 跨文件共享（views/*.js 以裸名调用这里的工具）=================
+   * 视图文件是普通 <script>，与 app.js 的 IIFE 不共享作用域；不显式挂到 window，
+   * 视图里的 api() / esc() / state 全是 undefined → 整页 ReferenceError。
+   * state 必须挂同一个对象引用（视图会改 state.filters / state.import）。
+   */
+  Object.assign(window, {
+    API_BASE: API_BASE,
+    PAGE_SIZE: PAGE_SIZE,
+    MAX_PHOTOS: MAX_PHOTOS,
+    MAX_PHOTO_MB: MAX_PHOTO_MB,
+    MAX_TAGS: MAX_TAGS,
+    STAGES: STAGES,
+    STAGE_LABEL: STAGE_LABEL,
+    ORDER_STATUS: ORDER_STATUS,
+    ORDER_STATUS_LABEL: ORDER_STATUS_LABEL,
+    ORDER_FLOW: ORDER_FLOW,
+    AFTERSALE_TYPE_LABEL: AFTERSALE_TYPE_LABEL,
+    AFTERSALE_STATUS_LABEL: AFTERSALE_STATUS_LABEL,
+    SOURCE_LABELS: SOURCE_LABELS,
+    INTENT_LABELS: INTENT_LABELS,
+    state: state,
+    esc: esc,
+    pad2: pad2,
+    money: money,
+    fmtDateTime: fmtDateTime,
+    todayISO: todayISO,
+    numOrNull: numOrNull,
+    toast: toast,
+    ApiError: ApiError,
+    api: api,
+    $: $,
+    $$: $$,
+    parseRoute: parseRoute,
+    navigate: navigate,
+    setActiveNav: setActiveNav,
+    render: render,
+    invalidateCustomerIndex: invalidateCustomerIndex,
+    ensureCustomerIndex: ensureCustomerIndex,
+    customerOptions: customerOptions
+  });
 
   /* ================= 启动 ================= */
 

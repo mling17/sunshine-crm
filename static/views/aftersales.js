@@ -18,13 +18,13 @@
       var aftersales = res.items || [];
       
       var listHtml = aftersales.length ? aftersales.map(function (a) {
-        var statusLabel = a.status_label || a.status;
+        var statusLabel = aftersaleStatusLabel(a.status, a.status_label);
         var statusBadge = '<span class=\"badge muted\">' + statusLabel + '</span>';
         
         return '<div class=\"item\">' +
           '<div class=\"item-main\">' +
             '<div class=\"item-title\">' + esc(a.no) + statusBadge + '</div>' +
-            '<div class=\"item-sub\">' + esc(a.type_label || a.type) + '</div>' +
+            '<div class=\"item-sub\">' + esc(aftersaleTypeLabel(a.type, a.type_other)) + '</div>' +
             '<div class=\"item-sub small\">' + esc(a.description.substring(0, 50)) + '</div>' +
             '<div class=\"item-sub small\">订单：' + esc(a.order_no) + '</div>' +
           '</div>' +
@@ -80,7 +80,7 @@
       }
 
       // 售后单信息
-      var statusLabel = aftersale.status_label || aftersale.status;
+      var statusLabel = aftersaleStatusLabel(aftersale.status, aftersale.status_label);
       var statusBadge = '<span class=\"badge muted\">' + statusLabel + '</span>';
       
       root.innerHTML =
@@ -89,7 +89,7 @@
           '<div class=\"item-sub\">' +
             '售后单号：' + esc(aftersale.no) + '<br>' +
             '关联订单：' + esc(aftersale.order_no) + '<br>' +
-            '类型：' + esc(aftersale.type_label || aftersale.type) + '<br>' +
+            '类型：' + esc(aftersaleTypeLabel(aftersale.type, aftersale.type_other)) + '<br>' +
             '状态：' + statusBadge + '<br>' +
             '创建时间：' + fmtDateTime(aftersale.created_at) + '<br>' +
             '描述：' + esc(aftersale.description) + '<br>' +

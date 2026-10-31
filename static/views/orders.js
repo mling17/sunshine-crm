@@ -14,7 +14,9 @@
     if (customerId) params.set('customer_id', customerId);
 
     return api('/orders?' + params.toString()).then(function (res) {
-      var orders = res.items || [];
+      // 后端 GET /orders 返回的是纯数组（不是分页对象），两种都兼容
+      var orders = Array.isArray(res) ? res : (res.items || []);
+      var total = Array.isArray(res) ? orders.length : (res.total || orders.length);
       
       var listHtml = orders.length ? orders.map(function (o) {
         var statusLabel = o.status_label || o.status;
@@ -43,7 +45,7 @@
 
       root.innerHTML =
         '<div class=\"card\">' +
-          '<div class=\"card-head\"><h2>订单列表（' + res.total + '）</h2>' +
+          '<div class=\"card-head\"><h2>订单列表（' + total + '）</h2>' +
             '<select id=\"orderStatusFilter\" aria-label=\"按状态筛选\" style=\"width:auto\">' +
               '<option value=\"\">全部状态</option>' +
               '<option value=\"pending_payment\">待支付</option>' +
@@ -76,10 +78,14 @@
   function viewOrderDetail(root, orderId) {
     return Promise.all([
       api('/orders/' + orderId),
-      api('/aftersales?order_id=' + orderId)
+      api('/aftersales?order_id=' + orderId),
+      ensureCustomerIndex()
     ]).then(function (all) {
       var order = all[0];
-      var aftersales = all[1] || [];
+      var custIndex = all[2] || {};
+      // V2：GET /aftersales 返回分页对象 {items,total}，不是裸数组
+      var afRes = all[1];
+      var aftersales = Array.isArray(afRes) ? afRes : ((afRes && afRes.items) || []);
 
       if (!order) {
         root.innerHTML = '<div class=\"card\">订单不存在</div>';
@@ -88,9 +94,10 @@
 
       // 计算金额信息
       var totalAmount = order.amount || 0;
-      var depositPaid = order.deposit_paid || 0;
-      var balancePaid = order.balance_paid || 0;
-      var unpaid = totalAmount - depositPaid - balancePaid;
+      var paidTotal = (order.paid_amount !== undefined && order.paid_amount !== null)
+        ? Number(order.paid_amount) || 0
+        : (Number(order.deposit_paid) || 0) + (Number(order.balance_paid) || 0);
+      var unpaid = Math.max(0, totalAmount - paidTotal);
 
       // 状态进度条
       var statusProgress = '';
@@ -132,11 +139,12 @@
         aftersalesHtml = '<div class=\"card\"><div class=\"card-head\"><h2>售后单</h2></div><p class=\"empty\">暂无售后单</p></div>';
       }
 
-      // 当前状态操作区
+      // 当前状态操作区（后端不下发 next_status，按状态机推）
+      var nextStatus = order.next_status || ORDER_FLOW[order.status] || null;
       var actionArea = '';
-      if (order.next_status) {
+      if (nextStatus) {
         actionArea = '<div class=\"card\"><div class=\"card-head\"><h2>当前操作</h2></div>' +
-          '<div class=\"form-actions\"><button type=\"button\" class=\"btn btn-primary\" id=\"btnNextAction\">' + getNextActionLabel(order.next_status) + '</button></div>' +
+          '<div class=\"form-actions\"><button type=\"button\" class=\"btn btn-primary\" id=\"btnNextAction\">' + getNextActionLabel(nextStatus) + '</button></div>' +
         '</div>';
       }
 
@@ -171,7 +179,7 @@
           '<div class=\"card-head\"><h2>订单详情</h2></div>' +
           '<div class=\"item-sub\">' +
             '订单号：' + esc(order.order_no) + '<br>' +
-            '客户：' + esc(order.customer_name || '—') + '<br>' +
+            '客户：' + esc(order.customer_name || custIndex[order.customer_id] || ('客户 #' + order.customer_id)) + '<br>' +
             '产品：' + esc(order.product_type + ' ' + order.model + ' ' + order.spec) + '<br>' +
             '状态：' + esc(order.status_label || order.status) + '<br>' +
             '创建时间：' + fmtDateTime(order.created_at) + '<br>' +
@@ -181,7 +189,7 @@
           '<div class=\"card-head\"><h2>金额信息</h2></div>' +
           '<div class=\"grid-3col\">' +
             '<div class=\"kpi\"><div class=\"label\">总额</div><div class=\"value\">' + money(totalAmount) + '</div></div>' +
-            '<div class=\"kpi\"><div class=\"label\">已收</div><div class=\"value\">' + money(depositPaid + balancePaid) + '</div></div>' +
+            '<div class=\"kpi\"><div class=\"label\">已收</div><div class=\"value\">' + money(paidTotal) + '</div></div>' +
             '<div class=\"kpi\"><div class=\"label\">未收</div><div class=\"value\">' + money(unpaid) + '</div></div>' +
           '</div>' +
           '<div class=\"form-actions\"><button type=\"button\" class=\"btn btn-sm\" id=\"btnPayDeposit\">支付押金</button></div>' +
@@ -191,14 +199,15 @@
         aftersalesHtml +
         historyHtml;
 
-      // 事件绑定
-      $('#btnNextAction', root).addEventListener('click', function () {
-        performNextAction(order);
-      });
-      
-      $('#btnPayDeposit', root).addEventListener('click', function () {
-        showDepositPayment(order);
-      });
+      // 事件绑定（按钮不一定存在：状态机走完 / 未到该环节）
+      var nextBtn = $('#btnNextAction', root);
+      if (nextBtn) {
+        nextBtn.addEventListener('click', function () { performNextAction(order); });
+      }
+      var payDepositBtn = $('#btnPayDeposit', root);
+      if (payDepositBtn) {
+        payDepositBtn.addEventListener('click', function () { showDepositPayment(order); });
+      }
     });
   }
 

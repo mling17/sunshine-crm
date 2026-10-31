@@ -1,0 +1,270 @@
+/* Demo 专用样式：只补 app.css 里没有的组件，不动正式版样式。
+ * 定稿后这些类可以直接搬进 app.css 给正式版用。 */
+
+/* ---------- Demo 顶部说明条 ---------- */
+.demo-banner {
+  background: #fff7e6;
+  border-bottom: 1px solid #ffd591;
+  color: #8a5a00;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 8px 12px;
+  text-align: center;
+}
+.demo-banner b { color: #ad4e00; }
+
+/* 顶栏金额眼睛 */
+.money-btn {
+  background: none;
+  border: 1px solid var(--line, #d9d9d9);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+  margin-right: 8px;
+}
+.money-btn:active { transform: scale(0.94); }
+
+/* ---------- 工作台：可点数字卡 ---------- */
+a.kpi-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+a.kpi-link:active { transform: scale(0.98); }
+.kpi-danger { border: 1px solid #ffa39e; background: #fff1f0; }
+.kpi-danger .value { color: #cf1322; }
+
+/* ---------- 工作台：今日待跟进 ---------- */
+.todo-row { align-items: flex-start; }
+.todo-row.todo-overdue {
+  background: #fff1f0;
+  border-left: 3px solid #f5222d;
+  padding-left: 9px;
+  border-radius: 4px;
+}
+.todo-row .item-side { align-self: center; }
+
+/* ---------- 工作台：订单待办 ---------- */
+.chip-due {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 10px 6px;
+  border: 1px solid var(--line, #e5e5e5);
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+  background: #fff;
+}
+.chip-due:active { background: #f5f7fa; }
+.chip-due-num { font-size: 20px; font-weight: 700; }
+.chip-due-label { font-size: 12px; color: #666; }
+
+/* ---------- 工作台：最近动态 ---------- */
+.act-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line, #eee);
+  font-size: 13px;
+}
+.act-row:last-child { border-bottom: none; }
+.act-time { color: #999; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.act-icon { flex: none; }
+.act-text { flex: 1; line-height: 1.5; }
+
+/* ---------- 数据字典：总览 ---------- */
+.dict-legend { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.dict-legend-item { font-size: 12px; line-height: 1.7; }
+.dict-list { display: flex; flex-direction: column; }
+.dict-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--line, #eee);
+  text-decoration: none;
+  color: inherit;
+}
+.dict-row:last-child { border-bottom: none; }
+.dict-row:active { background: #f7f9fc; }
+.dict-row-name { font-weight: 600; margin-bottom: 2px; }
+.dict-row-side { white-space: nowrap; }
+
+/* ---------- 数据字典：编辑表 ---------- */
+.dict-table { width: 100%; font-size: 13px; }
+.dict-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: #666;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line, #eee);
+  white-space: nowrap;
+}
+.dict-table td { padding: 6px 4px; border-bottom: 1px dashed #f0f0f0; vertical-align: middle; }
+.dict-key {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #f5f5f5;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.dict-input, .dict-sort {
+  border: 1px solid var(--line, #d9d9d9);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 13px;
+  width: 100%;
+  min-width: 90px;
+  box-sizing: border-box;
+}
+.dict-sort { width: 56px; min-width: 56px; text-align: center; }
+.dict-new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #eee);
+}
+.dict-new .dict-input { flex: 1 1 140px; width: auto; }
+.btn-link.danger { color: #cf1322; }
+.btn-link[disabled] { color: #bbb; cursor: not-allowed; }
+.crumb { text-decoration: none; color: #666; font-weight: 400; }
+
+/* 开关 */
+.switch { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+
+/* ---------- 弹窗内表单 ---------- */
+.modal-content textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line, #d9d9d9);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+/* ---------- 手机端堆叠 ---------- */
+@media (max-width: 520px) {
+  .dict-table th:nth-child(3), .dict-table td:nth-child(3) { display: none; }
+  .act-text { font-size: 12px; }
+}
+/* ============================================================
+ * v2.1 新组件（表格 / 时间线 / 信息网格 / 操作组）
+ * ============================================================ */
+
+/* ---------- 通用数据表格（手机横向滚动） ---------- */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.data-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: #666;
+  background: #fafafa;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line, #e8e8e8);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.data-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #f2f2f2;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.data-table tbody tr:active { background: #f7f9fc; }
+.data-table td.nowrap, .data-table .nowrap { white-space: nowrap; }
+.nowrap { white-space: nowrap; }
+
+/* ---------- 操作按钮组 ---------- */
+.op-group { display: inline-flex; gap: 8px; align-items: center; }
+.op-group .btn-link { font-size: 13px; padding: 2px 0; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* ---------- 页签 ---------- */
+.tabs { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0 2px; }
+.tabs .tab-btn { flex: none; }
+
+/* ---------- 信息网格（详情页字段） ---------- */
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px 16px;
+  padding: 4px 0 6px;
+}
+.info-cell { min-width: 0; }
+.info-k { font-size: 11px; margin-bottom: 2px; }
+.info-v { font-size: 14px; line-height: 1.45; word-break: break-all; }
+
+/* ---------- 履历时间线 ---------- */
+.tl { position: relative; padding-left: 6px; }
+.tl-item { display: flex; gap: 10px; padding: 10px 0; position: relative; }
+.tl-item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 34px;
+  bottom: -4px;
+  width: 2px;
+  background: #eee;
+}
+.tl-dot {
+  flex: none;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  background: #f0f5ff;
+  border: 1px solid #d6e4ff;
+}
+.tl-change .tl-dot { background: #fff7e6; border-color: #ffe0a3; }
+.tl-stage .tl-dot { background: #f6ffed; border-color: #c8e6a0; }
+.tl-order .tl-dot { background: #f9f0ff; border-color: #e0c8ff; }
+.tl-body { flex: 1; min-width: 0; }
+.tl-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+.tl-type { font-size: 12px; font-weight: 600; }
+.tl-time { font-size: 11px; color: #999; font-variant-numeric: tabular-nums; }
+.tl-content { font-size: 14px; line-height: 1.55; word-break: break-word; }
+.tl-meta { margin-top: 2px; }
+.tl-files { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.file-chip {
+  font-size: 12px;
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  padding: 2px 8px;
+  color: #555;
+  text-decoration: none;
+}
+
+/* ---------- 跟进录入 ---------- */
+.fu-form-wrap { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line, #eee); }
+.fu-form { margin-top: 10px; }
+.fu-form textarea { width: 100%; box-sizing: border-box; }
+
+/* ---------- 宽弹窗（商机/客户编辑字段多） ---------- */
+.modal-content.wide { max-width: 720px; width: calc(100vw - 32px); }
+@media (max-width: 520px) {
+  .modal-content.wide { width: calc(100vw - 16px); }
+  .info-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+}
