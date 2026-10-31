@@ -50,6 +50,7 @@ router = APIRouter(
 #: 系统字段（唯一来源：校验、下拉、提示都从这里派生）
 FIELD_LABELS: dict[str, str] = {
     "name": "姓名",
+    "customer_type": "类型",
     "phone": "电话",
     "wechat": "微信",
     "location": "地区",
@@ -68,6 +69,11 @@ HEADER_ALIASES: dict[str, str] = {
     "客户姓名": "name",
     "客户": "name",
     "name": "name",
+    "类型": "customer_type",
+    "客户类型": "customer_type",
+    "线索类型": "customer_type",
+    "customer_type": "customer_type",
+    "lead_type": "customer_type",
     "电话": "phone",
     "手机": "phone",
     "手机号": "phone",
@@ -341,6 +347,30 @@ def _resolve_source(raw: str | None, records: list[dict] | None = None) -> str |
     return None
 
 
+def _customer_type_records() -> list[dict]:
+    from app import dicts as dict_svc
+
+    return dict_svc.items("customer_type")
+
+
+def _resolve_customer_type(raw: str | None, records: list[dict] | None = None) -> str:
+    """把模板里的类型名称/key 转成字典 key；空值按业务规则归为「其他」。"""
+    text = (raw or "").strip()
+    if not text:
+        return "other"
+    items = _customer_type_records() if records is None else records
+    for item in items:
+        key = str(item.get("key") or "")
+        label = str(item.get("label") or "")
+        if text == key or text == label:
+            return key
+    lowered = text.lower()
+    for item in items:
+        if lowered == str(item.get("key") or "").lower():
+            return str(item.get("key"))
+    return ""
+
+
 def _normalize_phone(raw: str | None) -> str:
     """联系方式去重口径：忽略空格、短横线和括号。"""
     return re.sub(r"[\s\-()]+", "", str(raw or "").strip())
@@ -428,18 +458,32 @@ def download_leads_template() -> Response:
     allowed = "、".join(source_labels) or "请先在数据字典添加客户来源"
     first_source = source_labels[0] if source_labels else ""
     third_source = source_labels[2] if len(source_labels) > 2 else first_source
+    type_records = _customer_type_records()
+    type_labels_by_key = {
+        str(item.get("key") or ""): str(item.get("label") or "")
+        for item in type_records
+    }
+    personal_label = type_labels_by_key.get("personal", "个人")
+    company_label = type_labels_by_key.get("company", "公司")
+    other_label = type_labels_by_key.get("other", "其他")
+    allowed_types = "、".join(
+        str(item.get("label") or "") for item in type_records
+    )
     rows = [
-        ["姓名", "电话", "微信", "地区", "来源", "备注"],
+        ["姓名", "类型", "电话", "微信", "地区", "来源", "备注"],
         [
             "张三",
+            personal_label,
             "13800000000",
             "zhangsan",
             "济南·历下区",
             first_source,
-            "示例行，填真数据前删掉。来源只能填写：" + allowed,
+            "示例行，填真数据前删掉。类型留空默认" + other_label
+            + "；可填写：" + allowed_types,
         ],
         [
             "某某装饰公司",
+            company_label,
             "0531-88888888",
             "abc888",
             "青岛·崂山区",
@@ -452,7 +496,10 @@ def download_leads_template() -> Response:
             "",
             "",
             "",
-            "填写说明：来源只能填写 " + allowed + "。本行姓名为空，导入时会自动跳过。",
+            "",
+            "填写说明：来源只能填写 " + allowed + "；类型只能填写 "
+            + allowed_types + "，留空默认为" + other_label
+            + "。本行姓名为空，导入时会自动跳过。",
         ],
     ]
     output = io.StringIO(newline="")
@@ -574,7 +621,9 @@ async def commit_import(request: Request) -> ImportCommitOut:
                 )
 
             source_records = _source_records()
+            type_records = _customer_type_records()
             allowed_sources = [str(item["label"]) for item in source_records]
+            allowed_types = [str(item["label"]) for item in type_records]
             validated_rows: list[tuple[int, dict, str]] = []
             issues: list[str] = []
 
@@ -589,6 +638,9 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     for field, index in field_index.items()
                 }
                 source_key = _resolve_source(values.get("source"), source_records)
+                lead_type = _resolve_customer_type(
+                    values.get("customer_type"), type_records
+                )
                 phone = values.get("phone")
                 wechat = values.get("wechat")
                 if not source_key:
@@ -597,7 +649,12 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     )
                 if not phone and not wechat:
                     issues.append(f"第 {row_number} 行电话和微信至少填写一个")
+                if not lead_type:
+                    issues.append(
+                        f"第 {row_number} 行类型「{values.get('customer_type')}」无效"
+                    )
                 if source_key and (phone or wechat):
+                    values["lead_type"] = lead_type
                     validated_rows.append((row_number, values, source_key))
 
             existing_phones = _active_phones(conn)
@@ -630,6 +687,8 @@ async def commit_import(request: Request) -> ImportCommitOut:
                         + (f"（另有 {len(issues) - 20} 个问题）" if len(issues) > 20 else "")
                         + "。来源只能填写数据字典中的值："
                         + "、".join(allowed_sources)
+                        + "；类型只能填写数据字典中的值："
+                        + "、".join(allowed_types)
                     ),
                 )
 
@@ -640,7 +699,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     """
                     INSERT INTO leads (name, phone, wechat, location, note, lead_type, source,
                                        intent_level, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, 'personal', ?, 'medium', 'new', ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'medium', 'new', ?, ?)
                     """,
                     (
                         values["name"],
@@ -648,6 +707,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
                         values.get("wechat"),
                         values.get("location"),
                         values.get("note"),
+                        values["lead_type"],
                         source_key,
                         now,
                         now,
@@ -665,7 +725,9 @@ async def commit_import(request: Request) -> ImportCommitOut:
                 imported += 1
         else:
             source_records = _source_records()
-            for row in parsed.rows:
+            type_records = _customer_type_records()
+            allowed_types = [str(item["label"]) for item in type_records]
+            for row_number, row in enumerate(parsed.rows, start=2):
                 name = row[field_index["name"]].strip()
                 if not name:
                     skipped += 1
@@ -679,10 +741,24 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     if "source" in field_index
                     else None
                 )
+                customer_type = _resolve_customer_type(
+                    values.get("customer_type"), type_records
+                )
+                if not customer_type:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"第 {row_number} 行类型"
+                            f"「{values.get('customer_type')}」无效；可选："
+                            + "、".join(allowed_types)
+                        ),
+                    )
                 conn.execute(
                     """
-                    INSERT INTO customers (name, phone, wechat, location, note, source, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO customers
+                        (name, phone, wechat, location, note, customer_type, source,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         values["name"],
@@ -690,6 +766,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
                         values.get("wechat"),
                         values.get("location"),
                         values.get("note"),
+                        customer_type,
                         source_key,
                         now,
                         now,

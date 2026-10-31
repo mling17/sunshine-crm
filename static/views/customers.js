@@ -72,7 +72,7 @@ function loadCustomers(root) {
                         : '');
             } },
             { title: '类型', nowrap: true, render: function (c) {
-                return c.customer_type === 'company' ? '公司' : '个人';
+                return dictLabel('customer_type', c.customer_type, c.customer_type || '—');
             } },
             { title: '地区', render: function (c) { return esc(c.location || '—'); } },
             { title: '微信号', nowrap: true, render: function (c) { return esc(c.wechat || '—'); } },
@@ -298,7 +298,7 @@ function viewCustomerDetail(root, rawId) {
             '</div>' +
             '<div class=\"tags\">' + (c.tags || []).map(function (t) { return '<span class=\"tag\">' + esc(t) + '</span>'; }).join('') + '</div>' +
             '<div class=\"item-sub\" style=\"margin-top:8px\">' +
-            '类型：' + (c.customer_type === 'company' ? '公司' : '个人') + '<br>' +
+            '类型：' + esc(dictLabel('customer_type', c.customer_type, c.customer_type || '—')) + '<br>' +
             '电话：' + esc(c.phone || '—') + '<br>' +
             '微信：' + esc(c.wechat || '—') + '<br>' +
             '地区：' + esc(c.location || '—') + '<br>' +

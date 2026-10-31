@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import unittest
 
@@ -134,6 +136,29 @@ class CsvImportTest(ApiTestCase):
         self.assertEqual(logs[0]["source_name"], "customers.csv")
         self.assertEqual(logs[0]["row_count"], 3)
         self.assertEqual(json.loads(logs[0]["column_mapping"]), MAPPING)
+
+    def test_customer_import_reads_type_and_defaults_blank_to_other(self):
+        csv_bytes = (
+            "姓名,类型,电话\n"
+            "个人客户,个人,13800138000\n"
+            "批量客户,,13900139000\n"
+        ).encode("utf-8")
+        preview = self.preview(csv_bytes).json()
+        mapping = {"姓名": "name", "类型": "customer_type", "电话": "phone"}
+        self.assertEqual(
+            preview["suggested_mapping"],
+            mapping,
+        )
+        resp = self.commit_json(file_ref=preview["file_ref"], column_mapping=mapping)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        customers = {
+            item["name"]: item
+            for item in self.client.get("/api/crm/customers?size=100").json()["items"]
+        }
+        self.assertEqual(customers["个人客户"]["customer_type"], "personal")
+        self.assertEqual(customers["个人客户"]["customer_type_label"], "个人")
+        self.assertEqual(customers["批量客户"]["customer_type"], "other")
+        self.assertEqual(customers["批量客户"]["customer_type_label"], "其他")
 
     def test_commit_multipart_with_file(self):
         resp = self.commit_multipart()
@@ -281,6 +306,7 @@ class LeadCsvImportTest(ApiTestCase):
         leads = self.client.get("/api/crm/leads?size=100").json()["items"]
         self.assertEqual(len(leads), 2)
         self.assertTrue(all(item["intent_level"] == "medium" for item in leads))
+        self.assertTrue(all(item["lead_type"] == "other" for item in leads))
         self.assertEqual({item["source"] for item in leads}, {"referral", "wechat"})
 
         for lead in leads:
@@ -288,6 +314,42 @@ class LeadCsvImportTest(ApiTestCase):
                 f"/api/crm/follow-ups?object_type=lead&object_id={lead['id']}&include_system=true"
             ).json()
             self.assertTrue(any(row["kind"] == "create" for row in history))
+
+    def test_import_leads_reads_dictionary_type_labels(self):
+        data = (
+            "姓名,类型,电话,微信,地区,来源\n"
+            "公司线索,公司,13800138000,companywx,济南,微信\n"
+            "个人线索,personal,13900139000,personalwx,青岛,电话\n"
+            "空类型,,13700137000,blankwx,烟台,转介绍\n"
+        ).encode("utf-8")
+        mapping = {
+            **self.LEAD_MAPPING,
+            "类型": "customer_type",
+        }
+        resp = self.commit_leads(data, mapping)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        by_name = {
+            item["name"]: item
+            for item in self.client.get("/api/crm/leads?size=100").json()["items"]
+        }
+        self.assertEqual(by_name["公司线索"]["lead_type"], "company")
+        self.assertEqual(by_name["个人线索"]["lead_type"], "personal")
+        self.assertEqual(by_name["空类型"]["lead_type"], "other")
+
+    def test_import_leads_rejects_unknown_type_without_partial_write(self):
+        data = (
+            "姓名,类型,电话,微信,地区,来源\n"
+            "合法线索,公司,13800138000,okwx,济南,微信\n"
+            "异常线索,未知类型,13900139000,badwx,青岛,微信\n"
+        ).encode("utf-8")
+        mapping = {
+            **self.LEAD_MAPPING,
+            "类型": "customer_type",
+        }
+        resp = self.commit_leads(data, mapping)
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertIn("类型", resp.json()["detail"])
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 0)
 
     def test_import_rejects_source_outside_dictionary_without_partial_write(self):
         data = (
@@ -354,6 +416,15 @@ class LeadCsvImportTest(ApiTestCase):
         self.assertIn("no-store", first.headers["cache-control"])
         first_text = first.content.decode("utf-8-sig")
         self.assertIn("微信", first_text)
+        template_rows = list(csv.reader(io.StringIO(first_text)))
+        self.assertEqual(
+            template_rows[0],
+            ['="姓名"', '="类型"', '="电话"', '="微信"',
+             '="地区"', '="来源"', '="备注"'],
+        )
+        self.assertTrue(
+            any("留空默认为其他" in cell for row in template_rows for cell in row)
+        )
 
         created = self.client.post(
             "/api/crm/dicts/customer_source/items",

@@ -16,8 +16,15 @@ class LeadsUiStructureTest(unittest.TestCase):
         self.css = (ROOT / "static/app.css").read_text(encoding="utf-8")
 
     def test_list_keeps_separate_tag_and_intent_columns(self):
+        self.assertIn("{ title: '类型'", self.js)
         self.assertIn("{ title: '标签'", self.js)
         self.assertIn("{ title: '意向'", self.js)
+
+    def test_lead_type_uses_dictionary_label(self):
+        self.assertIn(
+            "dictLabel('customer_type', l.lead_type, l.lead_type || '—')",
+            self.js,
+        )
 
     def test_detail_heading_groups_tags_and_right_aligned_badges(self):
         for marker in ("titleHtml:", "lead-detail-title-line", "detail-title-tags"):

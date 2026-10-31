@@ -52,7 +52,7 @@ DICT_DESC = {
     "deal_stage":       "状态机：报价 → 待客户确认 → 成交 / 流失，只能改名",
     "order_status":     "状态机：7 态，只能改名/排序",
     "aftersale_status": "状态机：待处理 → 处理中 → 已完成",
-    "customer_type":    "个人 / 公司，绑定「公司名是否必填」，只能改名",
+    "customer_type":    "个人 / 公司 / 其他，绑定「公司名是否必填」，只能改名",
     "follow_object":    "系统定义的跟进对象类型，只读",
 }
 
@@ -156,6 +156,7 @@ DICT_SEEDS = {
     "customer_type": [
         {"key": "company", "label": "公司", "sort": 1, "enabled": True, "used": 0},
         {"key": "personal", "label": "个人", "sort": 2, "enabled": True, "used": 0},
+        {"key": "other", "label": "其他", "sort": 3, "enabled": True, "used": 0},
     ],
     "follow_object": [
         {"key": "lead", "label": "线索", "sort": 1, "enabled": True, "used": 0},

@@ -6,10 +6,11 @@ CRM V2 枚举常量。
 from typing import Literal, Dict
 
 # ---------------- 客户类型 ----------------
-CUSTOMER_TYPE = Literal["personal", "company"]
+CUSTOMER_TYPE = Literal["personal", "company", "other"]
 CUSTOMER_TYPE_LABELS: Dict[str, str] = {
     "personal": "个人",
     "company": "公司",
+    "other": "其他",
 }
 
 # ---------------- 线索状态 ----------------

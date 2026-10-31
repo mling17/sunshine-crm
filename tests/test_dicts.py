@@ -66,6 +66,8 @@ class TestDicts(unittest.TestCase):
         self.assertIn("aftersale_status", DICT_SEEDS)
         self.assertIn("customer_type", DICT_SEEDS)
         self.assertIn("follow_object", DICT_SEEDS)
+        customer_types = {item["key"]: item["label"] for item in DICT_SEEDS["customer_type"]}
+        self.assertEqual(customer_types.get("other"), "其他")
         
         # 检查产品型号种子数据
         product_models = DICT_SEEDS["product_model"]

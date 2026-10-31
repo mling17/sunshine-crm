@@ -74,6 +74,10 @@ function leadSourceText(l) {
     return dictLabel('customer_source', l.source, SOURCE_LABELS[l.source] || l.source);
 }
 
+function leadTypeText(l) {
+    return dictLabel('customer_type', l.lead_type, l.lead_type || '—');
+}
+
 function leadIntentBadge(level) {
     if (!level) { return '—'; }
     var cls = level === 'high' ? 'danger' : (level === 'medium' ? 'warn' : 'muted');
@@ -131,6 +135,7 @@ function loadLeads(root) {
                         ? '<div class="small muted">' + esc(l.company_name) + '</div>' : '') +
                     ' ' + leadStatusBadge(l.status);
             } },
+            { title: '类型', render: function (l) { return esc(leadTypeText(l)); }, nowrap: true },
             { title: '来源', render: function (l) { return esc(leadSourceText(l)); }, nowrap: true },
             { title: '地区', render: function (l) { return esc(l.location || '—'); } },
             { title: '微信号', render: function (l) { return esc(l.wechat || '—'); }, nowrap: true },
@@ -410,7 +415,7 @@ function viewLeadDetail(root, rawId) {
                 '<div class="detail-title-tags">' + leadDetailTags(l.tags) + '</div></div></div>',
             badgesHtml: leadStatusBadge(l.status) + ' ' + leadIntentBadge(l.intent_level),
             infoHtml: infoGrid([
-                ['类型', l.lead_type === 'company' ? '公司' : '个人'],
+                ['类型', leadTypeText(l)],
                 ['来源', leadSourceText(l), true],
                 ['地区', l.location],
                 ['微信号', l.wechat],
