@@ -1288,3 +1288,99 @@ tbody tr:last-child td { border-bottom: none; }
     width: min(92vw, 420px);
   }
 }
+
+/* ============================================================
+ * 数据字典（#/dict）—— 移植自 static/demo/demo.css 的 dict 段
+ * 只在数据字典页用，避免影响其它页面的通用 class
+ * ============================================================ */
+
+/* 总览列表 */
+.dict-legend { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.dict-legend-item { font-size: 12px; line-height: 1.7; }
+.dict-list { display: flex; flex-direction: column; }
+.dict-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--line, #eee);
+  text-decoration: none;
+  color: inherit;
+}
+.dict-row:last-child { border-bottom: none; }
+.dict-row:active { background: #f7f9fc; }
+.dict-row-name { font-weight: 600; margin-bottom: 2px; }
+.dict-row-side { white-space: nowrap; }
+
+/* 总览行是 <button>：重置浏览器默认外观 */
+button.dict-row {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line, #eee);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.dict-row:last-child { border-bottom: none; }
+button.dict-row:active { background: #f7f9fc; }
+
+/* 编辑表 */
+.dict-table { width: 100%; font-size: 13px; }
+.dict-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: #666;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line, #eee);
+  white-space: nowrap;
+}
+.dict-table td { padding: 6px 4px; border-bottom: 1px dashed #f0f0f0; vertical-align: middle; }
+.dict-key {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #f5f5f5;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.dict-input, .dict-sort {
+  border: 1px solid var(--line, #d9d9d9);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 13px;
+  width: 100%;
+  min-width: 90px;
+  box-sizing: border-box;
+}
+.dict-sort { width: 56px; min-width: 56px; text-align: center; }
+.dict-new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #eee);
+}
+.dict-new .dict-input { flex: 1 1 140px; width: auto; }
+
+/* 删除按钮：危险色 + 禁用态（被引用 / C·D 级） */
+.btn-link.danger { color: #cf1322; }
+.btn-link[disabled] { color: #bbb; cursor: not-allowed; }
+
+/* 启用/停用开关 */
+.switch { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
+.switch input { margin: 0; }
+
+/* 字典编辑弹窗比普通弹窗宽（6 列表格） */
+.modal-content.wide { width: min(92vw, 820px); max-width: 820px; }
+.modal-content.wide .modal-body { gap: 12px; }
+
+/* 手机端：排序列太挤，隐藏（与服务端无关，只影响显示） */
+@media (max-width: 520px) {
+  .dict-table th:nth-child(3), .dict-table td:nth-child(3) { display: none; }
+}

@@ -334,11 +334,13 @@
       job = viewStats(root);
     } else if (view === 'import') {
       job = viewImport(root);
+    } else if (view === 'dict') {
+      job = viewDict(root, route);
     } else if (view === 'leads') {
       job = route.parts[1] ? viewLeadDetail(root, route.parts[1]) : viewLeads(root);
     } else {
       job = Promise.resolve();
-      root.innerHTML = '<div class="card">页面不存在，<a href="#/dashboard">回看板</a></div>';
+      root.innerHTML = '<div class="card">页面不存在，<a href="#/dashboard">回工作台</a></div>';
     }
 
     return Promise.resolve(job).catch(function (err) {
