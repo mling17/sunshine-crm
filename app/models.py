@@ -46,7 +46,7 @@ from app.enums import (
 # 商机阶段枚举
 STAGE_LABELS = DEAL_STAGE_LABELS
 STAGES = DEAL_STAGE_ORDER
-DEFAULT_STAGE = "confirm"  # V2 默认阶段改为 confirm
+DEFAULT_STAGE = "quote"  # PLANNER-V3 §1.1：新建商机默认「报价」（阶段顺序 报价→待客户确认→成交/流失）
 
 
 # ---------------- 字段清洗 ----------------

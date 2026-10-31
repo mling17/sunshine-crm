@@ -13,14 +13,14 @@ from app.models import STAGE_LABELS, STAGES
 
 class DealsTest(ApiTestCase):
     # ---------- 新建 ----------
-    def test_create_defaults_to_confirm(self):
-        """测试新商机默认阶段是 confirm（V2 新要求）。"""
+    def test_create_defaults_to_quote(self):
+        """新商机默认阶段 = quote 报价（PLANNER-V3 §1.1 定稿：报价→待客户确认→成交/流失）。"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=8800.0)
 
         self.assertEqual(deal["customer_id"], c["id"])
-        self.assertEqual(deal["stage"], "confirm")
-        self.assertEqual(deal["stage_label"], "需求确认")
+        self.assertEqual(deal["stage"], "quote")
+        self.assertEqual(deal["stage_label"], "报价")
         self.assertIsNone(deal["closed_at"])
         self.assertEqual(deal["amount"], 8800.0)
         self.assertEqual(deal["deposit"], 0.0)
@@ -111,7 +111,7 @@ class DealsTest(ApiTestCase):
 
         # 非法值不能把库里的阶段改坏
         detail = self.client.get("/api/crm/deals", params={"customer_id": c["id"]}).json()
-        self.assertEqual(detail[0]["stage"], "confirm")
+        self.assertEqual(detail[0]["stage"], "quote")
 
     # ---------- 改字段 ----------
     def test_partial_update_keeps_other_fields(self):
@@ -123,7 +123,7 @@ class DealsTest(ApiTestCase):
         body = resp.json()
         self.assertEqual(body["amount"], 2500.0)
         self.assertEqual(body["product_type"], "天窗", "没传的字段不许被清空")
-        self.assertEqual(body["stage"], "confirm")
+        self.assertEqual(body["stage"], "quote")
 
         # 文本字段可以显式清空
         cleared = self.client.put(

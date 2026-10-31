@@ -1,24 +1,20 @@
 """
-CRM V2 数据字典 API 路由。
+CRM V2 数据字典 API（PLANNER-V3 §5.10）。
+
+分级权限在服务层强制（不是前端隐藏按钮）：
+    A 可增删改 | B 仅改名+排序 | C 仅改名 | D 只读
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import re
 from typing import Any, Dict, List, Optional
 
-from app.db import db_conn
-from app.dicts import (
-    DICT_REGISTRY,
-    DICT_SEEDS,
-    items,
-    label_map,
-    level,
-    validate,
-    used_count,
-)
-from app.routers.auth import require_auth
-from app.errors import ApiError
+from fastapi import APIRouter, Depends, Query
 
+from app import dicts as dict_svc
+from app.dicts import DICT_REGISTRY
+from app.errors import ApiError
+from app.routers.auth import require_auth
 
 router = APIRouter(
     prefix="/api/crm/dicts",
@@ -26,211 +22,148 @@ router = APIRouter(
     dependencies=[Depends(require_auth)],
 )
 
-
-@router.get("", response_model=List[Dict[str, Any]])
-def list_dicts() -> List[Dict[str, Any]]:
-    """获取所有字典列表"""
-    result = []
-    for code, info in DICT_REGISTRY.items():
-        result.append({
-            "code": code,
-            "name": info["name"],
-            "level": info["level"],
-            "desc": "",
-            "items": items(code)
-        })
-    return result
+#: key 允许中文（product_type 的 key 就是「天窗」这类业务名），但禁止引号/空格/路径字符
+KEY_PATTERN = re.compile(r"^[\w\u4e00-\u9fa5\-]{1,32}$")
 
 
-@router.get("/{code}", response_model=Dict[str, Any])
-def get_dict(code: str) -> Dict[str, Any]:
-    """获取单个字典详情"""
+def _dict_or_404(code: str) -> Dict[str, Any]:
     if code not in DICT_REGISTRY:
-        raise HTTPException(status_code=404, detail="字典不存在")
-    
+        raise ApiError(status_code=404, code="dict_not_found", message=f"字典 {code} 不存在")
+    return DICT_REGISTRY[code]
+
+
+def _pack(code: str) -> Dict[str, Any]:
     info = DICT_REGISTRY[code]
     return {
         "code": code,
         "name": info["name"],
         "level": info["level"],
-        "desc": "",
-        "items": items(code)
+        "desc": dict_svc.desc(code),
+        "items": dict_svc.items(code),
     }
 
 
+# ---------------- 读 ----------------
+
+
+@router.get("", response_model=List[Dict[str, Any]])
+@router.get("/", response_model=List[Dict[str, Any]], include_in_schema=False)
+def list_dicts() -> List[Dict[str, Any]]:
+    """12 张字典总览（含每项 used）。"""
+    return [_pack(code) for code in DICT_REGISTRY]
+
+
 @router.get("/product_model", response_model=List[Dict[str, Any]])
-def get_product_models(
-    q: Optional[str] = Query(default=None),
-    product: Optional[str] = Query(default=None)
+def search_product_models(
+    q: Optional[str] = Query(default=None, description="型号/尺寸关键字，如 XW、1200"),
+    product: Optional[str] = Query(default=None, description="产品类型，如 天窗"),
 ) -> List[Dict[str, Any]]:
-    """获取产品型号字典项（支持筛选）"""
-    all_items = items("product_model")
-    
-    # 筛选逻辑
-    if q:
-        all_items = [item for item in all_items if q.lower() in item["label"].lower()]
-    
-    if product:
-        all_items = [item for item in all_items if item.get("meta", {}).get("product") == product]
-    
-    return all_items
+    """型号可搜索下拉 —— 必须声明在 /{code} 之前，否则会被当字典 code 吞掉。"""
+    return dict_svc.search_product_models(q, product)
+
+
+@router.get("/{code}", response_model=Dict[str, Any])
+def get_dict(code: str) -> Dict[str, Any]:
+    _dict_or_404(code)
+    return _pack(code)
+
+
+# ---------------- 写（分级）----------------
 
 
 @router.post("/{code}/items", response_model=Dict[str, Any])
-def create_dict_item(
-    code: str,
-    payload: Dict[str, Any]
-) -> Dict[str, Any]:
-    """创建字典项（仅 A 类）"""
-    # 检查字典是否存在
-    if code not in DICT_REGISTRY:
-        raise HTTPException(status_code=404, detail="字典不存在")
-    
-    # 检查字典级别
-    dict_level = level(code)
-    if dict_level != "A":
-        raise HTTPException(status_code=403, detail="该字典不支持新增项")
-    
-    # 验证 key 格式
-    key = payload.get("key", "").strip()
-    if not key:
-        raise HTTPException(status_code=400, detail="key 不能为空")
-    
-    if not key.replace("-", "").replace("_", "").isalnum() or len(key) > 32:
-        raise HTTPException(status_code=400, detail="key 格式不正确，必须是 1-32 字符的字母数字、下划线或连字符")
-    
-    # 检查是否已存在
-    if validate(code, key):
-        raise ApiError(status_code=409, code="dict_key_exists", message="字典项已存在")
-    
-    # 获取 label 和 sort
-    label = payload.get("label", "").strip()
-    sort = payload.get("sort", 0)
-    
-    # 插入数据库
-    try:
-        with db_conn() as conn:
-            conn.execute(
-                "INSERT INTO dict_items (dict_code, key, label, sort, enabled, used) VALUES (?, ?, ?, ?, ?, ?)",
-                (code, key, label, sort, 1, 0)
-            )
-            # 清除缓存
-            label_map.cache_clear()
-            
-            return {
-                "key": key,
-                "label": label,
-                "sort": sort,
-                "enabled": True,
-                "used": 0
-            }
-    except Exception as e:
-        raise ApiError(status_code=400, code="dict_create_failed", message="创建字典项失败")
+def create_item(code: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    info = _dict_or_404(code)
+    if info["level"] != "A":
+        raise ApiError(
+            status_code=403,
+            code="dict_level_forbidden",
+            message=f"「{info['name']}」是 {info['level']} 类字典，只能改名/排序，不能新增",
+        )
+
+    key = str(payload.get("key") or "").strip()
+    label = str(payload.get("label") or "").strip()
+    if not key or not KEY_PATTERN.match(key):
+        raise ApiError(
+            status_code=400,
+            code="dict_key_invalid",
+            message="key 只能用 1–32 位汉字、字母、数字、下划线或连字符",
+        )
+    if not label:
+        raise ApiError(status_code=400, code="dict_label_required", message="显示名不能为空")
+    if dict_svc.exists(code, key):
+        raise ApiError(status_code=409, code="dict_key_exists", message=f"「{key}」已存在")
+
+    meta = payload.get("meta")
+    if meta is not None and not isinstance(meta, dict):
+        raise ApiError(status_code=400, code="dict_meta_invalid", message="meta 必须是对象")
+
+    return dict_svc.create_item(
+        code,
+        key=key,
+        label=label,
+        sort=int(payload.get("sort") or 0),
+        enabled=bool(payload.get("enabled", True)),
+        meta=meta,
+    )
 
 
 @router.put("/{code}/items/{key}", response_model=Dict[str, Any])
-def update_dict_item(
-    code: str,
-    key: str,
-    payload: Dict[str, Any]
-) -> Dict[str, Any]:
-    """更新字典项（仅 A/B/C 类）"""
-    # 检查字典是否存在
-    if code not in DICT_REGISTRY:
-        raise HTTPException(status_code=404, detail="字典不存在")
-    
-    # 检查字典级别
-    dict_level = level(code)
-    if dict_level not in ["A", "B", "C"]:
-        raise HTTPException(status_code=403, detail="该字典不支持修改项")
-    
-    # 检查 key 是否改变（不能修改 key）
-    if "key" in payload and payload["key"] != key:
-        raise HTTPException(status_code=400, detail="key 不能修改")
-    
-    # 检查项是否存在
-    if not validate(code, key):
-        raise HTTPException(status_code=404, detail="字典项不存在")
-    
-    # 构造更新语句
-    updates = {}
+def update_item(code: str, key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    info = _dict_or_404(code)
+    if info["level"] == "D":
+        raise ApiError(
+            status_code=403,
+            code="dict_level_forbidden",
+            message=f"「{info['name']}」是系统只读字典，不能修改",
+        )
+    if "key" in payload and str(payload["key"]) != key:
+        raise ApiError(
+            status_code=400,
+            code="dict_key_immutable",
+            message="key 是历史数据依据，保存后不能修改（改显示名即可）",
+        )
+    if not dict_svc.exists(code, key):
+        raise ApiError(status_code=404, code="dict_item_not_found", message=f"字典项 {key} 不存在")
+
+    fields: Dict[str, Any] = {}
     if "label" in payload:
-        updates["label"] = payload["label"]
+        label = str(payload.get("label") or "").strip()
+        if not label:
+            raise ApiError(status_code=400, code="dict_label_required", message="显示名不能为空")
+        fields["label"] = label
     if "sort" in payload:
-        updates["sort"] = payload["sort"]
+        fields["sort"] = int(payload.get("sort") or 0)
     if "enabled" in payload:
-        updates["enabled"] = 1 if payload["enabled"] else 0
-    
-    if not updates:
-        raise HTTPException(status_code=400, detail="至少需要更新一个字段")
-    
-    # 执行更新
-    try:
-        with db_conn() as conn:
-            set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
-            values = list(updates.values()) + [code, key]
-            
-            conn.execute(
-                f"UPDATE dict_items SET {set_clause} WHERE dict_code = ? AND key = ?",
-                values
-            )
-            # 清除缓存
-            label_map.cache_clear()
-            
-            # 返回更新后的项
-            item = items(code, include_disabled=True)[0] if items(code, include_disabled=True) else None
-            if item:
-                return item
-            else:
-                return {
-                    "key": key,
-                    "label": updates.get("label", ""),
-                    "sort": updates.get("sort", 0),
-                    "enabled": bool(updates.get("enabled", 1)),
-                    "used": 0
-                }
-    except Exception as e:
-        raise ApiError(status_code=400, code="dict_update_failed", message="更新字典项失败")
+        fields["enabled"] = bool(payload["enabled"])
+    if "meta" in payload:
+        if payload["meta"] is not None and not isinstance(payload["meta"], dict):
+            raise ApiError(status_code=400, code="dict_meta_invalid", message="meta 必须是对象")
+        fields["meta"] = payload["meta"]
+    if not fields:
+        raise ApiError(status_code=400, code="dict_nothing_to_update", message="没有要更新的字段")
+
+    return dict_svc.update_item(code, key, **fields)
 
 
 @router.delete("/{code}/items/{key}", response_model=Dict[str, Any])
-def delete_dict_item(
-    code: str,
-    key: str
-) -> Dict[str, Any]:
-    """删除字典项（仅 A 类且 used=0）"""
-    # 检查字典是否存在
-    if code not in DICT_REGISTRY:
-        raise HTTPException(status_code=404, detail="字典不存在")
-    
-    # 检查字典级别
-    dict_level = level(code)
-    if dict_level != "A":
-        raise HTTPException(status_code=403, detail="该字典不支持删除项")
-    
-    # 检查项是否存在
-    if not validate(code, key):
-        raise HTTPException(status_code=404, detail="字典项不存在")
-    
-    # 检查是否被使用
-    used = used_count(code, key)
+def delete_item(code: str, key: str) -> Dict[str, Any]:
+    info = _dict_or_404(code)
+    if info["level"] != "A":
+        raise ApiError(
+            status_code=403,
+            code="dict_level_forbidden",
+            message=f"「{info['name']}」是 {info['level']} 类字典，只能停用，不能删除",
+        )
+    if not dict_svc.exists(code, key):
+        raise ApiError(status_code=404, code="dict_item_not_found", message=f"字典项 {key} 不存在")
+
+    used = dict_svc.used_count(code, key)
     if used > 0:
         raise ApiError(
             status_code=409,
             code="dict_item_in_use",
-            message=f"有 {used} 条数据在用，只能停用"
+            message=f"有 {used} 条数据在用，只能停用",
         )
-    
-    # 执行删除
-    try:
-        with db_conn() as conn:
-            conn.execute(
-                "DELETE FROM dict_items WHERE dict_code = ? AND key = ?",
-                (code, key)
-            )
-            # 清除缓存
-            label_map.cache_clear()
-            
-            return {"key": key, "deleted": True}
-    except Exception as e:
-        raise ApiError(status_code=400, code="dict_delete_failed", message="删除字典项失败")
+    dict_svc.delete_item(code, key)
+    return {"key": key, "deleted": True}

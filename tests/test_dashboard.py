@@ -53,7 +53,7 @@ class DashboardTest(ApiTestCase):
         self.assertEqual(item["customer_id"], c["id"])
         self.assertEqual(item["customer_name"], "张伟")
         self.assertEqual(item["deal_id"], deal["id"])
-        self.assertEqual(item["deal_stage"], "confirm")
+        self.assertEqual(item["deal_stage"], "quote")
         self.assertEqual(item["content"], "今天要报价")
         self.assertEqual(item["next_date"], day(0))
         self.assertEqual(item["days_overdue"], 0)
@@ -140,9 +140,10 @@ class DashboardTest(ApiTestCase):
         stats = self.dashboard()["stats"]
         self.assertEqual(stats["customers_total"], 2)
         self.assertEqual(set(stats["deals_by_stage"]), set(STAGES), "阶段键要全，缺的补 0")
-        self.assertEqual(stats["deals_by_stage"]["quote"], 1)
+        # 定稿：新建商机默认 quote，所以「老客甲两单」+「显式 quote 单」= 3 单里 2 单 quote
+        self.assertEqual(stats["deals_by_stage"]["quote"], 2)
         self.assertEqual(stats["deals_by_stage"]["won"], 1)
-        self.assertEqual(stats["deals_by_stage"]["confirm"], 1)
+        self.assertEqual(stats["deals_by_stage"]["confirm"], 0)
         self.assertEqual(stats["deals_by_stage"]["lost"], 0)
         self.assertEqual(stats["month_new_customers"], 2)
         self.assertEqual(stats["repeat_customers"], 1, "老客甲名下 2 单")

@@ -3,6 +3,7 @@ CRM V2 数据字典注册表与 API 实现。
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Union
@@ -38,40 +39,58 @@ DICT_REGISTRY = {
 }
 
 
+# ---------------- 字典描述（给前端总览页用）----------------
+
+DICT_DESC = {
+    "product_model":    "商机/订单的型号下拉，选中自动带出尺寸",
+    "customer_source":  "客户建档 / 线索来源",
+    "intent_level":     "客户 / 线索的购买意向",
+    "product_type":     "商机 / 订单的产品分类",
+    "lost_reason":      "商机判流失时必选",
+    "aftersale_type":   "售后单类型",
+    "follow_method":    "记跟进时的方式（微信 / 电话）",
+    "deal_stage":       "状态机：报价 → 待客户确认 → 成交 / 流失，只能改名",
+    "order_status":     "状态机：7 态，只能改名/排序",
+    "aftersale_status": "状态机：待处理 → 处理中 → 已完成",
+    "customer_type":    "个人 / 公司，绑定「公司名是否必填」，只能改名",
+    "follow_object":    "系统定义的跟进对象类型，只读",
+}
+
+
 # ---------------- 字典种子数据（用于降级）----------------
 
 DICT_SEEDS = {
     "product_model": [
-        {"key": "XW-60", "label": "XW-60 天窗 600×1200", "sort": 1, "enabled": True, "used": 0},
-        {"key": "XW-90", "label": "XW-90 天窗 900×1800", "sort": 2, "enabled": True, "used": 3},
-        {"key": "XW-120", "label": "XW-120 天窗 1200×2400", "sort": 3, "enabled": True, "used": 5},
-        {"key": "XW-150", "label": "XW-150 天窗 1500×2800", "sort": 4, "enabled": True, "used": 1},
-        {"key": "XW-180", "label": "XW-180 天窗 1800×3000", "sort": 5, "enabled": True, "used": 0},
-        {"key": "XW-120E", "label": "XW-120E 天窗 电动款 1200×2400", "sort": 6, "enabled": True, "used": 2},
-        {"key": "XW-150E", "label": "XW-150E 天窗 电动款 1500×2800", "sort": 7, "enabled": True, "used": 1},
-        {"key": "XW-200E", "label": "XW-200E 天窗 电动款 2000×3200", "sort": 8, "enabled": True, "used": 0},
-        {"key": "TM-120", "label": "TM-120 天幕 1200×2000", "sort": 9, "enabled": True, "used": 0},
-        {"key": "TM-180", "label": "TM-180 天幕 1800×2600", "sort": 10, "enabled": True, "used": 1},
-        {"key": "TM-240", "label": "TM-240 天幕 2400×3000", "sort": 11, "enabled": True, "used": 2},
-        {"key": "TM-300", "label": "TM-300 天幕 3000×3500", "sort": 12, "enabled": True, "used": 1},
-        {"key": "TM-360", "label": "TM-360 天幕 3600×4200", "sort": 13, "enabled": True, "used": 0},
-        {"key": "TM-240E", "label": "TM-240E 天幕 电动款 2400×3000", "sort": 14, "enabled": True, "used": 1},
-        {"key": "TM-300E", "label": "TM-300E 天幕 电动款 3000×3500", "sort": 15, "enabled": True, "used": 0},
-        {"key": "YG-20", "label": "YG-20 阳光房 2000×3000", "sort": 16, "enabled": True, "used": 0},
-        {"key": "YG-30", "label": "YG-30 阳光房 3000×4000", "sort": 17, "enabled": True, "used": 2},
-        {"key": "YG-40", "label": "YG-40 阳光房 4000×5000", "sort": 18, "enabled": True, "used": 0},
-        {"key": "YG-50", "label": "YG-50 阳光房 5000×6000", "sort": 19, "enabled": True, "used": 0},
-        {"key": "ZY-10", "label": "ZY-10 遮阳帘 1000×1500", "sort": 20, "enabled": True, "used": 0},
-        {"key": "ZY-15", "label": "ZY-15 遮阳帘 1500×2000", "sort": 21, "enabled": True, "used": 1},
-        {"key": "ZY-20", "label": "ZY-20 遮阳帘 2000×2500", "sort": 22, "enabled": True, "used": 0},
-        {"key": "ZY-25E", "label": "ZY-25E 遮阳帘 电动款 2500×3000", "sort": 23, "enabled": True, "used": 0},
-        {"key": "FT-100", "label": "FT-100 上翻窗 1000×1000", "sort": 24, "enabled": True, "used": 0},
-        {"key": "FT-140", "label": "FT-140 上翻窗 1400×1400", "sort": 25, "enabled": True, "used": 0},
-        {"key": "PY-120", "label": "PY-120 平移窗 1200×1200", "sort": 26, "enabled": True, "used": 0},
-        {"key": "PY-160", "label": "PY-160 平移窗 1600×1200", "sort": 27, "enabled": True, "used": 0},
-        {"key": "PY-200E", "label": "PY-200E 平移窗 电动款 2000×1500", "sort": 28, "enabled": True, "used": 0},
-        {"key": "YG-30E", "label": "YG-30E 阳光房 电动开合 3000×4000", "sort": 29, "enabled": True, "used": 0},
-        {"key": "TM-420", "label": "TM-420 天幕 4200×5000", "sort": 30, "enabled": True, "used": 0},
+        {"key": "XW-60", "label": "XW-60 天窗 600×1200", "sort": 1, "enabled": True, "used": 0, "meta": {"product": "天窗", "size": "600×1200", "drive": "manual"}},
+        {"key": "XW-90", "label": "XW-90 天窗 900×1800", "sort": 2, "enabled": True, "used": 3, "meta": {"product": "天窗", "size": "900×1800", "drive": "manual"}},
+        {"key": "XW-120", "label": "XW-120 天窗 1200×2400", "sort": 3, "enabled": True, "used": 5, "meta": {"product": "天窗", "size": "1200×2400", "drive": "manual"}},
+        {"key": "XW-150", "label": "XW-150 天窗 1500×2800", "sort": 4, "enabled": True, "used": 1, "meta": {"product": "天窗", "size": "1500×2800", "drive": "manual"}},
+        {"key": "XW-180", "label": "XW-180 天窗 1800×3000", "sort": 5, "enabled": True, "used": 0, "meta": {"product": "天窗", "size": "1800×3000", "drive": "manual"}},
+        {"key": "XW-120E", "label": "XW-120E 天窗 电动款 1200×2400", "sort": 6, "enabled": True, "used": 2, "meta": {"product": "天窗", "size": "1200×2400", "drive": "electric"}},
+        {"key": "XW-150E", "label": "XW-150E 天窗 电动款 1500×2800", "sort": 7, "enabled": True, "used": 1, "meta": {"product": "天窗", "size": "1500×2800", "drive": "electric"}},
+        {"key": "XW-200E", "label": "XW-200E 天窗 电动款 2000×3200", "sort": 8, "enabled": True, "used": 0, "meta": {"product": "天窗", "size": "2000×3200", "drive": "electric"}},
+        {"key": "TM-120", "label": "TM-120 天幕 1200×2000", "sort": 9, "enabled": True, "used": 0, "meta": {"product": "天幕", "size": "1200×2000", "drive": "manual"}},
+        {"key": "TM-180", "label": "TM-180 天幕 1800×2600", "sort": 10, "enabled": True, "used": 1, "meta": {"product": "天幕", "size": "1800×2600", "drive": "manual"}},
+        {"key": "TM-240", "label": "TM-240 天幕 2400×3000", "sort": 11, "enabled": True, "used": 2, "meta": {"product": "天幕", "size": "2400×3000", "drive": "manual"}},
+        {"key": "TM-300", "label": "TM-300 天幕 3000×3500", "sort": 12, "enabled": True, "used": 1, "meta": {"product": "天幕", "size": "3000×3500", "drive": "manual"}},
+        {"key": "TM-360", "label": "TM-360 天幕 3600×4200", "sort": 13, "enabled": True, "used": 0, "meta": {"product": "天幕", "size": "3600×4200", "drive": "manual"}},
+        {"key": "TM-240E", "label": "TM-240E 天幕 电动款 2400×3000", "sort": 14, "enabled": True, "used": 1, "meta": {"product": "天幕", "size": "2400×3000", "drive": "electric"}},
+        {"key": "TM-300E", "label": "TM-300E 天幕 电动款 3000×3500", "sort": 15, "enabled": True, "used": 0, "meta": {"product": "天幕", "size": "3000×3500", "drive": "electric"}},
+        {"key": "YG-20", "label": "YG-20 阳光房 2000×3000", "sort": 16, "enabled": True, "used": 0, "meta": {"product": "阳光房", "size": "2000×3000", "drive": "manual"}},
+        {"key": "YG-30", "label": "YG-30 阳光房 3000×4000", "sort": 17, "enabled": True, "used": 2, "meta": {"product": "阳光房", "size": "3000×4000", "drive": "manual"}},
+        {"key": "YG-40", "label": "YG-40 阳光房 4000×5000", "sort": 18, "enabled": True, "used": 0, "meta": {"product": "阳光房", "size": "4000×5000", "drive": "manual"}},
+        {"key": "YG-50", "label": "YG-50 阳光房 5000×6000", "sort": 19, "enabled": True, "used": 0, "meta": {"product": "阳光房", "size": "5000×6000", "drive": "manual"}},
+        {"key": "ZY-10", "label": "ZY-10 遮阳帘 1000×1500", "sort": 20, "enabled": True, "used": 0, "meta": {"product": "遮阳帘", "size": "1000×1500", "drive": "manual"}},
+        {"key": "ZY-15", "label": "ZY-15 遮阳帘 1500×2000", "sort": 21, "enabled": True, "used": 1, "meta": {"product": "遮阳帘", "size": "1500×2000", "drive": "manual"}},
+        {"key": "ZY-20", "label": "ZY-20 遮阳帘 2000×2500", "sort": 22, "enabled": True, "used": 0, "meta": {"product": "遮阳帘", "size": "2000×2500", "drive": "manual"}},
+        {"key": "ZY-25E", "label": "ZY-25E 遮阳帘 电动款 2500×3000", "sort": 23, "enabled": True, "used": 0, "meta": {"product": "遮阳帘", "size": "2500×3000", "drive": "electric"}},
+        {"key": "FT-100", "label": "FT-100 上翻窗 1000×1000", "sort": 24, "enabled": True, "used": 0, "meta": {"product": "天窗", "size": "1000×1000", "drive": "manual"}},
+        {"key": "FT-140", "label": "FT-140 上翻窗 1400×1400", "sort": 25, "enabled": True, "used": 0, "meta": {"product": "天窗", "size": "1400×1400", "drive": "manual"}},
+        {"key": "PY-120", "label": "PY-120 平移窗 1200×1200", "sort": 26, "enabled": True, "used": 0, "meta": {"product": "天窗", "size": "1200×1200", "drive": "manual"}},
+        {"key": "PY-160", "label": "PY-160 平移窗 1600×1200", "sort": 27, "enabled": True, "used": 0, "meta": {"product": "天窗", "size": "1600×1200", "drive": "manual"}},
+        {"key": "PY-200E", "label": "PY-200E 平移窗 电动款 2000×1500", "sort": 28, "enabled": True, "used": 0, "meta": {"product": "天窗", "size": "2000×1500", "drive": "electric"}},
+        {"key": "YG-30E", "label": "YG-30E 阳光房 电动开合 3000×4000", "sort": 29, "enabled": True, "used": 0, "meta": {"product": "阳光房", "size": "3000×4000", "drive": "electric"}},
+        {"key": "TM-420", "label": "TM-420 天幕 4200×5000", "sort": 30, "enabled": True, "used": 0, "meta": {"product": "天幕", "size": "4200×5000", "drive": "manual"}},
     ],
     "customer_source": [
         {"key": "wechat", "label": "微信", "sort": 1, "enabled": True, "used": 0},
@@ -144,164 +163,232 @@ DICT_SEEDS = {
     ],
 }
 
+# ---------------- 查询（DB 优先；表缺失时降级到种子）----------------
 
-# ---------------- 字典查询函数 ----------------
 
-@lru_cache(maxsize=128)
+class _NoDictTable(Exception):
+    """dict_items 表还不存在（迁移跑到一半）—— 用种子兜底。"""
+
+
+def _loads(raw: Any) -> Optional[Dict[str, Any]]:
+    if not raw:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    try:
+        loaded = json.loads(raw)
+        return loaded if isinstance(loaded, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _table_ready(conn: sqlite3.Connection) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='dict_items'"
+        ).fetchone()
+        is not None
+    )
+
+
+@lru_cache(maxsize=256)
 def label_map(code: str) -> Dict[str, str]:
-    """
-    获取字典的 key->label 映射。
-    使用 lru_cache 缓存，写操作后 cache_clear()。
-    """
-    items_dict = items(code, include_disabled=True)
-    return {item["key"]: item["label"] for item in items_dict}
+    """key -> 显示名（含停用项；历史数据仍要显示中文）。写操作后必须 cache_clear()。"""
+    return {item["key"]: item["label"] for item in items(code, include_disabled=True)}
+
+
+def _usage_by_key(conn: sqlite3.Connection, code: str) -> Dict[str, int]:
+    """单次分组查询算「被引用次数」，不逐项 COUNT。"""
+    entry = DICT_REGISTRY.get(code) or {}
+    usage: Dict[str, int] = {}
+    for pair in str(entry.get("table") or "").split(","):
+        pair = pair.strip()
+        if "." not in pair:
+            continue
+        table, column = pair.split(".", 1)
+        try:
+            rows = conn.execute(
+                f"SELECT {column} AS k, COUNT(*) AS n FROM {table} GROUP BY {column}"
+            ).fetchall()
+        except sqlite3.Error:
+            continue
+        for row in rows:
+            key = row["k"]
+            if key is None or str(key) == "":
+                continue
+            usage[str(key)] = usage.get(str(key), 0) + int(row["n"])
+    return usage
 
 
 def items(code: str, include_disabled: bool = False) -> List[Dict[str, Any]]:
+    """字典项列表 `[{key,label,sort,enabled,used,meta}]`（按 sort 升序）。
+
+    - 表存在：读 `dict_items`，`used` 实时统计业务表；
+    - 表不存在：降级到 `DICT_SEEDS`，`used=0`（不抛错，服务照常启动）。
     """
-    获取字典项列表。
-    
-    Args:
-        code: 字典代码
-        include_disabled: 是否包含禁用项
-        
-    Returns:
-        字典项列表，每个项包含 key/label/sort/enabled/used
-    """
+    if code not in DICT_REGISTRY:
+        return []
     try:
         with db_conn() as conn:
-            # 尝试从数据库获取
-            if include_disabled:
-                rows = conn.execute(
-                    "SELECT key, label, sort, enabled, used FROM dict_items WHERE dict_code = ?",
-                    (code,)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT key, label, sort, enabled, used FROM dict_items WHERE dict_code = ? AND enabled = 1",
-                    (code,)
-                ).fetchall()
-            
-            # 如果数据库中没有数据，降级到种子数据
-            if not rows:
-                raise sqlite3.OperationalError("no such table")
-                
+            if not _table_ready(conn):
+                raise _NoDictTable()
+            sql = "SELECT key, label, sort, enabled, meta FROM dict_items WHERE dict_code = ?"
+            params: List[Any] = [code]
+            if not include_disabled:
+                sql += " AND enabled = 1"
+            sql += " ORDER BY sort, id"
+            rows = conn.execute(sql, params).fetchall()
+            usage = _usage_by_key(conn, code)
             return [
                 {
                     "key": row["key"],
                     "label": row["label"],
-                    "sort": row["sort"],
+                    "sort": int(row["sort"] or 0),
                     "enabled": bool(row["enabled"]),
-                    "used": row["used"]
+                    "used": usage.get(str(row["key"]), 0),
+                    "meta": _loads(row["meta"]),
                 }
                 for row in rows
             ]
-    except (sqlite3.OperationalError, sqlite3.Error):
-        # 数据库访问失败或表不存在，使用种子数据
-        seed_data = DICT_SEEDS.get(code, [])
-        if include_disabled:
-            return seed_data
-        else:
-            return [item for item in seed_data if item["enabled"]]
+    except _NoDictTable:
+        return [
+            {
+                "key": seed["key"],
+                "label": seed["label"],
+                "sort": int(seed.get("sort") or 0),
+                "enabled": bool(seed.get("enabled", True)),
+                "used": 0,
+                "meta": _loads(seed.get("meta")),
+            }
+            for seed in DICT_SEEDS.get(code, [])
+            if include_disabled or seed.get("enabled", True)
+        ]
+
+
+def exists(code: str, key: str) -> bool:
+    """字典项是否存在（含停用项）——改/删用这个。"""
+    try:
+        with db_conn() as conn:
+            if not _table_ready(conn):
+                raise _NoDictTable()
+            return (
+                conn.execute(
+                    "SELECT 1 FROM dict_items WHERE dict_code = ? AND key = ?", (code, key)
+                ).fetchone()
+                is not None
+            )
+    except _NoDictTable:
+        return any(seed["key"] == key for seed in DICT_SEEDS.get(code, []))
 
 
 def validate(code: str, key: str) -> bool:
-    """
-    验证字典项是否存在且启用。
-    
-    Args:
-        code: 字典代码
-        key: 字典项 key
-        
-    Returns:
-        是否有效
-    """
+    """新建/编辑业务数据时用：必须存在且启用。"""
     try:
         with db_conn() as conn:
-            result = conn.execute(
-                "SELECT 1 FROM dict_items WHERE dict_code = ? AND key = ? AND enabled = 1",
-                (code, key)
-            ).fetchone()
-            return result is not None
-    except (sqlite3.OperationalError, sqlite3.Error):
-        # 数据库访问失败或表不存在，检查种子数据
-        seed_data = DICT_SEEDS.get(code, [])
-        return any(item["key"] == key and item["enabled"] for item in seed_data)
+            if not _table_ready(conn):
+                raise _NoDictTable()
+            return (
+                conn.execute(
+                    "SELECT 1 FROM dict_items WHERE dict_code = ? AND key = ? AND enabled = 1",
+                    (code, key),
+                ).fetchone()
+                is not None
+            )
+    except _NoDictTable:
+        return any(
+            seed["key"] == key and seed.get("enabled", True) for seed in DICT_SEEDS.get(code, [])
+        )
 
 
 def used_count(code: str, key: str) -> int:
-    """
-    统计某个字典项在数据库中的使用次数。
-    
-    Args:
-        code: 字典代码
-        key: 字典项 key
-        
-    Returns:
-        使用次数
-    """
+    """某个字典项被业务数据引用多少次（跨注册表里的所有表/列）。"""
     try:
         with db_conn() as conn:
-            # 获取字典注册表中的 table 字段，解析出要统计的列
-            registry_entry = DICT_REGISTRY.get(code)
-            if not registry_entry:
-                return 0
-                
-            tables = registry_entry["table"].split(",")
-            table_columns = []
-            for table_col in tables:
-                table_col = table_col.strip()
-                if "." in table_col:
-                    table, col = table_col.split(".", 1)
-                    table_columns.append((table, col))
-            
-            # 统计每个表中使用该 key 的记录数
-            total_count = 0
-            for table, col in table_columns:
-                try:
-                    # 构造统计查询
-                    count_query = f"SELECT COUNT(*) FROM {table} WHERE {col} = ?"
-                    count = conn.execute(count_query, (key,)).fetchone()[0]
-                    total_count += count
-                except Exception:
-                    # 如果表或列不存在，跳过该统计
-                    continue
-                    
-            return total_count
-    except (sqlite3.OperationalError, sqlite3.Error):
-        # 数据库访问失败或表不存在，返回 0
+            return _usage_by_key(conn, code).get(str(key), 0)
+    except sqlite3.Error:
         return 0
 
 
 def level(code: str) -> str:
-    """
-    获取字典的级别。
-    
-    Args:
-        code: 字典代码
-        
-    Returns:
-        字典级别 (A/B/C/D)
-    """
-    registry_entry = DICT_REGISTRY.get(code)
-    return registry_entry.get("level", "D") if registry_entry else "D"
+    return DICT_REGISTRY.get(code, {}).get("level", "D")
 
 
-# ---------------- 字典项管理函数（供后续实现）----------------
-
-def create_item(code: str, item_data: Dict[str, Any]) -> Dict[str, Any]:
-    """创建字典项（仅 A 类）"""
-    # 实现逻辑将在后续完成
-    pass
+def desc(code: str) -> str:
+    return DICT_DESC.get(code, "")
 
 
-def update_item(code: str, key: str, update_data: Dict[str, Any]) -> Dict[str, Any]:
-    """更新字典项（仅 A/B/C 类）"""
-    # 实现逻辑将在后续完成
-    pass
+def codes() -> List[str]:
+    return list(DICT_REGISTRY.keys())
 
 
-def delete_item(code: str, key: str) -> bool:
-    """删除字典项（仅 A 类且 used=0）"""
-    # 实现逻辑将在后续完成
-    pass
+# ---------------- 写操作（分级权限由 router 判，这里只保证数据正确）----------------
+
+
+def create_item(code: str, key: str, label: str, sort: int = 0,
+                enabled: bool = True, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO dict_items (dict_code, key, label, sort, enabled, meta, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+            (code, key, label, int(sort), 1 if enabled else 0,
+             json.dumps(meta, ensure_ascii=False) if meta else None),
+        )
+    label_map.cache_clear()
+    return get_item(code, key)
+
+
+def update_item(code: str, key: str, **fields: Any) -> Dict[str, Any]:
+    allowed = {"label", "sort", "enabled", "meta"}
+    sets, values = [], []
+    for name, value in fields.items():
+        if name not in allowed or value is None:
+            continue
+        if name == "enabled":
+            value = 1 if value else 0
+        elif name == "meta":
+            value = json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else value
+        sets.append(f"{name} = ?")
+        values.append(value)
+    if not sets:
+        raise ValueError("没有可更新的字段")
+    with db_conn() as conn:
+        conn.execute(
+            f"UPDATE dict_items SET {', '.join(sets)}, updated_at = datetime('now')"
+            " WHERE dict_code = ? AND key = ?",
+            [*values, code, key],
+        )
+    label_map.cache_clear()
+    return get_item(code, key)
+
+
+def delete_item(code: str, key: str) -> None:
+    with db_conn() as conn:
+        conn.execute("DELETE FROM dict_items WHERE dict_code = ? AND key = ?", (code, key))
+    label_map.cache_clear()
+
+
+def get_item(code: str, key: str) -> Dict[str, Any]:
+    for item in items(code, include_disabled=True):
+        if item["key"] == key:
+            return item
+    raise KeyError(f"{code}/{key} 不存在")
+
+
+def search_product_models(q: Optional[str] = None, product: Optional[str] = None) -> List[Dict[str, Any]]:
+    """型号可搜索下拉：匹配 key / label / meta.size（大小写不敏感）。"""
+    keyword = (q or "").strip().lower()
+    result = []
+    for item in items("product_model"):
+        meta = item.get("meta") or {}
+        if product and meta.get("product") != product:
+            continue
+        if keyword:
+            haystack = " ".join([
+                str(item["key"]),
+                str(item["label"]),
+                str(meta.get("size") or ""),
+            ]).lower()
+            if keyword not in haystack:
+                continue
+        result.append(item)
+    return result

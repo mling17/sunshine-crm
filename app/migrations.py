@@ -1,5 +1,5 @@
 """
-CRM V2 增量迁移 M2（v2_002）（幂等 / 可中断重跑 / 只增不毁）。
+CRM V2 增量迁移 M1（幂等 / 可中断重跑 / 只增不毁）。
 
 用法（二选一）::
 
@@ -17,13 +17,14 @@ CRM V2 增量迁移 M2（v2_002）（幂等 / 可中断重跑 / 只增不毁）�
 5. 迁移前后比对业务表行数，任何不一致直接抛错。
 6. 清空存量数据：迁移末尾一次性清空业务数据（customers/deals/follow_ups/attachments/tags/customer_tags/import_log），
    保留 users，sessions 可清；用 schema_migrations 版本号门控只执行一次。
-7. customers 表构造移除 house_note、新增 note 列（重建或 DROP COLUMN，按 SQLite 版本选方案）。
+7. customers 表构造移除 house_note、新增 note 列（重建或 DROP COLUMN，按 SQLite 版本选方案）
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import json
 import sqlite3
 import sys
 from datetime import datetime
@@ -102,6 +103,15 @@ def _col_guard(table: str, column: str):
     return guard
 
 
+def _tbl_guard(*tables: str):
+    """任一表不存在 → 跳过（全新库上索引/UPDATE 不会炸）。"""
+
+    def guard(conn: sqlite3.Connection) -> bool:
+        return any(not table_exists(conn, t) for t in tables)
+
+    return guard
+
+
 def _rebuild_guards(src: str, dst: str, final_ok):
     """三件套 guard：建新表 / 复制行 / 删旧表+改名，全部状态可重入。"""
 
@@ -150,7 +160,6 @@ G_ATT_CREATE, G_ATT_COPY, G_ATT_DROP, G_ATT_RENAME, G_ATT_CLEAN = _rebuild_guard
 
 # ---------------------------------------------------------------- 语句
 # (label, guard, sql)；guard 返回 True = 跳过
-# 注意：这里调整了顺序，确保索引在表存在后创建
 STATEMENTS: list[tuple[str, object, str]] = [
     # ---------- 0. 版本表 ----------
     ("schema_migrations", None, """
@@ -160,149 +169,301 @@ STATEMENTS: list[tuple[str, object, str]] = [
       note       TEXT
     )
     """),
-    
-    # ---------- 1. 新表 3 张 ----------
-    # 1.1 客户地址簿（C-2）
-    ("customer_addresses", None, """
-    CREATE TABLE IF NOT EXISTS customer_addresses (
+    # ---------- 1. 线索 ----------
+    ("leads", None, """
+    CREATE TABLE IF NOT EXISTS leads (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      name                  TEXT,
+      phone                 TEXT,
+      wechat                TEXT,
+      lead_type             TEXT NOT NULL DEFAULT 'personal',
+      company_name          TEXT,
+      source                TEXT,
+      source_other          TEXT,
+      location              TEXT,
+      note                  TEXT,
+      intent_level          TEXT,
+      status                TEXT NOT NULL DEFAULT 'new',
+      invalid_reason        TEXT,
+      invalid_reason_other  TEXT,
+      converted_customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+      converted_deal_id     INTEGER REFERENCES deals(id)     ON DELETE SET NULL,
+      owner                 TEXT,
+      created_at            TEXT NOT NULL,
+      updated_at            TEXT NOT NULL
+    )
+    """),
+    ("idx_leads_status", None, "CREATE INDEX IF NOT EXISTS idx_leads_status  ON leads(status)"),
+    ("idx_leads_phone", None, "CREATE INDEX IF NOT EXISTS idx_leads_phone   ON leads(phone)"),
+    ("idx_leads_wechat", None, "CREATE INDEX IF NOT EXISTS idx_leads_wechat  ON leads(wechat)"),
+    ("idx_leads_created", None, "CREATE INDEX IF NOT EXISTS idx_leads_created ON leads(created_at)"),
+    ("lead_tags", None, """
+    CREATE TABLE IF NOT EXISTS lead_tags (
+      lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      tag_id  INTEGER NOT NULL REFERENCES tags(id)  ON DELETE CASCADE,
+      UNIQUE(lead_id, tag_id)
+    )
+    """),
+    ("idx_lead_tags_lead", None, "CREATE INDEX IF NOT EXISTS idx_lead_tags_lead ON lead_tags(lead_id)"),
+    # ---------- 2. 客户扩展 + 多联系人 ----------
+    ("customers.customer_type", _col_guard("customers", "customer_type"),
+     "ALTER TABLE customers ADD COLUMN customer_type TEXT NOT NULL DEFAULT 'personal'"),
+    ("customers.source", _col_guard("customers", "source"),
+     "ALTER TABLE customers ADD COLUMN source TEXT"),
+    ("customers.source_other", _col_guard("customers", "source_other"),
+     "ALTER TABLE customers ADD COLUMN source_other TEXT"),
+    ("customers.intent_level", _col_guard("customers", "intent_level"),
+     "ALTER TABLE customers ADD COLUMN intent_level TEXT"),
+    ("customers.company_name", _col_guard("customers", "company_name"),
+     "ALTER TABLE customers ADD COLUMN company_name TEXT"),
+    ("customers.owner", _col_guard("customers", "owner"),
+     "ALTER TABLE customers ADD COLUMN owner TEXT"),
+    ("customer_contacts", None, """
+    CREATE TABLE IF NOT EXISTS customer_contacts (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      phone       TEXT,
+      wechat      TEXT,
+      is_primary  INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    )
+    """),
+    ("idx_cc_customer", None, "CREATE INDEX IF NOT EXISTS idx_cc_customer ON customer_contacts(customer_id)"),
+    # ---------- 3. 商机扩展 ----------
+    ("deals.title", _col_guard("deals", "title"), "ALTER TABLE deals ADD COLUMN title TEXT"),
+    ("deals.lost_reason", _col_guard("deals", "lost_reason"), "ALTER TABLE deals ADD COLUMN lost_reason TEXT"),
+    ("deals.lost_reason_other", _col_guard("deals", "lost_reason_other"),
+     "ALTER TABLE deals ADD COLUMN lost_reason_other TEXT"),
+    ("deals.source_lost_deal_id", _col_guard("deals", "source_lost_deal_id"),
+     "ALTER TABLE deals ADD COLUMN source_lost_deal_id INTEGER REFERENCES deals(id) ON DELETE SET NULL"),
+    ("deals.order_id", _col_guard("deals", "order_id"), "ALTER TABLE deals ADD COLUMN order_id INTEGER"),
+    ("deals.owner", _col_guard("deals", "owner"), "ALTER TABLE deals ADD COLUMN owner TEXT"),
+    ("idx_deals_order", None, "CREATE INDEX IF NOT EXISTS idx_deals_order ON deals(order_id)"),
+    # ---------- 4. 物流公司主数据（先建，orders 外键指向它）----------
+    ("carriers", None, """
+    CREATE TABLE IF NOT EXISTS carriers (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      name           TEXT NOT NULL UNIQUE,
+      code           TEXT,
+      contact_person TEXT,
+      phone          TEXT,
+      address        TEXT,
+      is_active      INTEGER NOT NULL DEFAULT 1,
+      created_at     TEXT NOT NULL,
+      updated_at     TEXT NOT NULL
+    )
+    """),
+    ("idx_carriers_active", None, "CREATE INDEX IF NOT EXISTS idx_carriers_active ON carriers(is_active)"),
+    # ---------- 5. 订单 + 状态日志 ----------
+    ("orders", None, """
+    CREATE TABLE IF NOT EXISTS orders (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_no       TEXT NOT NULL UNIQUE,
+      customer_id    INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+      deal_id        INTEGER NOT NULL UNIQUE REFERENCES deals(id) ON DELETE RESTRICT,
+      product_type   TEXT,
+      model          TEXT,
+      spec           TEXT,
+      amount         REAL NOT NULL DEFAULT 0,
+      deposit_paid   REAL NOT NULL DEFAULT 0,
+      balance_paid   REAL NOT NULL DEFAULT 0,
+      logistics_mode TEXT,
+      carrier_id     INTEGER REFERENCES carriers(id) ON DELETE RESTRICT,
+      tracking_no    TEXT,
+      shipped_at     TEXT,
+      completed_at   TEXT,
+      status         TEXT NOT NULL DEFAULT 'pending_payment',
+      note           TEXT,
+      owner          TEXT,
+      created_at     TEXT NOT NULL,
+      updated_at     TEXT NOT NULL
+    )
+    """),
+    ("idx_orders_status", None, "CREATE INDEX IF NOT EXISTS idx_orders_status   ON orders(status)"),
+    ("idx_orders_customer", None, "CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)"),
+    ("idx_orders_created", None, "CREATE INDEX IF NOT EXISTS idx_orders_created  ON orders(created_at)"),
+    ("order_status_log", None, """
+    CREATE TABLE IF NOT EXISTS order_status_log (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id       INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      from_status    TEXT,
+      to_status      TEXT NOT NULL,
+      deposit_paid   REAL,
+      balance_paid   REAL,
+      screenshot_ids TEXT,
+      logistics_mode TEXT,
+      carrier_id     INTEGER REFERENCES carriers(id) ON DELETE SET NULL,
+      tracking_no    TEXT,
+      note           TEXT,
+      created_at     TEXT NOT NULL
+    )
+    """),
+    ("idx_osl_order", None, "CREATE INDEX IF NOT EXISTS idx_osl_order ON order_status_log(order_id)"),
+    # ---------- 6. 售后 + 状态日志 ----------
+    ("aftersales", None, """
+    CREATE TABLE IF NOT EXISTS aftersales (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      customer_id   INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      label         TEXT,            -- 家 / 工地 / 库房
-      receiver_name TEXT NOT NULL,
-      phone         TEXT NOT NULL,
-      address       TEXT NOT NULL,
-      is_default    INTEGER NOT NULL DEFAULT 0,
+      no            TEXT NOT NULL UNIQUE,
+      order_id      INTEGER NOT NULL REFERENCES orders(id)    ON DELETE RESTRICT,
+      customer_id   INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+      type          TEXT NOT NULL,
+      type_other    TEXT,
+      description   TEXT NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      result        TEXT,
+      reject_reason TEXT,
+      closed_at     TEXT,
       created_at    TEXT NOT NULL,
       updated_at    TEXT NOT NULL
     )
     """),
-    ("idx_addr_customer", None, "CREATE INDEX IF NOT EXISTS idx_addr_customer ON customer_addresses(customer_id)"),
-    
-    # 1.2 物流公司联系人（§3.4）
-    ("carrier_contacts", None, """
-    CREATE TABLE IF NOT EXISTS carrier_contacts (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      carrier_id INTEGER NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
-      name       TEXT NOT NULL,
-      phone      TEXT NOT NULL,
-      tags       TEXT,            -- JSON 数组 [\"大件业务\",\"报价\"]（v2.3 去掉「职务」改标签）
-      sort       INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+    ("idx_as_status", None, "CREATE INDEX IF NOT EXISTS idx_as_status   ON aftersales(status)"),
+    ("idx_as_order", None, "CREATE INDEX IF NOT EXISTS idx_as_order    ON aftersales(order_id)"),
+    ("idx_as_customer", None, "CREATE INDEX IF NOT EXISTS idx_as_customer ON aftersales(customer_id)"),
+    ("idx_as_created", None, "CREATE INDEX IF NOT EXISTS idx_as_created  ON aftersales(created_at)"),
+    ("aftersale_status_log", None, """
+    CREATE TABLE IF NOT EXISTS aftersale_status_log (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      aftersale_id INTEGER NOT NULL REFERENCES aftersales(id) ON DELETE CASCADE,
+      from_status  TEXT,
+      to_status    TEXT NOT NULL,
+      note         TEXT,
+      created_at   TEXT NOT NULL
     )
     """),
-    ("idx_carrier_contacts", None, "CREATE INDEX IF NOT EXISTS idx_carrier_contacts ON carrier_contacts(carrier_id)"),
-    
-    # 1.3 数据字典项（§3.6）
-    ("dict_items", None, """
-    CREATE TABLE IF NOT EXISTS dict_items (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      dict_code  TEXT NOT NULL,      -- 字典 code（见 §4.1 注册表）
-      key        TEXT NOT NULL,      -- 存储值，保存后不可改
-      label      TEXT NOT NULL,      -- 显示名，随时可改
-      sort       INTEGER NOT NULL DEFAULT 0,
-      enabled    INTEGER NOT NULL DEFAULT 1,
-      meta       TEXT,               -- JSON：product_model 存 {\"product\":\"天窗\",\"size\":\"900×1800\",\"drive\":\"electric\"}
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(dict_code, key)
+    ("idx_asl_aftersale", None, "CREATE INDEX IF NOT EXISTS idx_asl_aftersale ON aftersale_status_log(aftersale_id)"),
+    # ---------- 7. follow_ups 重建：放宽 customer_id（线索期无客户）----------
+    ("follow_ups_new", G_FU_CREATE, """
+    CREATE TABLE IF NOT EXISTS follow_ups_new (
+      id          INTEGER PRIMARY KEY,
+      object_type TEXT NOT NULL DEFAULT 'customer',
+      object_id   INTEGER,
+      customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE,
+      deal_id     INTEGER REFERENCES deals(id)     ON DELETE CASCADE,
+      method      TEXT,
+      content     TEXT NOT NULL,
+      next_date   TEXT,
+      created_at  TEXT NOT NULL
     )
     """),
-    ("idx_dict_code", None, "CREATE INDEX IF NOT EXISTS idx_dict_code ON dict_items(dict_code, sort)"),
-    
-    # ---------- 2. 扩列 21 个 ----------
-    # 2.1 customers 表（+7）
-    ("customers.house_type", _col_guard("customers", "house_type"),
-     "ALTER TABLE customers ADD COLUMN house_type TEXT"),
-    ("customers.floor", _col_guard("customers", "floor"),
-     "ALTER TABLE customers ADD COLUMN floor TEXT"),
-    ("customers.install_at", _col_guard("customers", "install_at"),
-     "ALTER TABLE customers ADD COLUMN install_at TEXT"),
-    ("customers.decoration_stage", _col_guard("customers", "decoration_stage"),
-     "ALTER TABLE customers ADD COLUMN decoration_stage TEXT"),
-    ("customers.budget", _col_guard("customers", "budget"),
-     "ALTER TABLE customers ADD COLUMN budget TEXT"),
-    ("customers.decider", _col_guard("customers", "decider"),
-     "ALTER TABLE customers ADD COLUMN decider TEXT"),
-    ("customers.care", _col_guard("customers", "care"),
-     "ALTER TABLE customers ADD COLUMN care TEXT"),
-    
-    # 2.2 deals 表（+3）
-    ("deals.drive_type", _col_guard("deals", "drive_type"),
-     "ALTER TABLE deals ADD COLUMN drive_type TEXT"),
-    ("deals.note", _col_guard("deals", "note"),
-     "ALTER TABLE deals ADD COLUMN note TEXT"),
-    ("deals.locked_at", _col_guard("deals", "locked_at"),
-     "ALTER TABLE deals ADD COLUMN locked_at TEXT"),
-    
-    # 2.3 orders 表（+7）
-    ("orders.deposit_amount", _col_guard("orders", "deposit_amount"),
-     "ALTER TABLE orders ADD COLUMN deposit_amount REAL"),
-    ("orders.balance_amount", _col_guard("orders", "balance_amount"),
-     "ALTER TABLE orders ADD COLUMN balance_amount REAL"),
-    ("orders.logistics_fee", _col_guard("orders", "logistics_fee"),
-     "ALTER TABLE orders ADD COLUMN logistics_fee REAL NOT NULL DEFAULT 0"),
-    ("orders.address_id", _col_guard("orders", "address_id"),
-     "ALTER TABLE orders ADD COLUMN address_id INTEGER REFERENCES customer_addresses(id) ON DELETE SET NULL"),
-    ("orders.receiver_name", _col_guard("orders", "receiver_name"),
-     "ALTER TABLE orders ADD COLUMN receiver_name TEXT"),
-    ("orders.receiver_phone", _col_guard("orders", "receiver_phone"),
-     "ALTER TABLE orders ADD COLUMN receiver_phone TEXT"),
-    ("orders.receiver_address", _col_guard("orders", "receiver_address"),
-     "ALTER TABLE orders ADD COLUMN receiver_address TEXT"),
-    
-    # 2.4 follow_ups 表（+2）
-    ("follow_ups.kind", _col_guard("follow_ups", "kind"),
-     "ALTER TABLE follow_ups ADD COLUMN kind TEXT NOT NULL DEFAULT 'follow'"),
-    ("follow_ups.detail", _col_guard("follow_ups", "detail"),
-     "ALTER TABLE follow_ups ADD COLUMN detail TEXT"),
-    
-    # 2.5 order_status_log 表（+2）
-    ("order_status_log.event_type", _col_guard("order_status_log", "event_type"),
-     "ALTER TABLE order_status_log ADD COLUMN event_type TEXT NOT NULL DEFAULT 'stage'"),
-    ("order_status_log.detail", _col_guard("order_status_log", "detail"),
-     "ALTER TABLE order_status_log ADD COLUMN detail TEXT"),
-    
-    # ---------- 3. 索引 9 个 ----------
-    # 3.1 deals 索引（注意：这些索引在 deals 表创建之后才能创建）
-    # 由于 deals 表在较早的迁移中已经存在，这些索引应该可以创建
-    ("idx_deals_stage", None, "CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage)"),
-    ("idx_deals_cust", None, "CREATE INDEX IF NOT EXISTS idx_deals_cust ON deals(customer_id)"),
-    
-    # 3.2 orders 索引
-    # 检查 orders 表是否存在，如果存在再创建索引
-    ("idx_orders_status", None, "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"),
-    ("idx_orders_cust", None, "CREATE INDEX IF NOT EXISTS idx_orders_cust ON orders(customer_id)"),
-    
-    # 3.3 follow_ups 索引
-    ("idx_fu_obj", None, "CREATE INDEX IF NOT EXISTS idx_fu_obj ON follow_ups(object_type, object_id, created_at)"),
-    ("idx_fu_kind", None, "CREATE INDEX IF NOT EXISTS idx_fu_kind ON follow_ups(kind)"),
-    
-    # 3.4 order_status_log 索引
-    ("idx_osl_order", None, "CREATE INDEX IF NOT EXISTS idx_osl_order ON order_status_log(order_id)"),
-    
-    # 3.5 其他索引
-    ("idx_attr_obj", None, "CREATE INDEX IF NOT EXISTS idx_attr_obj ON attachments(object_type, object_id)"),
-    ("idx_attr_fu", None, "CREATE INDEX IF NOT EXISTS idx_attr_fu ON attachments(follow_up_id)"),
-    
-    # ---------- 4. 值域迁移 ----------
-    # 4.1 deals 阶段迁移（必须在同一个事务中）
-    ("deals.stage_migrate", None, """
-    UPDATE deals SET stage='quote'   WHERE stage IN ('confirm','quote');
-    UPDATE deals SET stage='confirm' WHERE stage='negotiate';
-    UPDATE deals SET stage='quote'   WHERE stage IN ('lead','quoted');
-    UPDATE deals SET stage='confirm' WHERE stage IN ('confirmed','deposit','producing','balance','shipped');
+    ("follow_ups copy", G_FU_COPY, """
+    INSERT OR IGNORE INTO follow_ups_new
+      (id, object_type, object_id, customer_id, deal_id, method, content, next_date, created_at)
+    SELECT id,
+           CASE WHEN deal_id IS NOT NULL THEN 'deal' ELSE 'customer' END,
+           COALESCE(deal_id, customer_id),
+           customer_id, deal_id, NULL, content, next_date, created_at
+      FROM follow_ups
     """),
-    
-    # 4.2 orders 物流方式迁移
-    ("orders.logistics_mode_migrate", None,
-     "UPDATE orders SET logistics_mode='agent' WHERE logistics_mode='carrier'"),
-    
-    # ---------- 5. 字典种子数据 ----------
-    # 5.1 种子数据插入（通过函数实现）
-    ("dict_items_seed", None, ""),
-    
-    # ---------- 6. 清空存量数据（Q2）----------
+    ("follow_ups drop old", G_FU_DROP, "DROP TABLE follow_ups"),
+    ("follow_ups rename", G_FU_RENAME, "ALTER TABLE follow_ups_new RENAME TO follow_ups"),
+    ("follow_ups cleanup", G_FU_CLEAN, "DROP TABLE IF EXISTS follow_ups_new"),
+    # ---------- 8. attachments 重建：放宽 follow_up_id（订单截图不挂跟进）----------
+    ("attachments_new", G_ATT_CREATE, """
+    CREATE TABLE IF NOT EXISTS attachments_new (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      object_type  TEXT NOT NULL DEFAULT 'follow_up',
+      object_id    INTEGER,
+      follow_up_id INTEGER REFERENCES follow_ups(id) ON DELETE CASCADE,
+      storage_key  TEXT NOT NULL,
+      file_name    TEXT,
+      mime_type    TEXT,
+      size         INTEGER NOT NULL DEFAULT 0,
+      created_at   TEXT NOT NULL
+    )
+    """),
+    ("attachments copy", G_ATT_COPY, """
+    INSERT OR IGNORE INTO attachments_new
+      (id, object_type, object_id, follow_up_id, storage_key, file_name, mime_type, size, created_at)
+    SELECT id, 'follow_up', follow_up_id, follow_up_id, storage_key, file_name, mime_type, size, created_at
+      FROM attachments
+    """),
+    ("attachments drop old", G_ATT_DROP, "DROP TABLE attachments"),
+    ("attachments rename", G_ATT_RENAME, "ALTER TABLE attachments_new RENAME TO attachments"),
+    ("attachments cleanup", G_ATT_CLEAN, "DROP TABLE IF EXISTS attachments_new"),
+    # ---------- 9. 索引 / 触发器（重建后原索引已随表消失，必须重建）----------
+    ("idx_fu_object", None, "CREATE INDEX IF NOT EXISTS idx_fu_object   ON follow_ups(object_type, object_id)"),
+    ("idx_fu_customer", None, "CREATE INDEX IF NOT EXISTS idx_fu_customer ON follow_ups(customer_id)"),
+    ("idx_fu_deal", None, "CREATE INDEX IF NOT EXISTS idx_fu_deal     ON follow_ups(deal_id)"),
+    ("idx_fu_next_date", None, "CREATE INDEX IF NOT EXISTS idx_fu_next_date ON follow_ups(next_date)"),
+    ("idx_att_obj", None, "CREATE INDEX IF NOT EXISTS idx_att_obj ON attachments(object_type, object_id)"),
+    ("idx_att_fu", None, "CREATE INDEX IF NOT EXISTS idx_att_fu  ON attachments(follow_up_id)"),
+    ("trg_fu_object_fill", None, """
+    CREATE TRIGGER IF NOT EXISTS trg_fu_object_fill
+    AFTER INSERT ON follow_ups
+    WHEN NEW.object_id IS NULL
+    BEGIN
+      UPDATE follow_ups
+         SET object_type = CASE WHEN NEW.deal_id IS NOT NULL THEN 'deal' ELSE 'customer' END,
+             object_id   = COALESCE(NEW.deal_id, NEW.customer_id)
+       WHERE id = NEW.id;
+    END
+    """),
+    ("trg_att_object_fill", None, """
+    CREATE TRIGGER IF NOT EXISTS trg_att_object_fill
+    AFTER INSERT ON attachments
+    WHEN NEW.object_id IS NULL AND NEW.follow_up_id IS NOT NULL
+    BEGIN
+      UPDATE attachments
+         SET object_type = 'follow_up', object_id = NEW.follow_up_id
+       WHERE id = NEW.id;
+    END
+    """),
+    # ---------- 10. 存量数据口径 ----------
+    ("follow_ups backfill", None, """
+    UPDATE follow_ups
+       SET object_type = CASE WHEN deal_id IS NOT NULL THEN 'deal' ELSE 'customer' END,
+           object_id   = COALESCE(deal_id, customer_id)
+     WHERE object_id IS NULL
+    """),
+    ("deals stage map", None, """
+    UPDATE deals SET stage = CASE stage
+        WHEN 'lead'      THEN 'confirm'
+        WHEN 'quoted'    THEN 'quote'
+        WHEN 'confirmed' THEN 'negotiate'
+        WHEN 'deposit'   THEN 'negotiate'
+        WHEN 'producing' THEN 'negotiate'
+        WHEN 'balance'   THEN 'negotiate'
+        WHEN 'shipped'   THEN 'negotiate'
+        ELSE stage END
+     WHERE stage NOT IN ('confirm','quote','negotiate','won','lost')
+    """),
+    ("customers source stock", None,
+     "UPDATE customers SET source = 'stock' WHERE source IS NULL OR TRIM(source) = ''"),
+    ("customers type personal", None,
+     "UPDATE customers SET customer_type = 'personal' "
+     "WHERE customer_type IS NULL OR TRIM(customer_type) = ''"),
+    # ---------- 11. customers 表结构变更：移除 house_note，增加 note 列 ----------
+    # 注意：这里我们采用重建方式，因为需要移除 house_note 列
+    ("customers_new", _customers_migrated, """
+    CREATE TABLE IF NOT EXISTS customers_new (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      name             TEXT NOT NULL,
+      phone            TEXT,
+      wechat           TEXT,
+      location         TEXT,
+      note             TEXT,
+      customer_type    TEXT NOT NULL DEFAULT 'personal',
+      source           TEXT,
+      source_other     TEXT,
+      intent_level     TEXT,
+      company_name     TEXT,
+      owner            TEXT,
+      created_at       TEXT NOT NULL,
+      updated_at       TEXT NOT NULL
+    )
+    """),
+    ("customers copy", _customers_migrated, """
+    INSERT OR REPLACE INTO customers_new (id, name, phone, wechat, location, note, customer_type, source, source_other, intent_level, company_name, owner, created_at, updated_at)
+    SELECT id, name, phone, wechat, location, house_note, customer_type, source, source_other, intent_level, company_name, owner, created_at, updated_at
+    FROM customers
+    """),
+    ("customers drop old", _customers_migrated, "DROP TABLE customers"),
+    ("customers rename", _customers_migrated, "ALTER TABLE customers_new RENAME TO customers"),
+    ("customers cleanup", _customers_migrated, "DROP TABLE IF EXISTS customers_new"),
+    # ---------- 12. 清空存量数据（Q2）----------
     # 用 schema_migrations 版本号门控只执行一次
     ("clear_data_guard", None, """
     CREATE TABLE IF NOT EXISTS migration_clear_guard (
@@ -317,154 +478,154 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ],
     ("clear_data_mark", None,
      "INSERT OR IGNORE INTO migration_clear_guard (version) VALUES ('v2_001_cleared')"),
-    
-    # ---------- 7. 版本落账 ----------
+    # ---------- 13. 版本落账 ----------
+    ("schema_migrations v2_001", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_001', datetime('now'), 'CRM V2 增量迁移：线索/订单/售后/物流 + 统一跟进')"),
+    ("user_version", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+
+    # ================= v2_002：CRM V2 定稿对齐（PLANNER-V3 §3）=================
+    # ---------- 14. 新表 3 张 ----------
+    ("customer_addresses", None, """
+    CREATE TABLE IF NOT EXISTS customer_addresses (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id   INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      label         TEXT,
+      receiver_name TEXT NOT NULL,
+      phone         TEXT NOT NULL,
+      address       TEXT NOT NULL,
+      is_default    INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    )
+    """),
+    ("carrier_contacts", None, """
+    CREATE TABLE IF NOT EXISTS carrier_contacts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      carrier_id INTEGER NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+      name       TEXT NOT NULL,
+      phone      TEXT NOT NULL,
+      tags       TEXT,
+      sort       INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+    """),
+    ("dict_items", None, """
+    CREATE TABLE IF NOT EXISTS dict_items (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      dict_code  TEXT NOT NULL,
+      key        TEXT NOT NULL,
+      label      TEXT NOT NULL,
+      sort       INTEGER NOT NULL DEFAULT 0,
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      meta       TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(dict_code, key)
+    )
+    """),
+
+    # ---------- 15. 扩列 21 个 ----------
+    # 15.1 customers 画像 +7
+    ("customers.house_type",       _col_guard("customers", "house_type"),       "ALTER TABLE customers ADD COLUMN house_type TEXT"),
+    ("customers.floor",            _col_guard("customers", "floor"),            "ALTER TABLE customers ADD COLUMN floor TEXT"),
+    ("customers.install_at",       _col_guard("customers", "install_at"),       "ALTER TABLE customers ADD COLUMN install_at TEXT"),
+    ("customers.decoration_stage", _col_guard("customers", "decoration_stage"), "ALTER TABLE customers ADD COLUMN decoration_stage TEXT"),
+    ("customers.budget",           _col_guard("customers", "budget"),           "ALTER TABLE customers ADD COLUMN budget TEXT"),
+    ("customers.decider",          _col_guard("customers", "decider"),          "ALTER TABLE customers ADD COLUMN decider TEXT"),
+    ("customers.care",             _col_guard("customers", "care"),             "ALTER TABLE customers ADD COLUMN care TEXT"),
+    # 15.2 deals +3
+    ("deals.drive_type", _col_guard("deals", "drive_type"), "ALTER TABLE deals ADD COLUMN drive_type TEXT"),
+    ("deals.note",       _col_guard("deals", "note"),       "ALTER TABLE deals ADD COLUMN note TEXT"),
+    ("deals.locked_at",  _col_guard("deals", "locked_at"),  "ALTER TABLE deals ADD COLUMN locked_at TEXT"),
+    # 15.3 orders +7
+    ("orders.deposit_amount",   _col_guard("orders", "deposit_amount"),   "ALTER TABLE orders ADD COLUMN deposit_amount REAL"),
+    ("orders.balance_amount",   _col_guard("orders", "balance_amount"),   "ALTER TABLE orders ADD COLUMN balance_amount REAL"),
+    ("orders.logistics_fee",    _col_guard("orders", "logistics_fee"),    "ALTER TABLE orders ADD COLUMN logistics_fee REAL NOT NULL DEFAULT 0"),
+    ("orders.address_id",       _col_guard("orders", "address_id"),       "ALTER TABLE orders ADD COLUMN address_id INTEGER REFERENCES customer_addresses(id) ON DELETE SET NULL"),
+    ("orders.receiver_name",    _col_guard("orders", "receiver_name"),    "ALTER TABLE orders ADD COLUMN receiver_name TEXT"),
+    ("orders.receiver_phone",   _col_guard("orders", "receiver_phone"),   "ALTER TABLE orders ADD COLUMN receiver_phone TEXT"),
+    ("orders.receiver_address", _col_guard("orders", "receiver_address"), "ALTER TABLE orders ADD COLUMN receiver_address TEXT"),
+    # 15.4 follow_ups +2（统一跟进扩为对象履历）
+    ("follow_ups.kind",   _col_guard("follow_ups", "kind"),   "ALTER TABLE follow_ups ADD COLUMN kind TEXT NOT NULL DEFAULT 'follow'"),
+    ("follow_ups.detail", _col_guard("follow_ups", "detail"), "ALTER TABLE follow_ups ADD COLUMN detail TEXT"),
+    # 15.5 order_status_log +2（状态日志扩为事件流）
+    ("order_status_log.event_type", _col_guard("order_status_log", "event_type"), "ALTER TABLE order_status_log ADD COLUMN event_type TEXT NOT NULL DEFAULT 'stage'"),
+    ("order_status_log.detail",     _col_guard("order_status_log", "detail"),     "ALTER TABLE order_status_log ADD COLUMN detail TEXT"),
+
+    # ---------- 16. 索引 9 个（表不存在则跳过）----------
+    ("idx_addr_customer",    _tbl_guard("customer_addresses"), "CREATE INDEX IF NOT EXISTS idx_addr_customer ON customer_addresses(customer_id)"),
+    ("idx_carrier_contacts", _tbl_guard("carrier_contacts"),   "CREATE INDEX IF NOT EXISTS idx_carrier_contacts ON carrier_contacts(carrier_id)"),
+    ("idx_dict_code",        _tbl_guard("dict_items"),         "CREATE INDEX IF NOT EXISTS idx_dict_code ON dict_items(dict_code, sort)"),
+    ("idx_deals_stage",      _tbl_guard("deals"),              "CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage)"),
+    ("idx_deals_cust",       _tbl_guard("deals"),              "CREATE INDEX IF NOT EXISTS idx_deals_cust ON deals(customer_id)"),
+    ("idx_orders_status",    _tbl_guard("orders"),             "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"),
+    ("idx_orders_cust",      _tbl_guard("orders"),             "CREATE INDEX IF NOT EXISTS idx_orders_cust ON orders(customer_id)"),
+    ("idx_fu_obj",           _tbl_guard("follow_ups"),         "CREATE INDEX IF NOT EXISTS idx_fu_obj ON follow_ups(object_type, object_id, created_at)"),
+    ("idx_fu_kind",          _tbl_guard("follow_ups"),         "CREATE INDEX IF NOT EXISTS idx_fu_kind ON follow_ups(kind)"),
+
+    # ---------- 17. 值域迁移（单条语句，顺序不可反）----------
+    # 旧 confirm=需求确认 → 新第一段 quote；旧 negotiate → 新第二段 confirm
+    ("deals.stage_confirm_to_quote", _tbl_guard("deals"),
+     "UPDATE deals SET stage='quote' WHERE stage IN ('confirm','quote')"),
+    ("deals.stage_negotiate_to_confirm", _tbl_guard("deals"),
+     "UPDATE deals SET stage='confirm' WHERE stage='negotiate'"),
+    ("deals.stage_v1_to_quote", _tbl_guard("deals"),
+     "UPDATE deals SET stage='quote' WHERE stage IN ('lead','quoted')"),
+    ("deals.stage_v1_to_confirm", _tbl_guard("deals"),
+     "UPDATE deals SET stage='confirm' WHERE stage IN ('confirmed','deposit','producing','balance','shipped')"),
+    ("orders.logistics_mode_migrate", _tbl_guard("orders"),
+     "UPDATE orders SET logistics_mode='agent' WHERE logistics_mode='carrier'"),
+
+    # ---------- 18. 字典种子（幂等，只补缺，不覆盖用户改过的 label）----------
+    ("dict_items_seed", None, ""),
+
+    # ---------- 19. v2_002 落账 ----------
     ("schema_migrations v2_002", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
-     "VALUES ('v2_002', datetime('now'), 'V2 定稿对齐')"),
-    ("user_version", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+     "VALUES ('v2_002', datetime('now'), 'CRM V2 定稿对齐：地址簿/物流联系人/数据字典 + 21 列')"),
+    ("user_version v2_002", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
+
 
 #: 迁移前后行数必须一致的业务表
 COUNT_STABLE_TABLES = ("customers", "deals", "follow_ups", "tags", "customer_tags", "attachments")
 
 
 def seed_dict_items(conn: sqlite3.Connection) -> None:
+    """字典种子落库（幂等）。
+
+    数据唯一定义在 `app/dicts.py::DICT_SEEDS` —— 这里**不复制一份**，
+    否则中文改名后两边必然漂移（PLANNER-V3 §4.2 单一真源）。
+    `INSERT OR IGNORE`：只补缺，不覆盖用户已经改过的 label / sort / enabled。
     """
-    插入字典种子数据（77条）
-    """
-    # 字典种子数据
-    dict_seeds = [
-        # product_model (30条)
-        ("product_model", [
-            {"key": "XW-60", "label": "XW-60 天窗 600×1200", "sort": 1, "enabled": True, "meta": "{\"product\":\"天窗\",\"size\":\"600×1200\",\"drive\":\"manual\"}"},
-            {"key": "XW-90", "label": "XW-90 天窗 900×1800", "sort": 2, "enabled": True, "meta": "{\"product\":\"天窗\",\"size\":\"900×1800\",\"drive\":\"manual\"}"},
-            {"key": "XW-120", "label": "XW-120 天窗 1200×2400", "sort": 3, "enabled": True, "meta": "{\"product\":\"天窗\",\"size\":\"1200×2400\",\"drive\":\"manual\"}"},
-            {"key": "XW-150", "label": "XW-150 天窗 1500×2800", "sort": 4, "enabled": True, "meta": "{\"product\":\"天窗\",\"size\":\"1500×2800\",\"drive\":\"manual\"}"},
-            {"key": "XW-180", "label": "XW-180 天窗 1800×3000", "sort": 5, "enabled": True, "meta": "{\"product\":\"天窗\",\"size\":\"1800×3000\",\"drive\":\"manual\"}"},
-            {"key": "XW-120E", "label": "XW-120E 天窗 电动款 1200×2400", "sort": 6, "enabled": True, "meta": "{\"product\":\"天窗\",\"size\":\"1200×2400\",\"drive\":\"electric\"}"},
-            {"key": "XW-150E", "label": "XW-150E 天窗 电动款 1500×2800", "sort": 7, "enabled": True, "meta": "{\"product\":\"天窗\",\"size\":\"1500×2800\",\"drive\":\"electric\"}"},
-            {"key": "XW-200E", "label": "XW-200E 天窗 电动款 2000×3200", "sort": 8, "enabled": True, "meta": "{\"product\":\"天窗\",\"size\":\"2000×3200\",\"drive\":\"electric\"}"},
-            {"key": "TM-120", "label": "TM-120 天幕 1200×2000", "sort": 9, "enabled": True, "meta": "{\"product\":\"天幕\",\"size\":\"1200×2000\",\"drive\":\"manual\"}"},
-            {"key": "TM-180", "label": "TM-180 天幕 1800×2600", "sort": 10, "enabled": True, "meta": "{\"product\":\"天幕\",\"size\":\"1800×2600\",\"drive\":\"manual\"}"},
-            {"key": "TM-240", "label": "TM-240 天幕 2400×3000", "sort": 11, "enabled": True, "meta": "{\"product\":\"天幕\",\"size\":\"2400×3000\",\"drive\":\"manual\"}"},
-            {"key": "TM-300", "label": "TM-300 天幕 3000×3500", "sort": 12, "enabled": True, "meta": "{\"product\":\"天幕\",\"size\":\"3000×3500\",\"drive\":\"manual\"}"},
-            {"key": "TM-360", "label": "TM-360 天幕 3600×4200", "sort": 13, "enabled": True, "meta": "{\"product\":\"天幕\",\"size\":\"3600×4200\",\"drive\":\"manual\"}"},
-            {"key": "TM-240E", "label": "TM-240E 天幕 电动款 2400×3000", "sort": 14, "enabled": True, "meta": "{\"product\":\"天幕\",\"size\":\"2400×3000\",\"drive\":\"electric\"}"},
-            {"key": "TM-300E", "label": "TM-300E 天幕 电动款 3000×3500", "sort": 15, "enabled": True, "meta": "{\"product\":\"天幕\",\"size\":\"3000×3500\",\"drive\":\"electric\"}"},
-            {"key": "YG-20", "label": "YG-20 阳光房 2000×3000", "sort": 16, "enabled": True, "meta": "{\"product\":\"阳光房\",\"size\":\"2000×3000\",\"drive\":\"manual\"}"},
-            {"key": "YG-30", "label": "YG-30 阳光房 3000×4000", "sort": 17, "enabled": True, "meta": "{\"product\":\"阳光房\",\"size\":\"3000×4000\",\"drive\":\"manual\"}"},
-            {"key": "YG-40", "label": "YG-40 阳光房 4000×5000", "sort": 18, "enabled": True, "meta": "{\"product\":\"阳光房\",\"size\":\"4000×5000\",\"drive\":\"manual\"}"},
-            {"key": "YG-50", "label": "YG-50 阳光房 5000×6000", "sort": 19, "enabled": True, "meta": "{\"product\":\"阳光房\",\"size\":\"5000×6000\",\"drive\":\"manual\"}"},
-            {"key": "ZY-10", "label": "ZY-10 遮阳帘 1000×1500", "sort": 20, "enabled": True, "meta": "{\"product\":\"遮阳帘\",\"size\":\"1000×1500\",\"drive\":\"manual\"}"},
-            {"key": "ZY-15", "label": "ZY-15 遮阳帘 1500×2000", "sort": 21, "enabled": True, "meta": "{\"product\":\"遮阳帘\",\"size\":\"1500×2000\",\"drive\":\"manual\"}"},
-            {"key": "ZY-20", "label": "ZY-20 遮阳帘 2000×2500", "sort": 22, "enabled": True, "meta": "{\"product\":\"遮阳帘\",\"size\":\"2000×2500\",\"drive\":\"manual\"}"},
-            {"key": "ZY-25E", "label": "ZY-25E 遮阳帘 电动款 2500×3000", "sort": 23, "enabled": True, "meta": "{\"product\":\"遮阳帘\",\"size\":\"2500×3000\",\"drive\":\"electric\"}"},
-            {"key": "FT-100", "label": "FT-100 上翻窗 1000×1000", "sort": 24, "enabled": True, "meta": "{\"product\":\"上翻窗\",\"size\":\"1000×1000\",\"drive\":\"manual\"}"},
-            {"key": "FT-140", "label": "FT-140 上翻窗 1400×1400", "sort": 25, "enabled": True, "meta": "{\"product\":\"上翻窗\",\"size\":\"1400×1400\",\"drive\":\"manual\"}"},
-            {"key": "PY-120", "label": "PY-120 平移窗 1200×1200", "sort": 26, "enabled": True, "meta": "{\"product\":\"平移窗\",\"size\":\"1200×1200\",\"drive\":\"manual\"}"},
-            {"key": "PY-160", "label": "PY-160 平移窗 1600×1200", "sort": 27, "enabled": True, "meta": "{\"product\":\"平移窗\",\"size\":\"1600×1200\",\"drive\":\"manual\"}"},
-            {"key": "PY-200E", "label": "PY-200E 平移窗 电动款 2000×1500", "sort": 28, "enabled": True, "meta": "{\"product\":\"平移窗\",\"size\":\"2000×1500\",\"drive\":\"electric\"}"},
-            {"key": "YG-30E", "label": "YG-30E 阳光房 电动开合 3000×4000", "sort": 29, "enabled": True, "meta": "{\"product\":\"阳光房\",\"size\":\"3000×4000\",\"drive\":\"electric\"}"},
-            {"key": "TM-420", "label": "TM-420 天幕 4200×5000", "sort": 30, "enabled": True, "meta": "{\"product\":\"天幕\",\"size\":\"4200×5000\",\"drive\":\"manual\"}"},
-        ]),
-        # customer_source (6条)
-        ("customer_source", [
-            {"key": "wechat", "label": "微信", "sort": 1, "enabled": True},
-            {"key": "phone", "label": "电话", "sort": 2, "enabled": True},
-            {"key": "referral", "label": "转介绍", "sort": 3, "enabled": True},
-            {"key": "existing", "label": "老客户", "sort": 4, "enabled": True},
-            {"key": "stock", "label": "存量", "sort": 5, "enabled": True},
-            {"key": "other", "label": "其他", "sort": 6, "enabled": True},
-        ]),
-        # intent_level (4条)
-        ("intent_level", [
-            {"key": "high", "label": "高", "sort": 1, "enabled": True},
-            {"key": "medium", "label": "中", "sort": 2, "enabled": True},
-            {"key": "low", "label": "低", "sort": 3, "enabled": True},
-            {"key": "none", "label": "无意向", "sort": 4, "enabled": True},
-        ]),
-        # product_type (4条)
-        ("product_type", [
-            {"key": "天窗", "label": "天窗", "sort": 1, "enabled": True},
-            {"key": "天幕", "label": "天幕", "sort": 2, "enabled": True},
-            {"key": "阳光房", "label": "阳光房", "sort": 3, "enabled": True},
-            {"key": "遮阳帘", "label": "遮阳帘", "sort": 4, "enabled": True},
-        ]),
-        # lost_reason (5条)
-        ("lost_reason", [
-            {"key": "price", "label": "价格", "sort": 1, "enabled": True},
-            {"key": "competitor", "label": "竞品", "sort": 2, "enabled": True},
-            {"key": "give_up", "label": "客户放弃", "sort": 3, "enabled": True},
-            {"key": "budget", "label": "预算不足", "sort": 4, "enabled": True},
-            {"key": "other", "label": "其他", "sort": 5, "enabled": True},
-        ]),
-        # aftersale_type (5条)
-        ("aftersale_type", [
-            {"key": "return", "label": "退货", "sort": 1, "enabled": True},
-            {"key": "exchange", "label": "换货", "sort": 2, "enabled": True},
-            {"key": "repair", "label": "维修", "sort": 3, "enabled": True},
-            {"key": "complaint", "label": "投诉", "sort": 4, "enabled": True},
-            {"key": "other", "label": "其他", "sort": 5, "enabled": True},
-        ]),
-        # follow_method (2条)
-        ("follow_method", [
-            {"key": "wechat", "label": "微信", "sort": 1, "enabled": True},
-            {"key": "phone", "label": "电话", "sort": 2, "enabled": True},
-        ]),
-        # deal_stage (4条)
-        ("deal_stage", [
-            {"key": "quote", "label": "报价", "sort": 1, "enabled": True},
-            {"key": "confirm", "label": "待客户确认", "sort": 2, "enabled": True},
-            {"key": "won", "label": "成交", "sort": 3, "enabled": True},
-            {"key": "lost", "label": "流失", "sort": 4, "enabled": True},
-        ]),
-        # order_status (7条)
-        ("order_status", [
-            {"key": "pending_payment", "label": "待支付", "sort": 1, "enabled": True},
-            {"key": "deposit_paid", "label": "已支付押金", "sort": 2, "enabled": True},
-            {"key": "producing", "label": "生产中", "sort": 3, "enabled": True},
-            {"key": "balance_paid", "label": "已支付尾款", "sort": 4, "enabled": True},
-            {"key": "ready_to_ship", "label": "待发货", "sort": 5, "enabled": True},
-            {"key": "shipped", "label": "已发货", "sort": 6, "enabled": True},
-            {"key": "completed", "label": "已完成", "sort": 7, "enabled": True},
-        ]),
-        # aftersale_status (3条)
-        ("aftersale_status", [
-            {"key": "pending", "label": "待处理", "sort": 1, "enabled": True},
-            {"key": "processing", "label": "处理中", "sort": 2, "enabled": True},
-            {"key": "done", "label": "已完成", "sort": 3, "enabled": True},
-        ]),
-        # customer_type (2条)
-        ("customer_type", [
-            {"key": "personal", "label": "个人", "sort": 1, "enabled": True},
-            {"key": "company", "label": "公司", "sort": 2, "enabled": True},
-        ]),
-        # follow_object (5条)
-        ("follow_object", [
-            {"key": "lead", "label": "线索", "sort": 1, "enabled": True},
-            {"key": "customer", "label": "客户", "sort": 2, "enabled": True},
-            {"key": "deal", "label": "商机", "sort": 3, "enabled": True},
-            {"key": "order", "label": "订单", "sort": 4, "enabled": True},
-            {"key": "aftersale", "label": "售后", "sort": 5, "enabled": True},
-        ]),
-    ]
-    
-    # 插入所有种子数据
-    for dict_code, items in dict_seeds:
-        for item in items:
-            conn.execute("""
-                INSERT OR IGNORE INTO dict_items 
-                (dict_code, key, label, sort, enabled, meta, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-            """, (dict_code, item["key"], item["label"], item["sort"], 
-                  int(item["enabled"]), item.get("meta", "")))
+    from app.dicts import DICT_SEEDS
+
+    for dict_code, entries in DICT_SEEDS.items():
+        for entry in entries:
+            meta = entry.get("meta")
+            if isinstance(meta, dict):
+                meta = json.dumps(meta, ensure_ascii=False)
+            conn.execute(
+                "INSERT OR IGNORE INTO dict_items"
+                " (dict_code, key, label, sort, enabled, meta, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+                (
+                    dict_code,
+                    entry["key"],
+                    entry["label"],
+                    int(entry.get("sort") or 0),
+                    1 if entry.get("enabled", True) else 0,
+                    meta,
+                ),
+            )
 
 
 def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose: bool = True) -> dict:
     """
-    执行 CRM V2 增量迁移 v2_002。
-
+    执行 CRM V2 增量迁移。
+    
     Args:
         db_path: 数据库路径
         backup: 是否自动备份
@@ -498,13 +659,12 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
                 continue
             try:
                 if label == "dict_items_seed":
-                    # 特殊处理：种子数据插入
                     seed_dict_items(conn)
-                elif sql:
+                else:
                     conn.execute(sql)
-                applied += 1
             except sqlite3.Error as exc:  # 带语句名报错，定位快
                 raise RuntimeError(f"迁移语句失败 [{label}]: {exc}\nSQL: {sql.strip()[:200]}") from exc
+            applied += 1
         conn.execute("COMMIT")
         executed_sql = f"{applied} executed / {skipped} skipped"
     except BaseException:
@@ -531,22 +691,16 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
     required_tables = (
         "leads", "lead_tags", "customer_contacts", "carriers", "orders",
         "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
-        "customer_addresses", "carrier_contacts", "dict_items"
     )
     for table in required_tables:
         assert table_exists(conn, table), f"缺表 {table}"
         
     # 检查必要列是否存在
     required_columns = {
-        "customers": ("customer_type", "source", "source_other", "intent_level", "company_name", "owner", "note",
-                      "house_type", "floor", "install_at", "decoration_stage", "budget", "decider", "care"),
-        "deals": ("title", "lost_reason", "lost_reason_other", "source_lost_deal_id", "order_id", "owner",
-                  "drive_type", "note", "locked_at"),
-        "follow_ups": ("object_type", "object_id", "method", "kind", "detail"),
+        "customers": ("customer_type", "source", "source_other", "intent_level", "company_name", "owner", "note"),
+        "deals": ("title", "lost_reason", "lost_reason_other", "source_lost_deal_id", "order_id", "owner"),
+        "follow_ups": ("object_type", "object_id", "method"),
         "attachments": ("object_type", "object_id", "follow_up_id"),
-        "orders": ("deposit_amount", "balance_amount", "logistics_fee", "address_id", "receiver_name",
-                   "receiver_phone", "receiver_address"),
-        "order_status_log": ("event_type", "detail"),
     }
     for table, columns in required_columns.items():
         for column in columns:
@@ -573,7 +727,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
 
     if verbose:
         print(f"Backup: {backup_path}" if backup_path else "Backup: skipped")
-        print(f"M2 {MIGRATION_VERSION}: {executed_sql}")
+        print(f"M1 {MIGRATION_VERSION}: {executed_sql}")
         print(f"Rows unchanged: {after}")
         print(f"user_version={conn.execute('PRAGMA user_version').fetchone()[0]}")
 
@@ -583,13 +737,13 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="CRM V2 增量迁移 v2_002")
+    parser = argparse.ArgumentParser(description="CRM V2 增量迁移 v2_001")
     parser.add_argument("--db", default=None, help="数据库路径（默认 $CRM_DB 或 /opt/data/crm/crm.db）")
     parser.add_argument("--no-backup", action="store_true", help="跳过自动备份（仅限临时副本）")
     args = parser.parse_args(argv)
 
     result = run_migrations(Path(args.db) if args.db else None, backup=not args.no_backup)
-    print(f"OK v2_002 applied={result['applied']} skipped={result['skipped']}")
+    print(f"OK v2_001 applied={result['applied']} skipped={result['skipped']}")
     return 0
 
 

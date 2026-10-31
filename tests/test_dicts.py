@@ -68,7 +68,10 @@ class TestDicts(unittest.TestCase):
         # 检查产品型号种子数据
         product_models = DICT_SEEDS["product_model"]
         self.assertGreater(len(product_models), 20)
-        self.assertIn({"key": "XW-60", "label": "XW-60 天窗 600×1200"}, product_models)
+        xw60 = [m for m in product_models if m["key"] == "XW-60"]
+        self.assertEqual(len(xw60), 1, "产品型号 XW-60 必须存在且唯一")
+        self.assertEqual(xw60[0]["label"], "XW-60 天窗 600×1200")
+        self.assertEqual(xw60[0]["meta"]["size"], "600×1200", "型号必须带出尺寸")
         
     def test_items_function(self):
         """测试 items 函数"""
@@ -106,10 +109,9 @@ class TestDicts(unittest.TestCase):
         self.assertFalse(validate("nonexistent_dict", "test"))
     
     def test_used_count_function(self):
-        """测试 used_count 函数"""
-        # 测试降级情况（无数据库）
-        count = used_count("deal_stage", "quote")
-        self.assertEqual(count, 0)
+        """used_count 必须实时统计业务表引用数（不是种子里的假数字）"""
+        self.assertEqual(used_count("deal_stage", "lost"), 0, "没人用的阶段应为 0")
+        self.assertIsInstance(used_count("deal_stage", "quote"), int)
         
     def test_level_function(self):
         """测试 level 函数"""

@@ -388,7 +388,7 @@ DICT_REGISTRY = {
 
 > 前缀不变：对外 `/crm/api/crm/...` → 后端 `/api/crm/...`（nginx `location /crm/api/` 反代 8010）。
 > 认证不变：HttpOnly Session Cookie。
-> 错误统一 `{"code": "...", "message": "中文提示"}`；**message 直接给用户看**，中文、可读、不带堆栈。
+> 错误统一沿用仓库既有格式 `{"detail": "中文提示", "code": "err_code"}`（`app/errors.py` 的 `ApiError`）；**detail 直接给用户看**，中文、可读、不带堆栈。
 
 ### 5.1 约定
 
