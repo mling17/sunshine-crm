@@ -167,7 +167,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     # 1. 取线索，status ∈ (new, following) 否则 409 lead_closed
     lead_row = conn.execute(
         "SELECT id, status, phone, wechat, name, lead_type, company_name, "
-        "source, source_other, location, note, intent_level, owner "
+        "source, source_other, location, note, intent_level, owner, created_at "
         "FROM leads WHERE id = ? AND is_delete = 0",
         (lead_id,),
     ).fetchone()
@@ -243,7 +243,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
         dedupe_mode = "linked"
     else:
         # 新建客户
-        created_at = now_iso()
+        converted_at = now_iso()
         
         # 根据线索类型决定客户名称
         if lead_row["lead_type"] == "company":
@@ -271,12 +271,31 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
                 lead_row["note"],
                 lead_row["intent_level"],
                 lead_row["owner"],
-                created_at,
-                created_at,
+                lead_row["created_at"],
+                converted_at,
             ),
         )
         customer_id = int(cur.lastrowid or 0)
         dedupe_mode = "forced"
+
+        # 公司是客户主档，线索姓名是主联系人，不能覆盖公司名。
+        if lead_row["lead_type"] == "company" and lead_row["name"]:
+            conn.execute(
+                """
+                INSERT INTO customer_contacts
+                    (customer_id, name, phone, wechat, is_primary,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    customer_id,
+                    lead_row["name"],
+                    lead_row["phone"],
+                    lead_row["wechat"],
+                    lead_row["created_at"],
+                    converted_at,
+                ),
+            )
     
     # 5. 插入商机
     deal_in = convert_in.deal
@@ -375,7 +394,16 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     # 获取客户详情
     customer_row = conn.execute(
         "SELECT id, name, phone, wechat, customer_type, company_name, source, "
-        "source_other, location, note, intent_level, owner, created_at, updated_at "
+        "source_other, location, note, intent_level, owner, created_at, updated_at, "
+        "(SELECT cc.name FROM customer_contacts cc"
+        " WHERE cc.customer_id = customers.id AND cc.is_delete = 0"
+        " ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1) AS primary_contact_name, "
+        "(SELECT cc.phone FROM customer_contacts cc"
+        " WHERE cc.customer_id = customers.id AND cc.is_delete = 0"
+        " ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1) AS primary_contact_phone, "
+        "(SELECT cc.wechat FROM customer_contacts cc"
+        " WHERE cc.customer_id = customers.id AND cc.is_delete = 0"
+        " ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1) AS primary_contact_wechat "
         "FROM customers WHERE id = ? AND is_delete = 0",
         (customer_id,),
     ).fetchone()

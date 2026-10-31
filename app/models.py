@@ -131,6 +131,10 @@ class CustomerOut(BaseModel):
     source_other: str | None = None
     intent_level: str | None = None
     company_name: str | None = None
+    #: 公司客户的主联系人；个人客户直接使用客户主档姓名/联系方式
+    primary_contact_name: str | None = None
+    primary_contact_phone: str | None = None
+    primary_contact_wechat: str | None = None
     owner: str | None = None
     created_at: str
     updated_at: str

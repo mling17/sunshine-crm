@@ -469,6 +469,41 @@ class LeadsTest(ApiTestCase):
         self.assertIsNotNone(body["customer"])
         self.assertIsNotNone(body["deal"])
         self.assertEqual(body["dedupe"], "forced")
+        self.assertEqual(body["customer"]["created_at"], body["lead"]["created_at"])
+
+    def test_company_lead_conversion_keeps_primary_contact_searchable(self):
+        lead = self.create_lead(
+            name="陈明",
+            phone="18366326404",
+            wechat="游戏520",
+            lead_type="company",
+            company_name="中电金信",
+        )
+        resp = self.client.post(f"/api/crm/leads/{lead['id']}/convert", json={
+            "mode": "new",
+            "deal": {
+                "title": "天窗 XW-60",
+                "product_type": "天窗",
+                "model": "XW-60",
+                "spec": "1400x480",
+                "drive_type": "manual",
+                "amount": 12800.0,
+            },
+        })
+        self.assertEqual(resp.status_code, 200, resp.text)
+        customer = resp.json()["customer"]
+        self.assertEqual(customer["name"], "中电金信")
+        self.assertEqual(customer["company_name"], "中电金信")
+        self.assertEqual(customer["primary_contact_name"], "陈明")
+        self.assertEqual(customer["primary_contact_phone"], "18366326404")
+        self.assertEqual(customer["primary_contact_wechat"], "游戏520")
+
+        for term in ("陈明", "中电金信", "游戏520"):
+            found = self.client.get(
+                "/api/crm/customers", params={"search": term}
+            ).json()
+            self.assertEqual(found["total"], 1, term)
+            self.assertEqual(found["items"][0]["id"], customer["id"], term)
 
     def test_lead_convert_with_link_mode(self):
         # 按 PLANNER §2.3：link 模式要求 link_customer_id 在去重命中集合内

@@ -148,6 +148,45 @@ class TestMigrations(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_v2_006_backfills_company_primary_contact_once(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-11-01T00:00:00Z"
+        try:
+            cur = conn.execute(
+                "INSERT INTO customers"
+                " (name, phone, wechat, customer_type, company_name, created_at, updated_at)"
+                " VALUES ('中电金信','18366326404','游戏520','company','中电金信',?,?)",
+                (now, now),
+            )
+            customer_id = int(cur.lastrowid)
+            conn.execute(
+                "INSERT INTO leads"
+                " (name, phone, wechat, lead_type, company_name, source, status,"
+                "  converted_customer_id, created_at, updated_at)"
+                " VALUES ('陈明','18366326404','游戏520','company','中电金信',"
+                "         'wechat','converted',?,?,?)",
+                (customer_id, now, now),
+            )
+            conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_006'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        run_migrations(self.db, backup=False, verbose=False)
+        run_migrations(self.db, backup=False, verbose=False)
+
+        conn = sqlite3.connect(str(self.db))
+        try:
+            rows = conn.execute(
+                "SELECT name, phone, wechat, is_primary"
+                " FROM customer_contacts WHERE customer_id = ? AND is_delete = 0",
+                (customer_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(rows, [("陈明", "18366326404", "游戏520", 1)])
+
 
 if __name__ == "__main__":
     unittest.main()

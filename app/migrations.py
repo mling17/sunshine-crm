@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_005"
-SCHEMA_USER_VERSION = 5
+MIGRATION_VERSION = "v2_006"
+SCHEMA_USER_VERSION = 6
 
 
 def default_db_path() -> Path:
@@ -626,6 +626,41 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_005', datetime('now'), '统一审计时间与软删除字段；线索电话唯一')"),
     ("user_version v2_005", None, "PRAGMA user_version = 5"),
+    # ---------- 23. v2_006：公司线索主联系人回填 ----------
+    ("customer_company_primary_contact_backfill",
+     _once("v2_006", "leads", "customers", "customer_contacts"), """
+    INSERT INTO customer_contacts
+        (customer_id, name, phone, wechat, is_primary, created_at, updated_at)
+    SELECT l.converted_customer_id, TRIM(l.name), l.phone, l.wechat, 1,
+           l.created_at, COALESCE(NULLIF(l.updated_at, ''), l.created_at)
+    FROM leads l
+    INNER JOIN customers c
+        ON c.id = l.converted_customer_id AND c.is_delete = 0
+    WHERE l.is_delete = 0
+      AND l.status = 'converted'
+      AND l.lead_type = 'company'
+      AND l.converted_customer_id IS NOT NULL
+      AND NULLIF(TRIM(l.name), '') IS NOT NULL
+      AND l.id = (
+          SELECT l2.id
+          FROM leads l2
+          WHERE l2.is_delete = 0
+            AND l2.status = 'converted'
+            AND l2.lead_type = 'company'
+            AND l2.converted_customer_id = l.converted_customer_id
+            AND NULLIF(TRIM(l2.name), '') IS NOT NULL
+          ORDER BY COALESCE(NULLIF(l2.updated_at, ''), l2.created_at) DESC, l2.id DESC
+          LIMIT 1
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM customer_contacts cc
+          WHERE cc.customer_id = l.converted_customer_id AND cc.is_delete = 0
+      )
+    """),
+    ("schema_migrations v2_006", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_006', datetime('now'), '公司客户主联系人继承与客户搜索口径')"),
+    ("user_version v2_006", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 

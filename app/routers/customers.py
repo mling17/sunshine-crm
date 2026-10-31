@@ -40,6 +40,15 @@ _CUSTOMER_SELECT = """
 SELECT c.id, c.name, c.phone, c.wechat, c.location, c.note,
        c.customer_type, c.source, c.source_other, c.intent_level, c.company_name, c.owner,
        c.created_at, c.updated_at,
+       (SELECT cc.name FROM customer_contacts cc
+         WHERE cc.customer_id = c.id AND cc.is_delete = 0
+         ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1) AS primary_contact_name,
+       (SELECT cc.phone FROM customer_contacts cc
+         WHERE cc.customer_id = c.id AND cc.is_delete = 0
+         ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1) AS primary_contact_phone,
+       (SELECT cc.wechat FROM customer_contacts cc
+         WHERE cc.customer_id = c.id AND cc.is_delete = 0
+         ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1) AS primary_contact_wechat,
        (SELECT COUNT(*) FROM deals d WHERE d.customer_id = c.id AND d.is_delete = 0) AS deals_total,
        (SELECT COALESCE(SUM(d.amount), 0) FROM deals d
          WHERE d.customer_id = c.id AND d.stage = 'won' AND d.is_delete = 0) AS total_closed_amount
@@ -150,9 +159,18 @@ def list_customers(
         where_parts.append(
             "(c.name LIKE ? ESCAPE '\\' "
             "OR c.phone LIKE ? ESCAPE '\\' "
-            "OR c.location LIKE ? ESCAPE '\\')"
+            "OR c.wechat LIKE ? ESCAPE '\\' "
+            "OR c.company_name LIKE ? ESCAPE '\\' "
+            "OR c.location LIKE ? ESCAPE '\\' "
+            "OR EXISTS ("
+            "  SELECT 1 FROM customer_contacts cc"
+            "  WHERE cc.customer_id = c.id AND cc.is_delete = 0"
+            "  AND (cc.name LIKE ? ESCAPE '\\'"
+            "       OR cc.phone LIKE ? ESCAPE '\\'"
+            "       OR cc.wechat LIKE ? ESCAPE '\\')"
+            "))"
         )
-        params.extend([pattern, pattern, pattern])
+        params.extend([pattern] * 8)
 
     tag_name = (tag or "").strip()
     if tag_name:

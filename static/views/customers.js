@@ -7,7 +7,7 @@ function viewCustomers(root) {
             '<div class=\"card-head\"><h2>客户档案</h2>' +
             '<span class=\"small muted\">客户由线索转化，不在此新建</span></div>' +
             '<div class=\"searchbar\">' +
-            '<input id=\"custSearch\" type=\"search\" placeholder=\"搜姓名 / 电话 / 微信 / 地区\" autocomplete=\"off\" value=\"' + esc(st.q) + '\">' +
+            '<input id=\"custSearch\" type=\"search\" placeholder=\"搜客户 / 公司 / 联系人 / 电话 / 微信 / 地区\" autocomplete=\"off\" value=\"' + esc(st.q) + '\">' +
             '<button type=\"button\" class=\"btn\" id=\"custSearchBtn\">搜索</button>' +
             '</div>' +
             '<div class=\"chips\" id=\"tagChips\">' + chipHtml(tags, st.tag) + '</div>' +
@@ -64,8 +64,12 @@ function loadCustomers(root) {
             { title: '名称', render: function (c) {
                 return '<a href="#/customers/' + c.id + '">' + esc(c.name) + '</a>' +
                     (c.is_repeat ? ' <span class="badge ok">老客</span>' : '') +
-                    (c.company_name && c.customer_type === 'company'
-                        ? '<div class="small muted">' + esc(c.company_name) + '</div>' : '');
+                    (c.customer_type === 'company'
+                        ? '<div class="small muted">联系人：' +
+                            esc(c.primary_contact_name || '—') +
+                            (c.primary_contact_phone ? ' · ' + esc(c.primary_contact_phone) : '') +
+                            '</div>'
+                        : '');
             } },
             { title: '类型', nowrap: true, render: function (c) {
                 return c.customer_type === 'company' ? '公司' : '个人';
@@ -276,6 +280,9 @@ function viewCustomerDetail(root, rawId) {
             '微信：' + esc(c.wechat || '—') + '<br>' +
             '地区：' + esc(c.location || '—') + '<br>' +
             '公司名：' + esc(c.company_name || '—') + '<br>' +
+            '联系人：' + esc(c.primary_contact_name || '—') +
+                (c.primary_contact_phone ? ' · ' + esc(c.primary_contact_phone) : '') +
+                (c.primary_contact_wechat ? ' · 微信 ' + esc(c.primary_contact_wechat) : '') + '<br>' +
             '来源：' + (c.source ? esc(SOURCE_LABELS[c.source] || c.source) : '—') + '<br>' +
             '意向：' + (c.intent_level ? esc(INTENT_LABELS[c.intent_level] || c.intent_level) : '—') + '<br>' +
             '备注：' + esc(c.note || '—') + '<br>' +
