@@ -228,11 +228,12 @@
     toastTimer = setTimeout(function () { el.hidden = true; }, isError ? 4200 : 2200);
   }
 
-  function ApiError(message, status, code) {
+  function ApiError(message, status, code, data) {
     this.name = 'ApiError';
     this.message = message;
     this.status = status || 0;
     this.code = code || null;   // 后端 {"detail","code"} 里的业务码，前端按码分支
+    this.data = data || null;
   }
   ApiError.prototype = Object.create(Error.prototype);
 
@@ -271,7 +272,7 @@
           }
           throw new ApiError(msg === 'HTTP 401' ? '账号或密码错误' : msg, 401, (data && data.code) || null);
         }
-        throw new ApiError(msg, res.status, (data && data.code) || null);
+        throw new ApiError(msg, res.status, (data && data.code) || null, data);
       });
     }, function () {
       throw new ApiError('网络异常：连不上服务，请确认连着内网', 0);
@@ -564,36 +565,27 @@
       }
     }).catch(function () { /* 拿不到就沿用当前值 */ });
     openModal('profileModal');
-    setTimeout(function () { if (userEl) { userEl.focus(); } }, 30);
+    setTimeout(function () { if (nameEl) { nameEl.focus(); } }, 30);
   }
 
   function submitProfile(ev) {
     ev.preventDefault();
     var errEl = document.getElementById('profErr');
-    var userEl = document.getElementById('profUser');
     var nameEl = document.getElementById('profName');
     var btn = document.getElementById('profSubmit');
-    var username = (userEl.value || '').trim();
     var displayName = (nameEl.value || '').trim();
     errEl.hidden = true;
-    if (!username) {
-      errEl.textContent = '登录账号不能为空';
-      errEl.hidden = false;
-      return;
-    }
     btn.disabled = true;
-    api('/me/profile', { method: 'PUT', body: { username: username, display_name: displayName } })
+    api('/me/profile', { method: 'PUT', body: { display_name: displayName } })
       .then(function (me) {
-        state.me = (me && me.username) || username;
+        state.me = (me && me.username) || state.me;
         state.displayName = (me && me.display_name) || state.me;
         document.getElementById('whoami').textContent = state.displayName;
         closeModal('profileModal');
         toast('个人信息已保存');
       })
       .catch(function (err) {
-        errEl.textContent = err.status === 409
-          ? '这个登录账号已被占用，换一个'
-          : (err.message || '保存失败');
+        errEl.textContent = err.message || '保存失败';
         errEl.hidden = false;
       })
       .then(function () { btn.disabled = false; });

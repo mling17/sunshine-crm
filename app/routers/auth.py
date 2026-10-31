@@ -36,9 +36,8 @@ class LoginIn(BaseModel):
 
 
 class ProfileIn(BaseModel):
-    """修改个人信息：用户名（登录名）与显示名都可改，留空表示不动。"""
+    """修改个人信息：登录账号固定，不允许修改；只允许改显示名。"""
 
-    username: str | None = Field(default=None, min_length=1, max_length=64)
     display_name: str | None = Field(default=None, max_length=32)
 
 
@@ -138,28 +137,10 @@ def me(username: str = Depends(require_auth)) -> dict:
 
 @router.put("/me/profile")
 def update_profile(payload: ProfileIn, request: Request, username: str = Depends(require_auth)) -> dict:
-    """改登录名 / 显示名。改登录名要同步 sessions，否则当前会话立刻失效。"""
-    new_username = (payload.username or "").strip() or None
+    """只改显示名；登录账号是身份标识，不提供修改入口。"""
     display_name = (payload.display_name or "").strip() or None
 
     with db_conn() as conn:
-        if new_username and new_username != username:
-            taken = conn.execute(
-                "SELECT 1 FROM users WHERE username = ?", (new_username,)
-            ).fetchone()
-            if taken:
-                raise ApiError(
-                    status_code=409, code="username_taken", message=f"用户名「{new_username}」已被占用"
-                )
-            conn.execute(
-                "UPDATE users SET username = ? WHERE username = ?", (new_username, username)
-            )
-            # 会话里存的是用户名，必须一起改，否则下一次请求 401
-            conn.execute(
-                "UPDATE sessions SET username = ? WHERE username = ?", (new_username, username)
-            )
-            username = new_username
-
         if display_name is not None:
             conn.execute(
                 "UPDATE users SET display_name = ? WHERE username = ?", (display_name, username)

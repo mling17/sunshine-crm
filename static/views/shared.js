@@ -135,9 +135,10 @@ function dataTable(columns, rows, emptyText) {
     return '<tr>' + columns.map(function (c) {
       var v = c.render ? c.render(r) : esc(r[c.key] === null || r[c.key] === undefined ? '' : r[c.key]);
       return '<td' + (c.align ? ' style="text-align:' + c.align + '"' : '') +
+        ' data-label="' + esc(c.title) + '"' +
         (c.nowrap ? ' class="nowrap"' : '') + '>' + v + '</td>';
     }).join('') + '</tr>';
-  }).join('') : '<tr><td colspan="' + columns.length + '"><p class="empty">' +
+  }).join('') : '<tr class="empty-row"><td colspan="' + columns.length + '"><p class="empty">' +
       esc(emptyText || '暂无数据') + '</p></td></tr>';
   return '<div class="table-wrap"><table class="data-table"><thead><tr>' + head +
     '</tr></thead><tbody>' + body + '</tbody></table></div>';

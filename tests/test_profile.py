@@ -18,28 +18,17 @@ class ProfileTest(ApiTestCase):
         self.assertEqual(resp.json()["display_name"], "陈明")
         self.assertEqual(self.client.get("/api/crm/me").json()["display_name"], "陈明")
 
-    def test_rename_username_keeps_session(self):
-        resp = self.client.put("/api/crm/me/profile", json={"username": "chen2"})
+    def test_username_is_read_only(self):
+        resp = self.client.put(
+            "/api/crm/me/profile",
+            json={"username": "chen2", "display_name": "陈明"},
+        )
         self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertEqual(resp.json()["username"], "chen2")
-        # 改名后当前会话仍然有效（sessions 已同步）
+        self.assertEqual(resp.json()["username"], "chen")
+        self.assertEqual(resp.json()["display_name"], "陈明")
         me = self.client.get("/api/crm/me")
         self.assertEqual(me.status_code, 200, me.text)
-        self.assertEqual(me.json()["username"], "chen2")
-        # 还原用户名（测试库共享，后续用例要用 chen 登录）
-        self.assertEqual(
-            self.client.put("/api/crm/me/profile", json={"username": "chen"}).status_code, 200
-        )
-
-    def test_username_conflict(self):
-        with self.db_conn() as conn:
-            conn.execute(
-                "INSERT INTO users (username, password_hash, created_at)"
-                " VALUES ('other', 'x', '2026-10-31T00:00:00Z')"
-            )
-        resp = self.client.put("/api/crm/me/profile", json={"username": "other"})
-        self.assertEqual(resp.status_code, 409, resp.text)
-        self.assertEqual(resp.json()["code"], "username_taken")
+        self.assertEqual(me.json()["username"], "chen")
 
     def test_change_password_flow(self):
         bad = self.client.put(

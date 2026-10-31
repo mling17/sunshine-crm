@@ -418,6 +418,31 @@ async def create_follow_up(
         )
         follow_up_id = int(cur.lastrowid or 0)
 
+        # 线索产生第一条真实跟进后，状态由「新线索」进入「跟进中」。
+        # 转化/失效是终态，前面已经拦截，这里只处理仍在流程中的线索。
+        if object_type == "lead":
+            current_lead = conn.execute(
+                "SELECT status FROM leads WHERE id = ?", (object_id_value,)
+            ).fetchone()
+            if current_lead and current_lead["status"] == "new":
+                conn.execute(
+                    "UPDATE leads SET status = 'following', updated_at = ? WHERE id = ?",
+                    (created_at, object_id_value),
+                )
+                from app.timeline import add_entry as _add_entry
+                _add_entry(
+                    conn,
+                    object_type="lead",
+                    object_id=object_id_value,
+                    kind="change",
+                    content="状态更新：新线索 → 跟进中",
+                )
+            else:
+                conn.execute(
+                    "UPDATE leads SET updated_at = ? WHERE id = ?",
+                    (created_at, object_id_value),
+                )
+
         # 售后：待处理遇到跟进 → 自动进入「处理中」（定稿 v2.4 #9 / PLANNER-V3 §6.4）
         if object_type == "aftersale":
             current = conn.execute(

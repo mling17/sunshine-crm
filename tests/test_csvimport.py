@@ -244,5 +244,102 @@ class CsvImportTest(ApiTestCase):
         )
 
 
+class LeadCsvImportTest(ApiTestCase):
+    LEAD_MAPPING = {
+        "姓名": "name",
+        "电话": "phone",
+        "微信": "wechat",
+        "地区": "location",
+        "来源": "source",
+    }
+    CSV = (
+        "姓名,电话,微信,地区,来源\n"
+        "青岛装饰,13800138000,qdzs,青岛市北区,转介绍\n"
+        "济南门窗,13900139000,jnmc,济南高新区,微信\n"
+    ).encode("utf-8")
+
+    def commit_leads(self, data: bytes, mapping=None):
+        preview = self.client.post(
+            "/api/crm/import/preview",
+            files={"file": ("leads.csv", data, "text/csv")},
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        return self.client.post(
+            "/api/crm/import/commit",
+            json={
+                "file_ref": preview.json()["file_ref"],
+                "column_mapping": mapping or self.LEAD_MAPPING,
+                "target": "leads",
+            },
+        )
+
+    def test_import_leads_defaults_to_medium_and_writes_create_history(self):
+        resp = self.commit_leads(self.CSV)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["imported"], 2)
+
+        leads = self.client.get("/api/crm/leads?size=100").json()["items"]
+        self.assertEqual(len(leads), 2)
+        self.assertTrue(all(item["intent_level"] == "medium" for item in leads))
+        self.assertEqual({item["source"] for item in leads}, {"referral", "wechat"})
+
+        for lead in leads:
+            history = self.client.get(
+                f"/api/crm/follow-ups?object_type=lead&object_id={lead['id']}&include_system=true"
+            ).json()
+            self.assertTrue(any(row["kind"] == "create" for row in history))
+
+    def test_import_rejects_source_outside_dictionary_without_partial_write(self):
+        data = (
+            "姓名,电话,微信,地区,来源\n"
+            "合法线索,13800138000,okwx,济南,微信\n"
+            "非法来源,13900139000,badwx,青岛,自己编的来源\n"
+        ).encode("utf-8")
+        resp = self.commit_leads(data)
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertIn("来源", resp.json()["detail"])
+        self.assertIn("微信", resp.json()["detail"])
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 0)
+
+    def test_import_requires_contact_info(self):
+        data = "姓名,电话,微信,地区,来源\n无联系方式,,,济南,微信\n".encode("utf-8")
+        resp = self.commit_leads(data)
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertIn("电话和微信至少填写一个", resp.json()["detail"])
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 0)
+
+    def test_import_requires_source_column_mapping(self):
+        resp = self.commit_leads(
+            self.CSV,
+            {"姓名": "name", "电话": "phone", "微信": "wechat"},
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertIn("来源", resp.json()["detail"])
+
+    def test_import_deduplicates_normalized_phone_and_wechat(self):
+        existing = self.client.post("/api/crm/leads", json={
+            "name": "已有线索",
+            "phone": "138-0013-8000",
+            "wechat": "QdZS",
+            "source": "wechat",
+        })
+        self.assertEqual(existing.status_code, 200, existing.text)
+
+        data = (
+            "姓名,电话,微信,地区,来源\n"
+            "重复电话,138 0013 8000,newwx,济南,微信\n"
+            "重复微信,13700137000,qdzs,青岛,转介绍\n"
+            "有效新线索一,13600136000,unique,烟台,电话\n"
+            "文件内重复电话,136-0013-6000,samefile,潍坊,电话\n"
+            "有效新线索二,13500135000,newunique,临沂,微信\n"
+        ).encode("utf-8")
+        resp = self.commit_leads(data)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["imported"], 2)
+        self.assertEqual(body["duplicate_count"], 3)
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

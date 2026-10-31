@@ -30,8 +30,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-MIGRATION_VERSION = "v2_003"
-SCHEMA_USER_VERSION = 3
+MIGRATION_VERSION = "v2_004"
+SCHEMA_USER_VERSION = 4
 
 
 def default_db_path() -> Path:
@@ -607,6 +607,17 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_003", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_003', datetime('now'), '用户显示名 display_name')"),
+    # ---------- 21. v2_004：已有跟进的线索回填「跟进中」 ----------
+    ("leads.following_backfill", _once("v2_004", "leads", "follow_ups"),
+     "UPDATE leads SET status = 'following' "
+     "WHERE status = 'new' AND EXISTS ("
+     " SELECT 1 FROM follow_ups f"
+     " WHERE f.object_type = 'lead' AND f.object_id = leads.id AND f.kind = 'follow'"
+     ")"),
+    ("schema_migrations v2_004", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_004', datetime('now'), '线索有跟进后进入跟进中')"),
+    ("user_version v2_004", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 

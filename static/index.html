@@ -8,14 +8,14 @@
 
   <!-- PWA：添加到主屏幕（图标 + manifest；service worker 只做静态壳缓存） -->
   <link rel="manifest" href="/crm/manifest.json">
-  <meta name="theme-color" content="#1f6feb">
+  <meta name="theme-color" content="#102743">
   <link rel="icon" type="image/png" sizes="192x192" href="/crm/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/crm/icons/icon-192.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="天幕CRM">
 
-  <link rel="stylesheet" href="/crm/app.css?v=20261031e19">
+  <link rel="stylesheet" href="/crm/app.css?v=20261031e20">
 </head>
 <body>
 
@@ -86,8 +86,8 @@
     </div>
     <form id="profileForm" class="modal-body" autocomplete="off">
       <div class="field">
-        <label for="profUser">登录账号</label>
-        <input id="profUser" name="username" maxlength="64" required>
+        <label for="profUser">登录账号（不可修改）</label>
+        <input id="profUser" name="username" maxlength="64" disabled>
       </div>
       <div class="field">
         <label for="profName">显示名称</label>
@@ -139,18 +139,18 @@
   <div class="login-wrap"><div class="login-card">这个页面需要启用 JavaScript 才能使用。</div></div>
 </noscript>
 
-<script src="/crm/views/shared.js?v=20261031e19"></script>
-<script src="/crm/views/dashboard.js?v=20261031e19"></script>
-<script src="/crm/views/leads.js?v=20261031e19"></script>
-<script src="/crm/views/customers.js?v=20261031e19"></script>
-<script src="/crm/views/deals.js?v=20261031e19"></script>
-<script src="/crm/views/orders.js?v=20261031e19"></script>
-<script src="/crm/views/aftersales.js?v=20261031e19"></script>
-<script src="/crm/views/logistics.js?v=20261031e19"></script>
-<script src="/crm/views/followups.js?v=20261031e19"></script>
-<script src="/crm/views/stats.js?v=20261031e19"></script>
-<script src="/crm/views/import.js?v=20261031e19"></script>
-<script src="/crm/views/dict.js?v=20261031e19"></script>
-<script src="/crm/app.js?v=20261031e19"></script>
+<script src="/crm/views/shared.js?v=20261031e20"></script>
+<script src="/crm/views/dashboard.js?v=20261031e20"></script>
+<script src="/crm/views/leads.js?v=20261031e20"></script>
+<script src="/crm/views/customers.js?v=20261031e20"></script>
+<script src="/crm/views/deals.js?v=20261031e20"></script>
+<script src="/crm/views/orders.js?v=20261031e20"></script>
+<script src="/crm/views/aftersales.js?v=20261031e20"></script>
+<script src="/crm/views/logistics.js?v=20261031e20"></script>
+<script src="/crm/views/followups.js?v=20261031e20"></script>
+<script src="/crm/views/stats.js?v=20261031e20"></script>
+<script src="/crm/views/import.js?v=20261031e20"></script>
+<script src="/crm/views/dict.js?v=20261031e20"></script>
+<script src="/crm/app.js?v=20261031e20"></script>
 </body>
 </html>

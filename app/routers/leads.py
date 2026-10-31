@@ -13,6 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db import db_conn
+from app.errors import ApiError
 from app import labels
 from app.models import (
     LeadConvertCheckOut,
@@ -30,6 +31,14 @@ from app.security import now_iso
 from app.services import convert_lead, read_images
 
 _FALLBACK_SOURCES = ("wechat", "phone", "referral", "existing", "stock", "other")
+
+
+def _normalize_phone(raw: str | None) -> str:
+    return "".join(ch for ch in str(raw or "") if ch not in " -()").strip()
+
+
+def _normalize_wechat(raw: str | None) -> str:
+    return str(raw or "").strip().casefold()
 
 
 def _source_allowed(key: str) -> bool:
@@ -146,10 +155,14 @@ def list_leads(
     if status is not None:
         where_parts.append("l.status = ?")
         params.append(status)
+        if status != "converted":
+            where_parts.append("l.converted_deal_id IS NULL")
     elif not include_converted:
-        # 2026-10-31 用户定稿：线索一旦转商机（status=converted）就不再出现在线索池，
-        # 它的档案去客户页看；要查历史转化记录就点「已转化」页签或带 include_converted=true
-        where_parts.append("(l.status IS NULL OR l.status <> 'converted')")
+        # 线索一旦关联商机，就只保留在客户链路里，不再出现在线索池。
+        where_parts.append(
+            "(l.status IS NULL OR l.status <> 'converted')"
+            " AND l.converted_deal_id IS NULL"
+        )
     if source is not None:
         where_parts.append("l.source = ?")
         params.append(source)
@@ -243,55 +256,43 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
     with db_conn() as conn:
         # 检查是否有重复线索或客户（Q6）
         duplicate_hint = None
-        if lead_in.phone:
-            # 检查线索
-            lead_row = conn.execute(
-                "SELECT id, name FROM leads WHERE phone = ?",
-                (lead_in.phone,),
-            ).fetchone()
-            if lead_row:
+        phone_key = _normalize_phone(lead_in.phone)
+        wechat_key = _normalize_wechat(lead_in.wechat)
+        candidates = [
+            {"object_type": "lead", **dict(row)}
+            for row in conn.execute(
+                "SELECT id, name, phone, wechat FROM leads"
+                " WHERE status IN ('new', 'following')"
+            ).fetchall()
+        ] + [
+            {"object_type": "customer", **dict(row)}
+            for row in conn.execute(
+                "SELECT id, name, phone, wechat FROM customers"
+            ).fetchall()
+        ]
+        for candidate in candidates:
+            phone_match = phone_key and phone_key == _normalize_phone(candidate["phone"])
+            wechat_match = wechat_key and wechat_key == _normalize_wechat(candidate["wechat"])
+            if phone_match or wechat_match:
                 duplicate_hint = {
-                    "object_type": "lead",
-                    "object_id": lead_row["id"],
-                    "name": lead_row["name"] or "未知"
+                    "object_type": candidate["object_type"],
+                    "object_id": candidate["id"],
+                    "name": candidate["name"] or "未知",
                 }
-            else:
-                # 检查客户
-                customer_row = conn.execute(
-                    "SELECT id, name FROM customers WHERE phone = ?",
-                    (lead_in.phone,),
-                ).fetchone()
-                if customer_row:
-                    duplicate_hint = {
-                        "object_type": "customer",
-                        "object_id": customer_row["id"],
-                        "name": customer_row["name"] or "未知"
-                    }
-        
-        if not duplicate_hint and lead_in.wechat:
-            # 检查线索
-            lead_row = conn.execute(
-                "SELECT id, name FROM leads WHERE wechat = ?",
-                (lead_in.wechat,),
-            ).fetchone()
-            if lead_row:
-                duplicate_hint = {
-                    "object_type": "lead",
-                    "object_id": lead_row["id"],
-                    "name": lead_row["name"] or "未知"
-                }
-            else:
-                # 检查客户
-                customer_row = conn.execute(
-                    "SELECT id, name FROM customers WHERE wechat = ?",
-                    (lead_in.wechat,),
-                ).fetchone()
-                if customer_row:
-                    duplicate_hint = {
-                        "object_type": "customer",
-                        "object_id": customer_row["id"],
-                        "name": customer_row["name"] or "未知"
-                    }
+                if phone_match:
+                    duplicate_hint["phone"] = lead_in.phone
+                if wechat_match:
+                    duplicate_hint["wechat"] = lead_in.wechat
+                break
+
+        if duplicate_hint:
+            contact = duplicate_hint.get("phone") or duplicate_hint.get("wechat")
+            raise ApiError(
+                status_code=409,
+                code="duplicate_contact",
+                message=f"联系方式已存在：{duplicate_hint['name']}（{contact}）",
+                duplicate_hint=duplicate_hint,
+            )
 
         cur = conn.execute(
             """
@@ -354,8 +355,6 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
 
         lead = _fetch_lead(conn, lead_id)
     
-    if duplicate_hint:
-        return LeadOut(**lead.model_dump(exclude={"duplicate_hint"}), duplicate_hint=duplicate_hint)
     return lead
 
 
@@ -431,9 +430,13 @@ def get_lead(lead_id: int) -> LeadDetailOut:
 def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
     """改线索。终态改 → 409 `lead_closed`。"""
     with db_conn() as conn:
-        # 检查线索是否存在
+        # 检查线索是否存在，并保留旧值用于准确记录本次实际修改项。
         lead = conn.execute(
-            "SELECT status FROM leads WHERE id = ?",
+            """
+            SELECT status, name, phone, wechat, lead_type, company_name,
+                   source, source_other, location, note, intent_level
+            FROM leads WHERE id = ?
+            """,
             (lead_id,),
         ).fetchone()
         if lead is None:
@@ -444,56 +447,50 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
             raise HTTPException(status_code=409, detail="线索已转化或已失效，无法修改")
         
         # 构造更新字段
+        current_tags = [
+            row["name"] for row in conn.execute(
+                "SELECT t.name FROM tags t JOIN lead_tags lt ON t.id = lt.tag_id"
+                " WHERE lt.lead_id = ? ORDER BY t.id",
+                (lead_id,),
+            ).fetchall()
+        ]
+
         updates = []
         params = []
+        changed: list[str] = []
+        field_map = [
+            ("name", "姓名"),
+            ("phone", "电话"),
+            ("wechat", "微信"),
+            ("lead_type", "类型"),
+            ("company_name", "公司名"),
+            ("source", "来源"),
+            ("source_other", "来源补充"),
+            ("location", "地区"),
+            ("note", "备注"),
+            ("intent_level", "意向"),
+        ]
+        for field, label in field_map:
+            value = getattr(lead_update, field)
+            if value is not None and value != lead[field]:
+                updates.append(f"{field} = ?")
+                params.append(value)
+                changed.append(label)
+
+        tags_changed = (
+            lead_update.tags is not None
+            and lead_update.tags[:MAX_TAGS] != current_tags
+        )
+        if tags_changed:
+            changed.append("标签")
         
-        if lead_update.name is not None:
-            updates.append("name = ?")
-            params.append(lead_update.name)
-        if lead_update.phone is not None:
-            updates.append("phone = ?")
-            params.append(lead_update.phone)
-        if lead_update.wechat is not None:
-            updates.append("wechat = ?")
-            params.append(lead_update.wechat)
-        if lead_update.lead_type is not None:
-            updates.append("lead_type = ?")
-            params.append(lead_update.lead_type)
-        if lead_update.company_name is not None:
-            updates.append("company_name = ?")
-            params.append(lead_update.company_name)
-        if lead_update.source is not None:
-            updates.append("source = ?")
-            params.append(lead_update.source)
-        if lead_update.source_other is not None:
-            updates.append("source_other = ?")
-            params.append(lead_update.source_other)
-        if lead_update.location is not None:
-            updates.append("location = ?")
-            params.append(lead_update.location)
-        if lead_update.note is not None:
-            updates.append("note = ?")
-            params.append(lead_update.note)
-        if lead_update.intent_level is not None:
-            updates.append("intent_level = ?")
-            params.append(lead_update.intent_level)
-        
-        if updates:
+        if updates or tags_changed:
             updates.append("updated_at = ?")
             params.append(now_iso())
             params.append(lead_id)
             sql = f"UPDATE leads SET {', '.join(updates)} WHERE id = ?"
             conn.execute(sql, params)
 
-            # 系统履历：编辑（列出改了哪些字段）
-            field_labels = [
-                ("姓名", lead_update.name), ("电话", lead_update.phone),
-                ("微信", lead_update.wechat), ("类型", lead_update.lead_type),
-                ("公司名", lead_update.company_name), ("来源", lead_update.source),
-                ("地区", lead_update.location), ("备注", lead_update.note),
-                ("意向", lead_update.intent_level), ("标签", lead_update.tags),
-            ]
-            changed = [label for label, value in field_labels if value is not None]
             if changed:
                 from app.timeline import add_entry as _add_entry
                 _add_entry(
@@ -519,8 +516,8 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
                         ).fetchone()
                         if tag_row is None:
                             cur = conn.execute(
-                                "INSERT INTO tags (name) VALUES (?)",
-                                (tag_name,),
+                                "INSERT INTO tags (name, created_at) VALUES (?, ?)",
+                                (tag_name, now_iso()),
                             )
                             tag_id = int(cur.lastrowid or 0)
                         else:

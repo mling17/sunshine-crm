@@ -402,6 +402,7 @@ class ImportCommitOut(BaseModel):
     ok: bool = True
     imported: int = 0
     skipped: int = 0
+    duplicate_count: int = 0
     total_rows: int = 0
     import_log_id: int
     mapping_used: dict[str, str] = Field(default_factory=dict)

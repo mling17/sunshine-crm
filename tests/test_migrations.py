@@ -142,6 +142,50 @@ class TestMigrationsIdempotent(unittest.TestCase):
             conn.close()
         self.assertEqual(first, second, "字典种子不能重复插入")
 
+    def test_following_backfill_runs_once_without_overwriting_later_status(self):
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-10-31T10:00:00Z"
+        cur = conn.execute(
+            "INSERT INTO leads (name, phone, source, status, created_at, updated_at)"
+            " VALUES ('回填线索','13800138000','wechat','new',?,?)",
+            (now, now),
+        )
+        lead_id = int(cur.lastrowid)
+        conn.execute(
+            "INSERT INTO follow_ups"
+            " (object_type, object_id, kind, content, created_at)"
+            " VALUES ('lead', ?, 'follow', '首次跟进', ?)",
+            (lead_id, now),
+        )
+        # 模拟从 v2_003 升级：数据已经存在，但 v2_004 尚未执行。
+        conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_004'")
+        conn.commit()
+        conn.close()
+
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            status = conn.execute(
+                "SELECT status FROM leads WHERE id = ?", (lead_id,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(status, "following")
+
+        conn = sqlite3.connect(str(self.db))
+        conn.execute("UPDATE leads SET status = 'invalid' WHERE id = ?", (lead_id,))
+        conn.commit()
+        conn.close()
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            status = conn.execute(
+                "SELECT status FROM leads WHERE id = ?", (lead_id,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(status, "invalid")
+
 
 if __name__ == '__main__':
     unittest.main()

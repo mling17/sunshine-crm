@@ -271,6 +271,16 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(body["name"], "张伟伟")
         self.assertEqual(body["phone"], "13800138001")
 
+    def test_update_lead_tags(self):
+        lead = self.create_lead(phone="13800138000", tags=["重点客户"])
+        resp = self.client.put(f"/api/crm/leads/{lead['id']}", json={
+            "tags": ["门店客户", "待量尺"],
+        })
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["tags"], ["门店客户", "待量尺"])
+        detail = self.client.get(f"/api/crm/leads/{lead['id']}").json()
+        self.assertEqual(detail["tags"], ["门店客户", "待量尺"])
+
     def test_update_lead_to_invalid_status_409(self):
         lead = self.create_lead(phone="13800138000")
         # 转化线索
@@ -373,21 +383,25 @@ class LeadsTest(ApiTestCase):
     # ---------- 建前查重 (Q6) ----------
     def test_create_lead_duplicate_phone(self):
         # 创建一个客户
-        self.create_customer(phone="13800138000")
+        customer = self.create_customer(phone="13800138000")
         
         # 创建线索时检测到重复电话
-        resp = self.create_lead(phone="13800138000")
-        # 由于我们不修改创建线索的响应，所以这里不验证duplicate_hint，只要不报错就行
-        self.assertEqual(resp["phone"], "13800138000")
+        resp = self.create_lead(phone="138 0013 8000")
+        self.assertEqual(resp["code"], "duplicate_contact")
+        self.assertEqual(resp["duplicate_hint"]["object_type"], "customer")
+        self.assertEqual(resp["duplicate_hint"]["object_id"], customer["id"])
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 0)
 
     def test_create_lead_duplicate_wechat(self):
         # 创建一个客户
-        self.create_customer(wechat="wechat123")
+        customer = self.create_customer(wechat="wechat123")
         
         # 创建线索时检测到重复微信
-        resp = self.create_lead(wechat="wechat123")
-        # 由于我们不修改创建线索的响应，所以这里不验证duplicate_hint，只要不报错就行
-        self.assertEqual(resp["wechat"], "wechat123")
+        resp = self.create_lead(phone=None, wechat="WECHAT123")
+        self.assertEqual(resp["code"], "duplicate_contact")
+        self.assertEqual(resp["duplicate_hint"]["object_type"], "customer")
+        self.assertEqual(resp["duplicate_hint"]["object_id"], customer["id"])
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 0)
 
     # ---------- 跟进兼容性 ----------
     def test_v1_follow_up_compatibility(self):
@@ -435,8 +449,8 @@ class LeadsTest(ApiTestCase):
 
     def test_lead_convert_with_link_mode(self):
         # 按 PLANNER §2.3：link 模式要求 link_customer_id 在去重命中集合内
-        customer = self.create_customer(phone="13800138001")
         lead = self.create_lead(phone="13800138001")
+        customer = self.create_customer(phone="13800138001")
         resp = self.client.post(f"/api/crm/leads/{lead['id']}/convert", json={
             "mode": "link",
             "link_customer_id": customer["id"],
@@ -474,9 +488,9 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(resp.status_code, 400, resp.text)
 
     def test_lead_convert_with_duplicate_customer_409(self):
-        # 创建一个客户
-        self.create_customer(phone="13800138000")
         lead = self.create_lead(phone="13800138000")
+        # 先建线索，再由历史客户导入/其它入口产生同联系方式客户
+        self.create_customer(phone="13800138000")
         resp = self.client.post(f"/api/crm/leads/{lead['id']}/convert", json={
             "mode": "new",
             "deal": {
@@ -492,9 +506,9 @@ class LeadsTest(ApiTestCase):
         self.assertIn("已存在相同客户", resp.json()["detail"])
 
     def test_lead_convert_with_force_new(self):
-        # 创建一个客户
-        self.create_customer(phone="13800138000")
         lead = self.create_lead(phone="13800138000")
+        # 先建线索，再由历史客户导入/其它入口产生同联系方式客户
+        self.create_customer(phone="13800138000")
         resp = self.client.post(f"/api/crm/leads/{lead['id']}/convert", json={
             "mode": "new",
             "force_new": True,
@@ -674,6 +688,10 @@ class FollowUpsV2Test(ApiTestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["object_type"], "lead")
+        detail = self.client.get(f"/api/crm/leads/{lead['id']}").json()
+        self.assertEqual(detail["status"], "following")
+        filtered = self.client.get("/api/crm/leads?status=following").json()
+        self.assertEqual([item["id"] for item in filtered["items"]], [lead["id"]])
 
     def test_follow_up_with_deal_object(self):
         """商机对象类型跟进"""

@@ -5,6 +5,7 @@
  */
 function viewLeads(root) {
     var st = state.filters;
+    if (st.status === 'converted') { st.status = ''; }
     /* 版本一致性自检：app.js 与 views/*.js 版本不同步时（浏览器缓存一半），
        下面所有 dictOptions / openLeadFormModal 都会 ReferenceError，表现为「点了没反应」。
        这里直接给出可执行的提示，别让用户猜。 */
@@ -13,7 +14,8 @@ function viewLeads(root) {
             '请按 Ctrl+F5（手机：清缓存）强制刷新一次。</p></div>';
         return Promise.resolve();
     }
-    var tabs = [['', '全部'], ['new', '新线索'], ['following', '跟进中'], ['converted', '已转化'], ['invalid', '已失效']];
+    /* 线索转商机后归入客户链路，不再在线索池提供「已转化」入口。 */
+    var tabs = [['', '全部'], ['new', '新线索'], ['following', '跟进中'], ['invalid', '已失效']];
     var tabHtml = tabs.map(function (t) {
         return '<button type="button" class="tab-btn' + ((st.status || '') === t[0] ? ' active' : '') +
             '" data-status="' + t[0] + '">' + t[1] + '</button>';
@@ -21,7 +23,8 @@ function viewLeads(root) {
 
     root.innerHTML =
         '<div class="card">' +
-        '<div class="card-head"><h2>线索池</h2>' +
+        '<div class="card-head lead-page-head"><div><h2>线索池</h2>' +
+        '<p class="card-subtitle">集中管理待转化线索，出现跟进后自动进入「跟进中」。</p></div>' +
         '<div class="btn-row" style="display:flex;gap:8px;align-items:center">' +
         '<button type="button" class="btn btn-primary btn-sm" id="toggleNewLead">＋ 新增线索</button>' +
         '<button type="button" class="btn btn-sm" id="btnImportLead">⇪ 批量导入</button>' +
@@ -87,6 +90,17 @@ function leadStatusBadge(status) {
     return '<span class="badge ' + v[0] + '">' + v[1] + '</span>';
 }
 
+function invalidReasonLabel(reason, other) {
+    if (reason === 'other') { return other || '其他'; }
+    var map = {
+        invalid_phone: '无效号码',
+        blacklist: '黑名单',
+        no_intent: '无意向',
+        duplicate: '重复'
+    };
+    return map[reason] || reason || '—';
+}
+
 function loadLeads(root) {
     var st = state.filters;
     var listEl = $('#leadList', root);
@@ -125,12 +139,13 @@ function loadLeads(root) {
                 return fmtDateTime(l.created_at).slice(0, 10);
             } },
             { title: '操作', nowrap: true, render: function (l) {
-                var ops = [{ op: 'edit', arg: l.id, label: '编辑' }, { op: 'follow', arg: l.id, label: '跟进' }];
-                if (l.status === 'converted') {
-                    ops.push({ op: 'toDeal', arg: l.id, label: '转商机', disabled: true, tip: '已转化，请到客户里转商机' });
-                } else if (l.status === 'invalid') {
+                var ops = [];
+                if (l.status === 'invalid') {
+                    ops.push({ op: 'follow', arg: l.id, label: '查看' });
                     ops.push({ op: 'toDeal', arg: l.id, label: '转商机', disabled: true, tip: '已失效线索不能转商机' });
                 } else {
+                    ops.push({ op: 'edit', arg: l.id, label: '编辑' });
+                    ops.push({ op: 'follow', arg: l.id, label: '跟进' });
                     ops.push({ op: 'toDeal', arg: l.id, label: '转商机' });
                 }
                 return opButtons(ops);
@@ -180,12 +195,24 @@ function leadFormHtml(lead) {
         '<select name="source">' + dictOptions('customer_source', l.source, '请选择') + '</select></div>' +
         '<div class=\"field\"><label>意向</label>' +
         '<select name="intent_level">' + dictOptions('intent_level', l.intent_level || 'medium', '') + '</select></div>' +
-        '<div class=\"field\"><label>标签（逗号分隔）</label>' +
-        '<input name=\"tags\" type=\"text\" maxlength=\"400\" value=\"' + esc((l.tags || []).join('、')) + '\"></div>' +
+        '<div class=\"field\"><label>标签</label>' +
+        '<input name=\"tags\" type=\"text\" maxlength=\"400\" value=\"' + esc((l.tags || []).join('，')) + '" ' +
+        'placeholder="多个标签可用中文或英文逗号分隔"></div>' +
         '<div class=\"field\"><label>备注</label>' +
         '<textarea name=\"note\" maxlength=\"500\">' + esc(l.note || '') + '</textarea></div>' +
         '<div class=\"form-actions\"><button type=\"submit\" class=\"btn btn-primary\">保存</button></div>' +
         '</form>';
+}
+
+function parseLeadTags(raw) {
+    var seen = {};
+    return String(raw || '').split(/[，,、;；\s]+/).map(function (tag) {
+        return tag.trim();
+    }).filter(function (tag) {
+        if (!tag || seen[tag]) { return false; }
+        seen[tag] = true;
+        return true;
+    }).slice(0, MAX_TAGS);
 }
 
 function readLeadForm(form) {
@@ -193,7 +220,7 @@ function readLeadForm(form) {
         var el = form.querySelector('[name=\"' + name + '\"]');
         return el ? String(el.value || '').trim() : '';
     }
-    var tags = val('tags').split(/[,，、;；\\s]+/).filter(Boolean).slice(0, MAX_TAGS);
+    var tags = parseLeadTags(val('tags'));
     return {
         name: val('name'),
         phone: val('phone') || null,
@@ -262,6 +289,11 @@ function openLeadFormModal(root, lead) {
             close();
             refreshAfterLeadChange(root);
         }).catch(function (err) {
+            if (!isEdit && err.code === 'duplicate_contact' && err.data && err.data.duplicate_hint) {
+                close();
+                showDuplicateHintModal(err.data.duplicate_hint);
+                return;
+            }
             toast(err.message, true);
         }).then(function () { submitBtn.disabled = false; });
     });
@@ -338,16 +370,16 @@ function viewLeadDetail(root, rawId) {
         var converted = l.status === 'converted';
         var invalid = l.status === 'invalid';
 
-        var actions = '<button type="button" class="btn btn-sm" id="leadEditBtn">编辑线索</button>';
+        var actions = '';
         if (converted) {
-            actions += '<button type="button" class="btn btn-sm" disabled title="已转化，请到客户里转商机">转商机</button>';
             if (l.converted_customer_id) {
                 actions += '<a class="btn btn-sm" href="#/customers/' + l.converted_customer_id + '">看客户档案 ›</a>';
             }
         } else if (invalid) {
             actions += '<button type="button" class="btn btn-sm" disabled title="已失效线索不能转商机">转商机</button>';
         } else {
-            actions += '<button type="button" class="btn btn-sm btn-primary" id="leadToDealBtn">转商机</button>' +
+            actions += '<button type="button" class="btn btn-sm" id="leadEditBtn">编辑线索</button>' +
+                '<button type="button" class="btn btn-sm btn-primary" id="leadToDealBtn">转商机</button>' +
                 '<button type="button" class="btn btn-sm" id="invalidateBtn">标记失效</button>';
         }
 
@@ -367,12 +399,12 @@ function viewLeadDetail(root, rawId) {
                 ['建档时间', fmtDateTime(l.created_at)],
                 ['最近更新', fmtDateTime(l.updated_at)],
                 ['备注', l.note],
-                ['失效原因', invalid ? (l.invalid_reason_other || l.invalid_reason) : '—']
+                ['失效原因', invalid ? invalidReasonLabel(l.invalid_reason, l.invalid_reason_other) : '—']
             ]),
             actionsHtml: actions,
             placeholder: '这次沟通聊了什么？对方什么态度？下一步做什么？',
-            canFollow: !invalid,
-            lockedText: '已失效的线索不能再添加跟进',
+            canFollow: !invalid && !converted,
+            lockedText: converted ? '线索已转商机，请到客户档案中继续跟进' : '已失效的线索不能再添加跟进',
             records: records,
             extraHtml: filesCardHtml(collectFiles(records), '这个线索还没有上传图纸 / 报价单 / 现场照片'),
             onSubmit: function (p) {
@@ -390,7 +422,8 @@ function viewLeadDetail(root, rawId) {
             }
         });
 
-        $('#leadEditBtn', root).addEventListener('click', function () { openLeadFormModal(root, l); });
+        var editBtn = $('#leadEditBtn', root);
+        if (editBtn) { editBtn.addEventListener('click', function () { openLeadFormModal(root, l); }); }
         var toDealBtn = $('#leadToDealBtn', root);
         if (toDealBtn) { toDealBtn.addEventListener('click', function () { openLeadDealModal(l); }); }
         var invBtn = $('#invalidateBtn', root);
@@ -553,7 +586,11 @@ function invalidateLead(leadId) {
             .then(function (res) {
                 toast('标记失效成功');
                 document.body.removeChild(modal);
+                state.filters.q = '';
+                state.filters.status = 'invalid';
+                state.filters.page = 1;
                 location.hash = '#/leads';
+                render();
             })
             .catch(function (err) {
                 toast(err.message, true);
@@ -571,13 +608,18 @@ function showDuplicateHintModal(hint) {
         '<div class="modal-header"><h3>线索重复提醒</h3>' +
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
-        '<p>线索池里已有同手机号 / 同微信的记录：</p>' +
+        '<p>线索池或客户档案里已有相同联系方式的记录：</p>' +
         '<p><b>' + esc(hint.name || '') + '</b>' +
-        (hint.phone ? ' · ' + esc(hint.phone) : '') + '</p>' +
-        '<p class="small muted">这次的新线索已经保存。重复记录请在列表里合并信息，或把多余的那条「标记失效」。</p>' +
+        (hint.phone ? ' · ' + esc(hint.phone) : '') +
+        (hint.wechat ? ' · ' + esc(hint.wechat) : '') + '</p>' +
+        '<p class="small muted">本次没有创建新线索。请直接编辑已有档案，或到客户详情继续跟进。</p>' +
         '<div class="form-actions">' +
         '<button type="button" class="btn modal-cancel">知道了</button>' +
-        (hint.object_id ? '<a class="btn btn-primary" href="#/leads/' + hint.object_id + '">查看已有线索</a>' : '') +
+        (hint.object_id
+            ? '<a class="btn btn-primary" href="#/' +
+                (hint.object_type === 'customer' ? 'customers/' : 'leads/') + hint.object_id + '">' +
+                (hint.object_type === 'customer' ? '查看已有客户' : '查看已有线索') + '</a>'
+            : '') +
         '</div>' +
         '</div></div>';
     document.body.appendChild(modal);
@@ -585,6 +627,8 @@ function showDuplicateHintModal(hint) {
     function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
     modal.querySelector('.modal-close').addEventListener('click', close);
     modal.querySelector('.modal-cancel').addEventListener('click', close);
+    var existingLink = modal.querySelector('a.btn');
+    if (existingLink) { existingLink.addEventListener('click', close); }
 }
 
 /* ---------------- 批量导入 / 导入模板（对齐 demo PAGES-V2 §7.3 顶部按钮） ----------------
@@ -598,6 +642,7 @@ var IMPORT_FIELDS_FALLBACK = [
     { key: 'phone', label: '电话', required: false },
     { key: 'wechat', label: '微信', required: false },
     { key: 'location', label: '地区', required: false },
+    { key: 'source', label: '来源', required: true },
     { key: 'note', label: '备注', required: false }
 ];
 
@@ -613,9 +658,18 @@ function leadTemplateCell(v) {
 
 function downloadLeadTemplate() {
     var header = ['姓名', '电话', '微信', '地区', '来源', '备注'];
+    var sourceLabels = dictItems('customer_source').map(function (item) {
+        return String(item.label || item.key || '').trim();
+    }).filter(Boolean);
+    var allowed = sourceLabels.join('、') || '请先在数据字典里添加客户来源';
+    var firstSource = sourceLabels[0] || '';
+    var thirdSource = sourceLabels[2] || firstSource;
     var rows = [
-        ['张三', '13800000000', 'zhangsan', '济南·历下区', '微信', '示例行，填真数据前删掉'],
-        ['某某装饰公司', '0531-88888888', 'abc888', '青岛·崂山区', '转介绍', '来源填数据字典里的名称，如 抖音 / 小红书']
+        ['张三', '13800000000', 'zhangsan', '济南·历下区', firstSource,
+            '示例行，填真数据前删掉。来源只能填写：' + allowed],
+        ['某某装饰公司', '0531-88888888', 'abc888', '青岛·崂山区', thirdSource,
+            '来源必须与数据字典完全一致，不能自行填写'],
+        ['', '', '', '', '', '填写说明：来源只能填写 ' + allowed + '。本行姓名为空，导入时会自动跳过。']
     ];
     var csv = '\ufeff' + [header].concat(rows).map(function (r) {
         return r.map(leadTemplateCell).join(',');
@@ -642,8 +696,9 @@ function leadImportPreviewHtml(pv) {
     var mappingRows = headers.map(function (header) {
         var current = initial[header] || '';
         var options = '<option value="">不导入</option>' + fields.map(function (f) {
+            var optionLabel = f.label + ((f.required || f.key === 'source') ? ' *' : '');
             return '<option value="' + esc(f.key) + '"' + (f.key === current ? ' selected' : '') + '>' +
-                esc(f.label) + (f.required ? ' *' : '') + '</option>';
+                esc(optionLabel) + '</option>';
         }).join('');
         return '<div class="field"><label>CSV 列：' + esc(header) + '</label>' +
             '<select data-imp-header="' + esc(header) + '">' + options + '</select></div>';
@@ -669,7 +724,11 @@ function leadImportPreviewHtml(pv) {
         '<div class="notice small" id="impErr" hidden></div>';
 }
 
-function openLeadImportModal() {
+function openLeadImportModal(root) {
+    var sourceLabels = dictItems('customer_source').map(function (item) {
+        return String(item.label || item.key || '').trim();
+    }).filter(Boolean);
+    var sourceText = sourceLabels.join('、') || '请先到数据字典添加客户来源';
     var modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML =
@@ -679,10 +738,12 @@ function openLeadImportModal() {
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
         '<ol class="small muted" style="padding-left:18px;line-height:1.9;margin-top:0">' +
-        '<li>下载模板 → 按列填好（<b>姓名必填</b>，电话和微信至少一个；来源可填字典里的名称）</li>' +
+        '<li>下载模板 → 按列填好（<b>姓名必填</b>，电话和微信至少一个，来源必填）</li>' +
         '<li>模板已做成「全文本」格式（不会把手机号变成 1.38E+10）；填完另存为 CSV（逗号分隔）再上传</li>' +
         '<li>上传 → 核对列映射和前 5 行 → 确认导入（写进「线索池」）</li>' +
         '</ol>' +
+        '<div class="notice source-guide"><b>来源只能填写：</b>' + esc(sourceText) +
+        '<br><span class="small muted">请严格使用数据字典中的名称；电话或微信相同的记录会自动去重。</span></div>' +
         '<div class="field"><label>选择 CSV 文件</label>' +
         '<input type="file" id="impFileEl" accept=".csv,text/csv"></div>' +
         '<div id="impPreview"></div>' +
@@ -715,6 +776,7 @@ function openLeadImportModal() {
         var dup = used.filter(function (v, i) { return used.indexOf(v) !== i; });
         var msg = '';
         if (used.indexOf('name') < 0) { msg = '必须把某一列映射到「姓名 *」'; }
+        else if (used.indexOf('source') < 0) { msg = '必须把某一列映射到「来源 *」'; }
         else if (dup.length) { msg = '同一字段被多列占用：' + dup.join('、'); }
         else if (pv && pv.file_ref && !pv.total_rows) { msg = '文件里只有表头，没有数据行'; }
         var errEl = modal.querySelector('#impErr');
@@ -768,28 +830,19 @@ function openLeadImportModal() {
             pv = null;
             fileEl.value = '';
             invalidateCustomerIndex();
-            previewEl.innerHTML =
-                '<div class="notice">成功导入线索 <b>' + res.imported + '</b> 行' +
-                (res.skipped ? '，跳过 <b>' + res.skipped + '</b> 行（姓名为空）' : '') +
-                '；文件共 ' + res.total_rows + ' 行。' +
-                (res.mapping_reused ? '（复用了上次的列映射）' : '') +
-                '<br><a href="#/leads" id="impGoLeads">去看线索池 →</a></div>';
-            var link = previewEl.querySelector('#impGoLeads');
-            if (link) {
-                link.addEventListener('click', function (ev) {
-                    ev.preventDefault();
-                    close();
-                    /* 当前已经在 #/leads 时 navigate 不触发 hashchange，必须主动重渲染 */
-                    if (location.hash === '#/leads') { render(); }
-                    else { navigate('#/leads'); }
-                });
-            }
-            toast('导入完成：' + res.imported + ' 行');
-            goBtn.textContent = '确认导入';
-            goBtn.disabled = true;
+            close();
+            state.filters.q = '';
+            state.filters.status = '';
+            state.filters.page = 1;
+            var summary = '导入完成：成功 ' + res.imported + ' 行';
+            if (res.duplicate_count) { summary += '，重复跳过 ' + res.duplicate_count + ' 行'; }
+            if (res.skipped) { summary += '，空姓名跳过 ' + res.skipped + ' 行'; }
+            toast(summary);
+            if (location.hash === '#/leads') { render(); }
+            else { navigate('#/leads'); }
         }).catch(function (err) {
             toast(err.message, true);
-            goBtn.textContent = '确认导入';
+            goBtn.textContent = '导入到线索池';
             goBtn.disabled = false;
         });
     });

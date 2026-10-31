@@ -312,23 +312,23 @@ def _normalize_mapping(raw: dict | None, headers: list[str]) -> dict[str, str]:
     return mapping
 
 
-# ---------------- 来源解析 ----------------
+# ---------------- 来源 / 联系方式 ----------------
 
-def _resolve_source(raw: str | None) -> str | None:
+def _source_records() -> list[dict]:
+    from app import dicts as dict_svc
+
+    return dict_svc.items("customer_source")
+
+
+def _resolve_source(raw: str | None, records: list[dict] | None = None) -> str | None:
     """把模板里填的「来源」转成字典 key。
 
-    接受字典名称（微信 / 抖音 / 小红书）或 key 本身（wechat / douyin）；
-    认不出来返回 None（调用方决定兜底值）。
+    只接受当前启用的数据字典名称或 key，不再把未知值静默改成「存量」。
     """
     text = (raw or "").strip()
     if not text:
         return None
-    from app import dicts as dict_svc
-
-    try:
-        items = dict_svc.items("customer_source")
-    except Exception:
-        items = []
+    items = _source_records() if records is None else records
     for item in items:
         key = str(item.get("key") or "")
         label = str(item.get("label") or "")
@@ -339,6 +339,37 @@ def _resolve_source(raw: str | None) -> str | None:
         if lowered == str(item.get("key") or "").lower():
             return str(item.get("key"))
     return None
+
+
+def _normalize_phone(raw: str | None) -> str:
+    """联系方式去重口径：忽略空格、短横线和括号。"""
+    return re.sub(r"[\s\-()]+", "", str(raw or "").strip())
+
+
+def _normalize_wechat(raw: str | None) -> str:
+    """微信号按 ASCII 大小写不敏感处理。"""
+    return str(raw or "").strip().casefold()
+
+
+def _active_contacts(conn) -> tuple[set[str], set[str]]:
+    """线索池与客户档案里仍在用的联系方式，用于导入去重。"""
+    phones: set[str] = set()
+    wechats: set[str] = set()
+    rows = conn.execute(
+        """
+        SELECT phone, wechat FROM leads WHERE status IN ('new', 'following')
+        UNION ALL
+        SELECT phone, wechat FROM customers
+        """
+    ).fetchall()
+    for row in rows:
+        phone = _normalize_phone(row["phone"])
+        wechat = _normalize_wechat(row["wechat"])
+        if phone:
+            phones.add(phone)
+        if wechat:
+            wechats.add(wechat)
+    return phones, wechats
 
 
 # ---------------- 路由 ----------------
@@ -478,25 +509,75 @@ async def commit_import(request: Request) -> ImportCommitOut:
         now = now_iso()
         imported = 0
         skipped = 0
-        for row in parsed.rows:
-            name = row[field_index["name"]].strip()
-            if not name:
-                skipped += 1
-                continue
+        duplicate_count = 0
 
-            values = {
-                field: (row[index].strip() or None) if field != "name" else name
-                for field, index in field_index.items()
-            }
-            # 来源：模板里填的名称 → 字典 key（认不出就按「存量」记，方便事后在详情里改）
-            source_key = _resolve_source(values.get("source")) if "source" in field_index else None
-            if target == "leads":
-                # 导进线索池：来源统一记「存量」(stock)，后续可在详情里改
-                conn.execute(
+        if target == "leads":
+            if "source" not in field_index:
+                raise HTTPException(
+                    status_code=400,
+                    detail="导入线索必须映射「来源 *」列，并填写数据字典中的有效来源",
+                )
+
+            source_records = _source_records()
+            allowed_sources = [str(item["label"]) for item in source_records]
+            validated_rows: list[tuple[int, dict, str]] = []
+            issues: list[str] = []
+
+            # 先整表校验，任何一行不合法都不写库，避免半批数据落库。
+            for row_number, row in enumerate(parsed.rows, start=2):
+                name = row[field_index["name"]].strip()
+                if not name:
+                    skipped += 1
+                    continue
+                values = {
+                    field: (row[index].strip() or None) if field != "name" else name
+                    for field, index in field_index.items()
+                }
+                source_key = _resolve_source(values.get("source"), source_records)
+                phone = values.get("phone")
+                wechat = values.get("wechat")
+                if not source_key:
+                    issues.append(
+                        f"第 {row_number} 行来源「{values.get('source') or '空'}」无效"
+                    )
+                if not phone and not wechat:
+                    issues.append(f"第 {row_number} 行电话和微信至少填写一个")
+                if source_key and (phone or wechat):
+                    validated_rows.append((row_number, values, source_key))
+
+            if issues:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "导入校验未通过："
+                        + "；".join(issues[:20])
+                        + (f"（另有 {len(issues) - 20} 个问题）" if len(issues) > 20 else "")
+                        + "。来源只能填写数据字典中的值："
+                        + "、".join(allowed_sources)
+                    ),
+                )
+
+            existing_phones, existing_wechats = _active_contacts(conn)
+            seen_phones: set[str] = set()
+            seen_wechats: set[str] = set()
+            from app.timeline import add_entry as _add_entry
+
+            for _row_number, values, source_key in validated_rows:
+                phone_key = _normalize_phone(values.get("phone"))
+                wechat_key = _normalize_wechat(values.get("wechat"))
+                duplicate = (
+                    (phone_key and (phone_key in existing_phones or phone_key in seen_phones))
+                    or (wechat_key and (wechat_key in existing_wechats or wechat_key in seen_wechats))
+                )
+                if duplicate:
+                    duplicate_count += 1
+                    continue
+
+                cur = conn.execute(
                     """
                     INSERT INTO leads (name, phone, wechat, location, note, lead_type, source,
-                                       status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, 'personal', ?, 'new', ?, ?)
+                                       intent_level, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'personal', ?, 'medium', 'new', ?, ?)
                     """,
                     (
                         values["name"],
@@ -504,12 +585,41 @@ async def commit_import(request: Request) -> ImportCommitOut:
                         values.get("wechat"),
                         values.get("location"),
                         values.get("note"),
-                        source_key or "stock",
+                        source_key,
                         now,
                         now,
                     ),
                 )
-            else:
+                lead_id = int(cur.lastrowid or 0)
+                _add_entry(
+                    conn,
+                    object_type="lead",
+                    object_id=lead_id,
+                    kind="create",
+                    content="导入线索：" + values["name"],
+                    created_at=now,
+                )
+                if phone_key:
+                    seen_phones.add(phone_key)
+                if wechat_key:
+                    seen_wechats.add(wechat_key)
+                imported += 1
+        else:
+            source_records = _source_records()
+            for row in parsed.rows:
+                name = row[field_index["name"]].strip()
+                if not name:
+                    skipped += 1
+                    continue
+                values = {
+                    field: (row[index].strip() or None) if field != "name" else name
+                    for field, index in field_index.items()
+                }
+                source_key = (
+                    _resolve_source(values.get("source"), source_records)
+                    if "source" in field_index
+                    else None
+                )
                 conn.execute(
                     """
                     INSERT INTO customers (name, phone, wechat, location, note, source, created_at, updated_at)
@@ -526,7 +636,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
                         now,
                     ),
                 )
-            imported += 1
+                imported += 1
 
         cur = conn.execute(
             """
@@ -550,6 +660,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
         ok=True,
         imported=imported,
         skipped=skipped,
+        duplicate_count=duplicate_count,
         total_rows=len(parsed.rows),
         import_log_id=import_log_id,
         mapping_used=mapping,
