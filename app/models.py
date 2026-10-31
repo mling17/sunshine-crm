@@ -598,6 +598,23 @@ class OrderDetailOut(BaseModel):
     status_log: list[OrderStatusLogOut] = Field(default_factory=list)
     attachments: list[AttachmentOut] = Field(default_factory=list)
     carrier: dict | None = None
+    # PLANNER-V3 §5.6：计划押金/尾款、收款拆项、配送信息、履历
+    deposit_amount: float | None = None
+    balance_amount: float | None = None
+    deposit_paid: float = 0.0
+    balance_paid: float = 0.0
+    logistics_mode: str | None = None
+    logistics_mode_label: str | None = None
+    logistics_fee: float = 0.0
+    address_id: int | None = None
+    receiver_name: str | None = None
+    receiver_phone: str | None = None
+    receiver_address: str | None = None
+    tracking_no: str | None = None
+    carrier_contacts: list[dict] = Field(default_factory=list)
+    aftersales: list[dict] = Field(default_factory=list)
+    deal: dict | None = None
+    timeline: list[dict] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -631,23 +648,26 @@ class OrderStatusLogOut(BaseModel):
 
 
 class CarrierIn(BaseModel):
-    """新建物流公司。"""
+    """新建物流公司。``contacts`` = [{name, phone, tags[]}]（多联系人，可空）。"""
 
     name: str = Field(min_length=1, max_length=64)
     code: OptionalText = Field(default=None, max_length=32)
     contact_person: OptionalText = Field(default=None, max_length=32)
     phone: OptionalText = Field(default=None, max_length=32)
     address: OptionalText = Field(default=None, max_length=200)
+    contacts: list[dict] = Field(default_factory=list)
 
 
 class CarrierUpdate(BaseModel):
-    """更新物流公司。"""
+    """更新物流公司。传 ``contacts`` 则整组覆盖。"""
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=64)
     code: OptionalText = Field(default=None, max_length=32)
     contact_person: OptionalText = Field(default=None, max_length=32)
     phone: OptionalText = Field(default=None, max_length=32)
     address: OptionalText = Field(default=None, max_length=200)
+    contacts: list[dict] | None = None
+    is_active: bool | None = None
 
 
 class CarrierOut(BaseModel):
@@ -661,6 +681,11 @@ class CarrierOut(BaseModel):
     address: str | None = None
     created_at: str
     updated_at: str
+    is_active: bool = True
+    #: 多联系人（PLANNER-V3 §3.4）：[{id,name,phone,tags[]}]
+    contacts: list[dict] = Field(default_factory=list)
+    #: 被订单关联次数（实时算，不落库）
+    order_count: int = 0
 
 # ---------------- 售后 ----------------
 

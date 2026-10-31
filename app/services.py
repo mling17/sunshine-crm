@@ -407,20 +407,27 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
         
         # 根据目标状态执行相应的逻辑
         if to_status == "deposit_paid":
-            # 支付押金逻辑
-            deposit = payload.get("deposit", 0)
-            if deposit <= 0:
+            # 支付押金逻辑（Q-D：必须等于应收押金，且只能收一次）
+            deposit = round(float(payload.get("deposit") or 0), 2)
+            due = order_row["deposit_amount"]
+            if float(order_row["deposit_paid"] or 0) > 0:
                 raise ApiError(
-                    status_code=400,
-                    code="invalid_deposit",
-                    message="押金金额必须大于0"
+                    status_code=409,
+                    code="already_paid",
+                    message="押金已经收过了",
                 )
-            
-            if deposit > order_row["amount"]:
+            if due is None:
+                if deposit <= 0 or deposit > float(order_row["amount"] or 0):
+                    raise ApiError(
+                        status_code=400,
+                        code="invalid_deposit",
+                        message="押金金额必须大于 0 且不超过订单总额",
+                    )
+            elif deposit != round(float(due), 2):
                 raise ApiError(
                     status_code=400,
-                    code="invalid_deposit",
-                    message="押金金额不能超过订单总额"
+                    code="amount_mismatch",
+                    message=f"押金应收 ¥{float(due):,.2f}，实收 ¥{deposit:,.2f}",
                 )
             
             # 押金落库（DDL 列：deposit_paid）
@@ -430,16 +437,23 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             )
             
         elif to_status == "balance_paid":
-            # 支付尾款逻辑
-            balance = payload.get("balance", 0)
-            remaining_amount = (order_row["amount"] or 0) - (order_row["deposit_paid"] or 0) - (order_row["balance_paid"] or 0)
-            
-            # Q1 强制相等：尾款 == 总额 − 已收押金（精确相等，差 1 分也拒绝）
-            if balance != remaining_amount:
+            # 支付尾款（Q-D：押金未收齐不许收尾款；尾款必须等于应收尾款）
+            balance = round(float(payload.get("balance") or 0), 2)
+            due_deposit = order_row["deposit_amount"]
+            if due_deposit is not None and round(float(order_row["deposit_paid"] or 0), 2) < round(float(due_deposit), 2):
+                raise ApiError(
+                    status_code=409,
+                    code="deposit_unpaid",
+                    message="押金还没收齐，不能收尾款",
+                )
+            due = order_row["balance_amount"]
+            if due is None:
+                due = round(float(order_row["amount"] or 0) - float(order_row["deposit_paid"] or 0), 2)
+            if balance != round(float(due), 2):
                 raise ApiError(
                     status_code=400,
-                    code="invalid_balance",
-                    message=f"尾款应为 {remaining_amount} 元，实际支付 {balance} 元"
+                    code="amount_mismatch",
+                    message=f"尾款应收 ¥{float(due):,.2f}，实收 ¥{balance:,.2f}",
                 )
             
             conn.execute(
@@ -461,7 +475,7 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             tracking_number = payload.get("tracking_number")
             
             # 根据物流方式验证必要字段
-            if logistics_mode == "carrier":
+            if logistics_mode in ("free", "agent"):
                 if not carrier_id:
                     raise ApiError(
                         status_code=400,
@@ -510,27 +524,44 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             )
             
         elif to_status == "completed":
+            # 已完成：收齐才允许（Q-D：已收 = 总额）
+            paid = round(float(order_row["deposit_paid"] or 0) + float(order_row["balance_paid"] or 0), 2)
+            total = round(float(order_row["amount"] or 0), 2)
+            if paid < total:
+                raise ApiError(
+                    status_code=409,
+                    code="payment_incomplete",
+                    message=f"还差 ¥{total - paid:,.2f} 未收，不能标记完成",
+                )
             # 已完成：写完成时间（客户确认收货）
             conn.execute(
                 "UPDATE orders SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?",
                 (to_status, payload.get("received_at") or now_local_iso(), now_iso(), order_id)
             )
             
-        # 插入状态日志
-        note = payload.get("note", "")
+        # 插入状态日志（PLANNER-V3 §3.5：event_type 区分 收款/发货/状态变更）
+        import json as _json
+
+        note = payload.get("note") or ""
+        event_type = {
+            "deposit_paid": "pay",
+            "balance_paid": "pay",
+            "shipped": "ship",
+        }.get(to_status, "stage")
+        if event_type == "pay":
+            money = payload.get("deposit") if to_status == "deposit_paid" else payload.get("balance")
+            note = note or f"收{'押金' if to_status == 'deposit_paid' else '尾款'} ¥{float(money or 0):,.2f}"
+            detail = _json.dumps({"amount": float(money or 0)}, ensure_ascii=False)
+        elif event_type == "ship":
+            note = note or f"已发货，运单号 {order_row['tracking_no'] or '—'}"
+            detail = _json.dumps({"tracking_no": order_row["tracking_no"]}, ensure_ascii=False)
+        else:
+            detail = None
         conn.execute(
-            """
-            INSERT INTO order_status_log 
-                (order_id, from_status, to_status, note, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                order_id,
-                from_status,
-                to_status,
-                note,
-                now_iso(),
-            ),
+            "INSERT INTO order_status_log"
+            " (order_id, from_status, to_status, event_type, note, detail, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (order_id, from_status, to_status, event_type, note, detail, now_iso()),
         )
         
         # 提交事务

@@ -139,11 +139,11 @@ def entries_for(
         )
 
     if include_order_events:
-        # 订单「创建」事件在商机侧已由 follow_ups(kind='order') 记过一条，避免重复展示
         items.extend(
             e
             for e in order_events(conn, object_type=object_type, object_id=object_id)
-            if e["type"] != "order"
+            # 商机侧「生成订单」已由 follow_ups(kind='order') 记过，避免重复；订单侧要保留
+            if not (object_type == "deal" and e["type"] == "order")
         )
         items.sort(key=lambda x: str(x.get("at") or ""), reverse=True)
 

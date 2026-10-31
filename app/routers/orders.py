@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 from typing import Optional, List
+import json
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
@@ -18,6 +20,7 @@ from app.models import (
     AttachmentOut, OrderStatusLogOut, OrderTransitionIn, OrderTransitionOut
 )
 from app.routers.auth import require_auth
+from app.timeline import entries_for
 from app.security import now_iso
 from app.errors import ApiError
 from app.services import read_images
@@ -111,7 +114,35 @@ def get_order(order_id: int) -> OrderDetailOut:
         order_dict['status_log'] = [OrderStatusLogOut(**dict(log)) for log in status_logs]
         order_dict['attachments'] = [AttachmentOut(**dict(attach)) for attach in attachments]
         order_dict['carrier'] = dict(carrier_row) if carrier_row else None
-        
+
+        # 物流联系人（多联系人 + 标签）
+        if row['carrier_id']:
+            order_dict['carrier_contacts'] = [
+                {"id": c["id"], "name": c["name"], "phone": c["phone"],
+                 "tags": json.loads(c["tags"]) if c["tags"] else []}
+                for c in conn.execute(
+                    "SELECT id, name, phone, tags FROM carrier_contacts"
+                    " WHERE carrier_id = ? ORDER BY sort, id", (row['carrier_id'],)
+                ).fetchall()
+            ]
+        # 售后单（没有就是空列表，前端整块隐藏）
+        order_dict['aftersales'] = [
+            dict(a) for a in conn.execute(
+                "SELECT id, no, type, status, description, result, created_at"
+                " FROM aftersales WHERE order_id = ? ORDER BY id DESC", (order_id,)
+            ).fetchall()
+        ]
+        # 关联商机（可点回）
+        deal_row = conn.execute(
+            "SELECT id, product_type, model, spec, amount, stage, drive_type"
+            " FROM deals WHERE id = ?", (row['deal_id'],)
+        ).fetchone()
+        order_dict['deal'] = dict(deal_row) if deal_row else None
+        # 订单履历（收款/状态变更/发货/改收货/售后）
+        order_dict['timeline'] = entries_for(
+            conn, object_type="order", object_id=order_id, include_order_events=True
+        )
+
         return OrderDetailOut(**order_dict)
 
 

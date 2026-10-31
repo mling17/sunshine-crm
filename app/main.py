@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import settings
 from app.db import db_conn
 from app.routers import (
+    addresses,
     aftersales,
     attachments,
     auth,
@@ -109,4 +110,5 @@ app.include_router(leads.router)
 app.include_router(orders.router)
 app.include_router(carriers.router)
 app.include_router(aftersales.router)
+app.include_router(addresses.router)
 app.include_router(dicts.router)

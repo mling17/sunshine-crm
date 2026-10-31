@@ -68,7 +68,7 @@ class OrdersTest(ApiTestCase):
         # 尾款 != 总额 - 已收押金（600）→ 拒绝
         bad = self.transition("balance_paid", balance=500.0)
         self.assertEqual(bad.status_code, 400, bad.text)
-        self.assertEqual(bad.json()["code"], "invalid_balance")
+        self.assertEqual(bad.json()["code"], "amount_mismatch")
         # 精确相等 → 通过
         ok = self.transition("balance_paid", balance=600.0)
         self.assertEqual(ok.status_code, 200, ok.text)
@@ -90,7 +90,7 @@ class OrdersTest(ApiTestCase):
         self.transition("deposit_paid", deposit=1000.0)
         self.transition("producing")
         self.transition("balance_paid", balance=0.0)
-        noscreen = self.transition("ready_to_ship", logistics_mode="carrier", carrier_id=1)
+        noscreen = self.transition("ready_to_ship", logistics_mode="agent", carrier_id=1)
         self.assertEqual(noscreen.status_code, 400, noscreen.text)
 
     def test_carrier_delete_protection(self):
