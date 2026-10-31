@@ -2,7 +2,7 @@
  * 客户（Demo 版，覆盖正式版 views/customers.js）
  * 用户 2026-10-31 定稿：
  *   · 客户由线索转化而来，**不提供新增**，页面上说明来源
- *   · 每条可：编辑（细化信息 + 客户画像）、追踪（同线索的跟进页）、转商机
+ *   · 每条可：编辑（细化信息 + 客户画像）、跟进（同线索的跟进页）、转商机
  * ==========================================================================*/
 
 function customerRowOf(c) {
@@ -55,7 +55,7 @@ function viewCustomers(root, route) {
         { title: '操作', nowrap: true, render: function (r) {
             return opButtons([
               { op: 'edit', arg: r.c.id, label: '编辑' },
-              { op: 'follow', arg: r.c.id, label: '追踪' },
+              { op: 'follow', arg: r.c.id, label: '跟进' },
               { op: 'toDeal', arg: r.c.id, label: '转商机' }
             ]);
           } }
@@ -126,7 +126,7 @@ function viewCustomerDetail(root, rawId) {
       '<div class="card-head">' +
         '<h2><a class="crumb" href="#/customers">‹ 客户</a> / ' + esc(c.name) + '</h2>' +
         '<div class="btn-row">' +
-          '<button type="button" class="btn btn-sm" id="custFollow">追踪</button>' +
+          '<button type="button" class="btn btn-sm" id="custFollow">跟进</button>' +
           '<button type="button" class="btn btn-sm" id="custEdit">编辑</button>' +
           '<button type="button" class="btn btn-sm btn-primary" id="custToDeal">转商机</button>' +
         '</div>' +
@@ -162,7 +162,7 @@ function viewCustomerDetail(root, rawId) {
   if (d2) { d2.addEventListener('click', function () { navigate('#/deals/new?customer=' + c.id); }); }
 }
 
-/* ---------------- 客户追踪（跟进页） ---------------- */
+/* ---------------- 客户跟进页 ---------------- */
 function viewCustomerFollow(root, rawId) {
   var c = (window.DEMO.customers || []).filter(function (x) { return x.id === Number(rawId); })[0];
   if (!c) { root.innerHTML = '<div class="card">客户不存在，<a href="#/customers">回客户列表</a></div>'; return; }
