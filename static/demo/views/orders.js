@@ -119,7 +119,7 @@ function viewOrderDetail(root, rawId) {
       infoGrid([
         ['客户', '<a href="#/customers/' + o.customer_id + '">' + esc(orderCustomerName(o.customer_id)) + '</a>', true],
         ['关联商机', deal
-          ? '<a href="#/deals/' + deal.id + '">' + esc(dealTitle(deal)) + ' ›</a>'
+          ? '<button type="button" class="btn-link" id="btnDealPreview">' + esc(dealTitle(deal)) + ' ›</button>'
           : '—', true],
         ['产品 / 型号', [o.product_type, o.model, o.spec].filter(Boolean).join(' ')],
         ['物流方式', o.logistics_mode_label],
@@ -160,6 +160,10 @@ function viewOrderDetail(root, rawId) {
       '</div>' + aftersaleHtml +
     '</div>';
 
+  var previewBtn = $('#btnDealPreview', root);
+  if (previewBtn && deal) {
+    previewBtn.addEventListener('click', function () { openDealPreviewModal(deal.id); });
+  }
   var nextBtn = $('#btnOrderNext', root);
   if (nextBtn) {
     nextBtn.addEventListener('click', function () { advanceOrder(o); });
@@ -296,4 +300,45 @@ function openAddressPicker(o) {
     toast('收货地址已更换（演示）');
     render();
   });
+}
+
+/* 商机预览（模态框，不跳页） */
+function openDealPreviewModal(dealId) {
+  var d = (window.DEMO.deals || []).filter(function (x) { return x.id === Number(dealId); })[0];
+  if (!d) { return; }
+  var logs = ((window.DEMO.dealLogs || {})[d.id] || []).slice().sort(function (a, b) { return a.at < b.at ? 1 : -1; });
+  var records = (window.DEMO.followups || []).filter(function (f) { return f.deal_id === d.id; })
+    .map(function (f) {
+      return { at: f.created_at, type: 'follow', content: f.content, next_date: f.next_date, method: f.method, files: [] };
+    })
+    .concat(logs.map(function (g) { return { at: g.at, type: g.type, content: g.text, files: g.files || [] }; }));
+
+  var modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML =
+    '<div class="modal-content wide">' +
+      '<div class="modal-header"><h3>商机 · ' + esc(customerNameOf(d.customer_id)) + '</h3>' +
+        '<button type="button" class="btn-link modal-close">×</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="badge-row"><span class="badge ' + (d.stage === 'won' ? 'ok' : 'warn') + '">' +
+          esc(STAGE_LABEL[d.stage] || d.stage) + '</span>' +
+          (d.locked ? '<span class="badge muted">已下单</span>' : '') + '</div>' +
+        infoGrid([
+          ['产品类型', d.product_type], ['型号', d.model],
+          ['手动/电动', DRIVE_LABEL[d.drive_type] || '—'],
+          ['尺寸', d.size], ['金额', money(d.amount), true],
+          ['备注', d.note]
+        ]) +
+        '<p class="small muted" style="margin:14px 0 6px">跟进履历（' + records.length + '）</p>' +
+        timelineHtml(records) +
+      '</div>' +
+      '<div class="form-actions">' +
+        '<button type="button" class="btn modal-cancel">关闭</button>' +
+        '<a class="btn btn-primary" href="#/deals/' + d.id + '">进入商机跟进页</a>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
+  $('.modal-close', modal).addEventListener('click', close);
+  $('.modal-cancel', modal).addEventListener('click', close);
 }

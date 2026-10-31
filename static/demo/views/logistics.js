@@ -32,7 +32,9 @@ function viewLogistics(root, route) {
             var cs = c.contacts || [];
             if (!cs.length) { return '<span class="muted">—</span>'; }
             var f0 = cs[0];
-            return esc(f0.name) + (f0.role ? '<div class="small muted">' + esc(f0.role) + '</div>' : '') +
+            var chips = (f0.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('');
+            return esc(f0.name) +
+              (chips ? '<div class="tag-row">' + chips + '</div>' : '') +
               (cs.length > 1 ? ' <span class="badge muted">+' + (cs.length - 1) + '</span>' : '');
           } },
         { title: '电话', nowrap: true, render: function (c) {
@@ -87,9 +89,9 @@ function openCarrierForm(id) {
   var isEdit = !!c;
   var d = c || { is_active: true, contacts: [] };
   var contacts = (d.contacts || []).map(function (x) {
-    return { name: x.name || '', phone: x.phone || '', role: x.role || '' };
+    return { name: x.name || '', phone: x.phone || '', tags: (x.tags || []).slice() };
   });
-  if (!contacts.length) { contacts = [{ name: '', phone: '', role: '' }]; }
+  if (!contacts.length) { contacts = [{ name: '', phone: '', tags: [] }]; }
 
   var modal = document.createElement('div');
   modal.className = 'modal';
@@ -125,9 +127,9 @@ function openCarrierForm(id) {
           '<input data-f="name" value="' + esc(p.name) + '" maxlength="32" placeholder="李经理"></div>' +
         '<div class="field"><label>电话</label>' +
           '<input data-f="phone" value="' + esc(p.phone) + '" maxlength="32" placeholder="138…"></div>' +
-        '<div class="field"><label>职务</label>' +
+        '<div class="field"><label>标签（逗号分隔）</label>' +
           '<div style="display:flex;gap:6px;align-items:center">' +
-            '<input data-f="role" value="' + esc(p.role) + '" maxlength="24" placeholder="业务/调度">' +
+            '<input data-f="tags" value="' + esc((p.tags || []).join('、')) + '" maxlength="40" placeholder="业务、调度、结算">' +
             '<button type="button" class="btn-link danger" data-del-contact="' + i + '">删</button>' +
           '</div></div>' +
       '</div>';
@@ -136,7 +138,12 @@ function openCarrierForm(id) {
     $$('.contact-row input', modal).forEach(function (inp) {
       inp.addEventListener('input', function () {
         var idx = Number(inp.closest('.contact-row').getAttribute('data-idx'));
-        contacts[idx][inp.getAttribute('data-f')] = inp.value;
+        var field = inp.getAttribute('data-f');
+        if (field === 'tags') {
+          contacts[idx].tags = inp.value.split(/[,，、\s]+/).filter(Boolean);
+        } else {
+          contacts[idx][field] = inp.value;
+        }
       });
     });
     $$('[data-del-contact]', modal).forEach(function (b) {
@@ -150,7 +157,7 @@ function openCarrierForm(id) {
   renderRows();
 
   $('#btnAddContact', modal).addEventListener('click', function () {
-    contacts.push({ name: '', phone: '', role: '' });
+    contacts.push({ name: '', phone: '', tags: [] });
     renderRows();
   });
 

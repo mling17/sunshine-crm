@@ -410,10 +410,12 @@
 
   /* 物流公司：一个公司多个联系人 */
   var CARRIER_CONTACTS = {
-    1: [{ name: '李经理', phone: '138 0531 9001', role: '大件业务' }, { name: '王调度', phone: '138 0531 9002', role: '派车' }],
-    2: [{ name: '王师傅', phone: '138 0000 1234', role: '德州/潍坊线' }, { name: '刘会计', phone: '138 0000 5678', role: '结算' }],
-    3: [{ name: '老张', phone: '139 5311 0001', role: '济南市区' }],
-    4: [{ name: '—', phone: '—', role: '已停用' }]
+    1: [{ name: '李经理', phone: '138 0531 9001', tags: ['大件业务', '报价'] },
+        { name: '王调度', phone: '138 0531 9002', tags: ['派车'] }],
+    2: [{ name: '王师傅', phone: '138 0000 1234', tags: ['德州线', '潍坊线'] },
+        { name: '刘会计', phone: '138 0000 5678', tags: ['结算', '开票'] }],
+    3: [{ name: '老张', phone: '139 5311 0001', tags: ['济南市区', '当日达'] }],
+    4: [{ name: '—', phone: '—', tags: ['已停用'] }]
   };
   CARRIERS.forEach(function (c) { c.contacts = CARRIER_CONTACTS[c.id] || []; });
 

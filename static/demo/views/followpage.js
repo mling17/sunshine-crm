@@ -12,7 +12,7 @@ var RECORD_META = {
   follow: { label: '跟进', cls: 'follow', icon: '💬' },
   create: { label: '创建', cls: 'create', icon: '✨' },
   change: { label: '编辑', cls: 'change', icon: '✏️' },
-  stage: { label: '阶段变更', cls: 'stage', icon: '🚩' },
+  stage: { label: '状态变更', cls: 'stage', icon: '🚩' },
   order: { label: '生成订单', cls: 'order', icon: '📦' },
   aftersale: { label: '售后', cls: 'after', icon: '🛠' }
 };
@@ -31,6 +31,22 @@ function mockPhoto(label, color) {
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
+/* 图片查看器：点击缩略图在当前页弹大图，不开新标签页 */
+function openImageModal(url, name) {
+  var modal = document.createElement('div');
+  modal.className = 'modal img-modal';
+  modal.innerHTML =
+    '<div class="img-viewer">' +
+      '<div class="img-viewer-bar"><span>' + esc(name || '图片') + '</span>' +
+        '<button type="button" class="btn-link modal-close">×</button></div>' +
+      '<img src="' + esc(url) + '" alt="' + esc(name || '') + '">' +
+    '</div>';
+  document.body.appendChild(modal);
+  function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
+  $('.modal-close', modal).addEventListener('click', close);
+  modal.addEventListener('click', function (ev) { if (ev.target === modal) { close(); } });
+}
+
 /* 附件缩略图：files 元素可以是字符串文件名，也可以是 {name,url} */
 function photoThumbs(files) {
   if (!files || !files.length) { return ''; }
@@ -38,10 +54,18 @@ function photoThumbs(files) {
     var name = typeof f === 'string' ? f : (f.name || '图片');
     var url = typeof f === 'string' ? null : f.url;
     if (!url) { return '<span class="file-chip">📎 ' + esc(name) + '</span>'; }
-    return '<a class="thumb" href="' + esc(url) + '" target="_blank" rel="noopener">' +
-      '<img src="' + esc(url) + '" alt="' + esc(name) + '" loading="lazy"></a>';
+    return '<button type="button" class="thumb" data-img="' + esc(url) + '" data-name="' + esc(name) + '" ' +
+      'title="点击查看大图"><img src="' + esc(url) + '" alt="' + esc(name) + '" loading="lazy"></button>';
   }).join('') + '</div>';
 }
+
+/* 缩略图点击委托（履历里图片统一走这里） */
+document.addEventListener('click', function (ev) {
+  var el = ev.target && ev.target.closest ? ev.target.closest('[data-img]') : null;
+  if (!el) { return; }
+  ev.preventDefault();
+  openImageModal(el.getAttribute('data-img'), el.getAttribute('data-name'));
+});
 
 /* 履历时间线 */
 function timelineHtml(records) {
@@ -79,7 +103,7 @@ function openFollowModal(opts) {
     '<div class="modal-content">' +
       '<div class="modal-header"><h3>' + esc(opts.title || '记一条跟进') + '</h3>' +
         '<button type="button" class="btn-link modal-close">×</button></div>' +
-      '<form id="fuModalForm" autocomplete="off">' +
+      '<form id="fuModalForm" autocomplete="off"><div class="modal-body">' +
         '<div class="field"><label>跟进内容 *</label>' +
           '<textarea name="content" rows="4" maxlength="2000" required placeholder="' +
             esc(opts.placeholder || '聊了什么？对方什么态度？下一步做什么？') + '"></textarea></div>' +
@@ -96,6 +120,7 @@ function openFollowModal(opts) {
         '<div class="field"><label>图片（图纸 / 现场照片，可多选）</label>' +
           '<input type="file" name="photos" accept="image/*" multiple></div>' +
         '<div id="fuThumbs" class="thumb-strip"></div>' +
+        '</div>' +
         '<div class="form-actions">' +
           '<button type="button" class="btn modal-cancel">取消</button>' +
           '<button type="submit" class="btn btn-primary">保存跟进</button>' +
@@ -115,8 +140,8 @@ function openFollowModal(opts) {
       return { name: f.name, url: URL.createObjectURL(f) };
     });
     $('#fuThumbs', modal).innerHTML = picked.map(function (p) {
-      return '<a class="thumb" href="' + esc(p.url) + '" target="_blank" rel="noopener">' +
-        '<img src="' + esc(p.url) + '" alt="' + esc(p.name) + '"></a>';
+      return '<button type="button" class="thumb" data-img="' + esc(p.url) + '" data-name="' + esc(p.name) + '">' +
+        '<img src="' + esc(p.url) + '" alt="' + esc(p.name) + '"></button>';
     }).join('');
   });
 

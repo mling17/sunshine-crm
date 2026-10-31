@@ -180,6 +180,8 @@ function viewDealNew(root, route) {
           '<div class="field"><label>金额（报价）*</label>' +
             '<input name="amount" type="number" min="0" step="0.01" required placeholder="12000"></div>' +
         '</div>' +
+        '<div class="field"><label>备注</label>' +
+          '<textarea name="note" rows="2" maxlength="300" placeholder="客户需求、现场情况、特殊要求…"></textarea></div>' +
         '<p class="small muted">新建商机的初始阶段固定为「报价」，定金/尾款在生成订单时才填。</p>' +
         '<div class="form-actions">' +
           '<button type="button" class="btn" id="dpCancel">取消</button>' +
@@ -237,6 +239,7 @@ function viewDealNew(root, route) {
       size: f.size.value.trim(), spec: f.size.value.trim(),
       drive_type: f.drive_type.value,
       amount: amount,
+      note: String(f.note.value || '').trim() || null,
       deposit: 0, balance: 0,
       stage: 'quote', closed_at: null,
       created_at: nowIso2, updated_at: nowIso2, order_id: null, locked: false
@@ -271,7 +274,14 @@ function openDealForm(id) {
         '<button type="button" class="btn-link modal-close">×</button></div>' +
       '<form id="dealFormEl" autocomplete="off">' +
         '<div class="row-2">' +
-          '<div class="field"><label>产品类型</label><input name="product_type" value="' + esc(d.product_type || '') + '" maxlength="32"></div>' +
+          '<div class="field"><label>产品类型</label><select name="product_type">' +
+            ((window.DEMO.dicts.filter(function (x) { return x.code === 'product_type'; })[0] || { items: [] }).items || [])
+              .filter(function (i) { return i.enabled; })
+              .map(function (i) {
+                return '<option value="' + esc(i.label) + '"' + (d.product_type === i.label ? ' selected' : '') + '>' +
+                  esc(i.label) + '</option>';
+              }).join('') +
+          '</select></div>' +
           '<div class="field"><label>手动 / 电动</label><select name="drive_type">' +
             DRIVE_TYPE.map(function (p) { return '<option value="' + p[0] + '"' + (d.drive_type === p[0] ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
           '</select></div>' +
@@ -283,11 +293,10 @@ function openDealForm(id) {
             }).join('') + '</select></div>' +
           '<div class="field"><label>尺寸</label><input name="size" value="' + esc(d.size || '') + '" maxlength="32"></div>' +
         '</div>' +
-        '<div class="row-3">' +
-          '<div class="field"><label>金额</label><input name="amount" type="number" min="0" step="0.01" value="' + (d.amount || 0) + '"></div>' +
-          '<div class="field"><label>定金</label><input name="deposit" type="number" min="0" step="0.01" value="' + (d.deposit || 0) + '"></div>' +
-          '<div class="field"><label>尾款</label><input name="balance" type="number" min="0" step="0.01" value="' + (d.balance || 0) + '"></div>' +
-        '</div>' +
+        '<div class="field"><label>金额（报价）</label>' +
+          '<input name="amount" type="number" min="0" step="0.01" value="' + (d.amount || 0) + '"></div>' +
+        '<div class="field"><label>备注</label>' +
+          '<textarea name="note" rows="2" maxlength="300">' + esc(d.note || '') + '</textarea></div>' +
         '<div class="field"><label>阶段</label><select name="stage">' +
           STAGES.map(function (p) { return '<option value="' + p[0] + '"' + (d.stage === p[0] ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
         '</select></div>' +
@@ -318,8 +327,7 @@ function openDealForm(id) {
     var nModel = f.model.value;
     var nSize = String(f.size.value || '').trim();
     var nAmount = Number(f.amount.value || 0);
-    var nDeposit = Number(f.deposit.value || 0);
-    var nBalance = Number(f.balance.value || 0);
+    var nNote = String(f.note ? f.note.value : '').trim() || null;
     var nStage = f.stage.value;
     var nDrive = f.drive_type.value;
 
@@ -328,14 +336,13 @@ function openDealForm(id) {
     cmp('尺寸', d.size, nSize);
     cmp('手动/电动', DRIVE_LABEL[d.drive_type], DRIVE_LABEL[nDrive]);
     cmp('金额', d.amount, nAmount, moneyRaw);
-    cmp('定金', d.deposit, nDeposit, moneyRaw);
-    cmp('尾款', d.balance, nBalance, moneyRaw);
+    cmp('备注', d.note, nNote);
 
     d.product_type = nType || d.product_type;
     d.model = nModel; d.model_code = nModel;
     d.size = nSize; d.spec = nSize;
     d.drive_type = nDrive;
-    d.amount = nAmount; d.deposit = nDeposit; d.balance = nBalance;
+    d.amount = nAmount; d.note = nNote;
     d.updated_at = nowIso;
 
     var logs = window.DEMO.dealLogs[d.id] = window.DEMO.dealLogs[d.id] || [];
@@ -350,11 +357,7 @@ function openDealForm(id) {
       d.stage = nStage;
       if (nStage === 'won') { d.closed_at = nowIso; }
     }
-    if (nDeposit + nBalance !== nAmount) {
-      toast('提示：定金 + 尾款 ≠ 金额（已保存，不拦截）', true);
-    } else {
-      toast('已保存：' + changes.length + ' 项变更已记入履历');
-    }
+    toast(changes.length ? ('已保存：' + changes.length + ' 项变更已记入履历') : '已保存（无字段变化，也已记入履历）');
     close();
     render();
   });
@@ -402,14 +405,12 @@ function openOrderModal(dealId) {
         '</div>' +
 
         '<p class="small muted">收款</p>' +
-        '<div class="row-3">' +
+        '<div class="row-2">' +
           '<div class="field"><label>押金金额 *</label>' +
             '<input name="deposit" id="ofDeposit" type="number" min="0" step="0.01" required placeholder="' +
               Math.round(total * 0.3) + '"></div>' +
           '<div class="field"><label>尾款（自动计算）</label>' +
             '<input name="balance" id="ofBalance" type="number" readonly value="' + total + '"></div>' +
-          '<div class="field"><label>押金 + 尾款</label>' +
-            '<input id="ofSum" type="number" readonly value="0"></div>' +
         '</div>' +
         '<div id="ofWarn" class="notice small" hidden></div>' +
 
@@ -472,7 +473,6 @@ function openOrderModal(dealId) {
     var dep = Number(depEl.value || 0);
     var bal = Math.max(0, total - dep);
     $('#ofBalance', modal).value = bal;
-    $('#ofSum', modal).value = dep + bal;
     var warn = $('#ofWarn', modal);
     if (dep > total) {
       warn.hidden = false;

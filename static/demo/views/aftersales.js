@@ -50,7 +50,7 @@ function viewAftersales(root, route) {
           } },
         { title: '创建时间', nowrap: true, render: function (a) { return fmtDateTime(a.created_at).slice(0, 10); } },
         { title: '操作', nowrap: true, render: function (a) {
-            return opButtons([{ op: 'view', arg: a.id, label: '详情' }]);
+            return opButtons([{ op: 'view', arg: a.id, label: '跟进' }]);
           } }
       ], list, '还没有售后单：到已完成订单里点「添加售后」') +
     '</div>';
@@ -72,7 +72,14 @@ function viewAftersaleDetail(root, rawId) {
   var records = (window.DEMO.aftersaleFollows || [])
     .filter(function (f) { return f.aftersale_id === a.id; })
     .map(function (f) {
-      return { at: f.created_at, type: 'follow', content: f.content, next_date: f.next_date, method: f.method, files: f.files || [] };
+      return {
+        at: f.created_at,
+        type: f.isStatus ? 'stage' : 'follow',
+        content: f.content,
+        next_date: f.next_date,
+        method: f.isStatus ? null : f.method,
+        files: f.files || []
+      };
     });
 
   var ops = [];
@@ -112,11 +119,25 @@ function viewAftersaleDetail(root, rawId) {
     }
   });
 
+  /* 状态变更统一写一条履历 */
+  function addStatusLog(text) {
+    (window.DEMO.aftersaleFollows = window.DEMO.aftersaleFollows || []).push({
+      aftersale_id: a.id,
+      method: 'phone',
+      content: text,
+      next_date: null,
+      created_at: new Date().toISOString().slice(0, 19),
+      files: [],
+      isStatus: true
+    });
+  }
+
   var start = $('#asStart', root);
   if (start) {
     start.addEventListener('click', function () {
       a.status = 'processing';
       a.updated_at = new Date().toISOString().slice(0, 19);
+      addStatusLog('状态变更：待处理 → 处理中');
       toast('已开始处理');
       render();
     });
@@ -127,6 +148,7 @@ function viewAftersaleDetail(root, rawId) {
       a.status = 'done';
       a.closed_at = new Date().toISOString().slice(0, 19);
       a.result = a.result || '已处理完成（演示）';
+      addStatusLog('状态变更：处理中 → 已完成' + (a.result ? '（' + a.result + '）' : ''));
       toast('售后已完成');
       render();
     });
@@ -136,6 +158,7 @@ function viewAftersaleDetail(root, rawId) {
     reject.addEventListener('click', function () {
       a.status = 'rejected';
       a.reject_reason = a.reject_reason || '不符合售后条件（演示）';
+      addStatusLog('状态变更：待处理 → 已拒绝（' + a.reject_reason + '）');
       toast('已拒绝');
       render();
     });
