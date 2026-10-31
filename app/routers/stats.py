@@ -79,8 +79,10 @@ def get_stats(months: int = Query(default=6, ge=1, le=24)) -> dict:
         ).fetchone()[0]
         trend = []
         for offset in range(months - 1, -1, -1):
+            # 必须先归一化到月初再减月：10-31 减 1 个月会被 SQLite 进位成 10 月（经典坑）
             key = conn.execute(
-                "SELECT strftime('%Y-%m','now','localtime', ?)", (f"-{offset} months",)
+                "SELECT strftime('%Y-%m','now','localtime','start of month', ?)",
+                (f"-{offset} months",),
             ).fetchone()[0]
             trend.append(
                 {

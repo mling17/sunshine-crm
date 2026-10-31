@@ -34,6 +34,9 @@ class StatsTest(ApiTestCase):
         ):
             self.assertIn(key, data, f"统计缺 {key}")
         self.assertEqual(len(data["months"]), 6, "默认近 6 个月")
+        keys = [m["key"] for m in data["months"]]
+        self.assertEqual(len(set(keys)), 6, "6 个月份不能重复（10-31 减月的进位坑）")
+        self.assertEqual(keys, sorted(keys), "月份要按时间正序")
         self.assertEqual(len(data["orders_by_status"]), 7, "7 个订单状态都要给")
 
     def test_funnel_is_cumulative_and_ignores_lost(self):
