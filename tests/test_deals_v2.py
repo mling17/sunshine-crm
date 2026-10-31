@@ -42,7 +42,7 @@ class DealsTest(ApiTestCase):
         )
         self.assertEqual(deal["product_type"], "天幕")
         self.assertEqual(deal["model"], "TM-300")
-        self.assertEqual(deal["spec"], "跨度 4m × 3m")
+        self.assertEqual(deal["spec"], "跨度 4m * 3m")
         self.assertEqual(deal["stage"], "quote")
         self.assertEqual(deal["stage_label"], "报价")
         self.assertEqual(deal["deposit"], 3000.0)

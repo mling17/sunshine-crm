@@ -105,11 +105,20 @@ function loadCustomers(root) {
         bindOps(root, {
             edit: function (id) { return openCustomerEdit(id, root); },
             follow: function (id) { navigate('#/customers/' + id); },
-            toDeal: function (id) { navigate('#/deals/new?customer=' + id); }
+            toDeal: function (id) {
+                api('/customers/' + id).then(function (c) {
+                    openDealConvertModal(c, 'customer');
+                }).catch(function (err) { toast(err.message, true); });
+            }
         });
     }).catch(function (err) {
         listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';
     });
+}
+
+/* 客户转商机复用线索页的通用弹层。 */
+function openCustomerDealModal(customer) {
+    return openDealConvertModal(customer, 'customer');
 }
 
 /* ---------------- 编辑客户（弹层；列表/详情共用） ---------------- */
@@ -324,9 +333,9 @@ function viewCustomerDetail(root, rawId) {
         $('#toggleEditCustomer', root).addEventListener('click', function () {
             openCustomerEdit(c.id, null);
         });
-        /* 转商机 → 转商机页面 */
+        /* 转商机 → 与线索页共用同一弹层 */
         $('#custToDeal', root).addEventListener('click', function () {
-            navigate('#/deals/new?customer=' + c.id);
+            openCustomerDealModal(c);
         });
 
         /* 删除客户（级联删商机/跟进/标签） */

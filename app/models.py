@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Optional, Literal
+from typing import Annotated, Any, Optional, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
@@ -73,8 +73,17 @@ def _blank_to_none(value: object) -> object:
     return value
 
 
+def normalize_spec(value: object) -> object:
+    """尺寸/洞口尺寸落库统一使用 ``*`` 作为宽高分隔符。"""
+    value = _blank_to_none(value)
+    if not isinstance(value, str):
+        return value
+    return value.replace("x", "*").replace("X", "*").replace("×", "*")
+
+
 CleanName = Annotated[str, BeforeValidator(_strip_name)]
 OptionalText = Annotated[Optional[str], BeforeValidator(_blank_to_none)]
+SpecText = Annotated[Optional[str], BeforeValidator(normalize_spec)]
 TagName = Annotated[str, Field(max_length=32)]
 
 #: 标签数量上限（防止误粘贴一长串）
@@ -175,11 +184,98 @@ class CustomerListOut(BaseModel):
 # ---------------- 商机 ----------------
 
 
+class ProductIn(BaseModel):
+    """产品主档新建。产品参数由业务维护，规格范围不等于客户成交尺寸。"""
+
+    code: str = Field(min_length=1, max_length=64)
+    name: CleanName = Field(min_length=1, max_length=120)
+    category: str = Field(default="天窗", min_length=1, max_length=32)
+    series: OptionalText = Field(default=None, max_length=32)
+    structure: OptionalText = Field(default=None, max_length=32)
+    opening_mode: OptionalText = Field(default=None, max_length=32)
+    drive_type: OptionalText = Field(default=None, max_length=16)
+    frame_type: OptionalText = Field(default=None, max_length=32)
+    leaf_type: OptionalText = Field(default=None, max_length=32)
+    edge_type: OptionalText = Field(default=None, max_length=16)
+    leaf_count: Optional[int] = Field(default=None, ge=1, le=30)
+    min_width: Optional[float] = Field(default=None, ge=0)
+    max_width: Optional[float] = Field(default=None, ge=0)
+    min_height: Optional[float] = Field(default=None, ge=0)
+    max_height: Optional[float] = Field(default=None, ge=0)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    source_template: OptionalText = Field(default=None, max_length=300)
+    description: OptionalText = Field(default=None, max_length=1000)
+    is_active: bool = True
+
+
+class ProductUpdate(BaseModel):
+    """产品主档部分更新。"""
+
+    code: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    name: Optional[CleanName] = Field(default=None, min_length=1, max_length=120)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    series: OptionalText = Field(default=None, max_length=32)
+    structure: OptionalText = Field(default=None, max_length=32)
+    opening_mode: OptionalText = Field(default=None, max_length=32)
+    drive_type: OptionalText = Field(default=None, max_length=16)
+    frame_type: OptionalText = Field(default=None, max_length=32)
+    leaf_type: OptionalText = Field(default=None, max_length=32)
+    edge_type: OptionalText = Field(default=None, max_length=16)
+    leaf_count: Optional[int] = Field(default=None, ge=1, le=30)
+    min_width: Optional[float] = Field(default=None, ge=0)
+    max_width: Optional[float] = Field(default=None, ge=0)
+    min_height: Optional[float] = Field(default=None, ge=0)
+    max_height: Optional[float] = Field(default=None, ge=0)
+    attributes: dict[str, Any] | None = None
+    source_template: OptionalText = Field(default=None, max_length=300)
+    description: OptionalText = Field(default=None, max_length=1000)
+    is_active: bool | None = None
+
+
+class ProductOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    category: str
+    series: str | None = None
+    structure: str | None = None
+    opening_mode: str | None = None
+    drive_type: str | None = None
+    frame_type: str | None = None
+    leaf_type: str | None = None
+    edge_type: str | None = None
+    leaf_count: int | None = None
+    min_width: float | None = None
+    max_width: float | None = None
+    min_height: float | None = None
+    max_height: float | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    source_template: str | None = None
+    form_file_name: str | None = None
+    form_file_size: int = 0
+    form_available: bool = False
+    description: str | None = None
+    is_active: bool = True
+    config_summary: str = ""
+    deal_count: int = 0
+    order_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+class ProductDetailOut(ProductOut):
+    deals: list[dict] = Field(default_factory=list)
+
+
 class DealOut(BaseModel):
     id: int
     customer_id: int
     product_type: str | None = None
     model: str | None = None
+    product_id: int | None = None
+    product_code_snapshot: str | None = None
+    product_name_snapshot: str | None = None
+    product_config_snapshot: str | None = None
     spec: str | None = None
     amount: float = 0.0
     deposit: float = 0.0
@@ -294,9 +390,10 @@ class DealIn(BaseModel):
     """新建商机。``amount`` 必填，deposit/balance 先只写不用，默认 0。"""
 
     customer_id: int = Field(gt=0)
+    product_id: int | None = Field(default=None, gt=0)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
-    spec: OptionalText = Field(default=None, max_length=200)
+    spec: SpecText = Field(default=None, max_length=200)
     amount: float = Field(ge=0)
     deposit: float = Field(default=0, ge=0)
     balance: float = Field(default=0, ge=0)
@@ -309,9 +406,10 @@ class DealIn(BaseModel):
 class DealUpdate(BaseModel):
     """改商机：只改传来的字段。``amount``/``stage`` 显式传 null 会在路由层被 400 拒绝。"""
 
+    product_id: int | None = Field(default=None, gt=0)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
-    spec: OptionalText = Field(default=None, max_length=200)
+    spec: SpecText = Field(default=None, max_length=200)
     amount: float | None = Field(default=None, ge=0)
     deposit: float | None = Field(default=None, ge=0)
     balance: float | None = Field(default=None, ge=0)
@@ -502,9 +600,10 @@ class LeadConvertDeal(BaseModel):
     """
 
     title: OptionalText = Field(default=None, max_length=100)
+    product_id: int | None = Field(default=None, gt=0)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
-    spec: OptionalText = Field(default=None, max_length=200)
+    spec: SpecText = Field(default=None, max_length=200)
     amount: float = Field(gt=0)
     drive_type: OptionalText = Field(default=None, max_length=32)
     note: OptionalText = Field(default=None, max_length=500)
@@ -555,7 +654,7 @@ class OrderIn(BaseModel):
     deal_id: int = Field(gt=0)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
-    spec: OptionalText = Field(default=None, max_length=200)
+    spec: SpecText = Field(default=None, max_length=200)
     amount: float = Field(ge=0)
     status: ORDER_STATUS = "pending_payment"
     owner: OptionalText = Field(default=None, max_length=32)
@@ -574,7 +673,7 @@ class OrderUpdate(BaseModel):
     deal_id: Optional[int] = Field(default=None, gt=0)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
-    spec: OptionalText = Field(default=None, max_length=200)
+    spec: SpecText = Field(default=None, max_length=200)
     amount: Optional[float] = Field(default=None, ge=0)
     owner: OptionalText = Field(default=None, max_length=32)
     # 新增字段
@@ -592,6 +691,10 @@ class OrderOut(BaseModel):
     deal_id: int
     product_type: str | None = None
     model: str | None = None
+    product_id: int | None = None
+    product_code_snapshot: str | None = None
+    product_name_snapshot: str | None = None
+    product_config_snapshot: str | None = None
     spec: str | None = None
     amount: float = 0.0
     status: str
@@ -629,6 +732,10 @@ class OrderDetailOut(BaseModel):
     deal_id: int
     product_type: str | None = None
     model: str | None = None
+    product_id: int | None = None
+    product_code_snapshot: str | None = None
+    product_name_snapshot: str | None = None
+    product_config_snapshot: str | None = None
     spec: str | None = None
     amount: float = 0.0
     status: str

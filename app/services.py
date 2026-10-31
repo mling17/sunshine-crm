@@ -41,6 +41,7 @@ from app.models import (
     CarrierUpdate,
 )
 from app.security import now_iso, now_local_iso
+from app.product_catalog import get_product, product_snapshot
 
 if TYPE_CHECKING:
     from sqlite3 import Connection
@@ -300,14 +301,31 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     # 5. 插入商机
     deal_in = convert_in.deal
     created_at = now_iso()
+    product = get_product(conn, deal_in.product_id, active_only=True) if deal_in.product_id else None
+    if deal_in.product_id and product is None:
+        raise ApiError(status_code=400, code="product_not_found", message="关联产品不存在或已停用")
+    snapshot = (
+        product_snapshot(product)
+        if product
+        else {
+            "product_id": None,
+            "product_code_snapshot": None,
+            "product_name_snapshot": None,
+            "product_config_snapshot": None,
+            "product_type": deal_in.product_type,
+            "model": deal_in.model,
+            "drive_type": deal_in.drive_type,
+        }
+    )
     
     # 阶段固定「报价」（定稿 §1.1），不再接受前端指定
     if deal_in.stage is not None and deal_in.stage not in ("quote", ""):
         raise HTTPException(status_code=400, detail="转化生成的商机阶段固定为「报价」")
     # 「手动/电动」必填（定稿 §7.5 关键属性）
-    if not deal_in.drive_type:
+    resolved_drive = deal_in.drive_type or snapshot.get("drive_type")
+    if not resolved_drive:
         raise ApiError(status_code=400, code="drive_type_required", message="请选择手动 / 电动")
-    if deal_in.drive_type not in ("manual", "electric"):
+    if resolved_drive not in ("manual", "electric"):
         raise ApiError(status_code=400, code="invalid_drive_type", message="手动 / 电动 只能是 manual 或 electric")
     if deal_in.amount <= 0:
         raise HTTPException(status_code=400, detail="商机金额必须大于0")
@@ -315,18 +333,23 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     cur = conn.execute(
         """
         INSERT INTO deals
-            (customer_id, title, product_type, model, spec, amount, drive_type, note,
+            (customer_id, title, product_id, product_code_snapshot, product_name_snapshot,
+             product_config_snapshot, product_type, model, spec, amount, drive_type, note,
              stage, owner, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'quote', ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'quote', ?, ?, ?)
         """,
         (
             customer_id,
             deal_in.title,
-            deal_in.product_type,
-            deal_in.model,
+            snapshot["product_id"],
+            snapshot["product_code_snapshot"],
+            snapshot["product_name_snapshot"],
+            snapshot["product_config_snapshot"],
+            snapshot["product_type"],
+            snapshot["model"],
             deal_in.spec,
             deal_in.amount,
-            (deal_in.drive_type or "manual"),
+            resolved_drive,
             deal_in.note,
             deal_in.owner,
             created_at,
@@ -410,8 +433,9 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     
     # 获取商机详情
     deal_row = conn.execute(
-        "SELECT id, customer_id, product_type, model, spec, amount, stage, "
-        "closed_at, created_at, updated_at "
+        "SELECT id, customer_id, product_id, product_code_snapshot,"
+        " product_name_snapshot, product_config_snapshot, product_type, model, spec,"
+        " amount, stage, drive_type, closed_at, created_at, updated_at "
         "FROM deals WHERE id = ?",
         (deal_id,),
     ).fetchone()

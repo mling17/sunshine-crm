@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_006"
-SCHEMA_USER_VERSION = 6
+MIGRATION_VERSION = "v2_009"
+SCHEMA_USER_VERSION = 9
 
 
 def default_db_path() -> Path:
@@ -660,7 +660,108 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_006", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_006', datetime('now'), '公司客户主联系人继承与客户搜索口径')"),
-    ("user_version v2_006", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    ("user_version v2_006", None, "PRAGMA user_version = 6"),
+    # ---------- 24. v2_007：尺寸/洞口尺寸分隔符统一为 * ----------
+    ("normalize_deal_spec_separator",
+     _once("v2_007", "deals", "orders"), """
+    UPDATE deals
+    SET spec = replace(replace(replace(spec, 'x', '*'), 'X', '*'), '×', '*')
+    WHERE spec IS NOT NULL
+      AND (instr(spec, 'x') > 0 OR instr(spec, 'X') > 0 OR instr(spec, '×') > 0)
+    """),
+    ("normalize_order_spec_separator",
+     _once("v2_007", "deals", "orders"), """
+    UPDATE orders
+    SET spec = replace(replace(replace(spec, 'x', '*'), 'X', '*'), '×', '*')
+    WHERE spec IS NOT NULL
+      AND (instr(spec, 'x') > 0 OR instr(spec, 'X') > 0 OR instr(spec, '×') > 0)
+    """),
+    ("schema_migrations v2_007", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_007', datetime('now'), '尺寸/洞口尺寸分隔符统一为星号')"),
+    # ---------- 25. v2_008：产品主档 + 商机/订单产品快照 ----------
+    ("products", None, """
+    CREATE TABLE IF NOT EXISTS products (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      seed_key              TEXT NOT NULL UNIQUE,
+      code                  TEXT NOT NULL,
+      name                  TEXT NOT NULL,
+      category              TEXT NOT NULL DEFAULT '天窗',
+      series                TEXT,
+      structure             TEXT,
+      opening_mode          TEXT,
+      drive_type            TEXT,
+      frame_type            TEXT,
+      leaf_type             TEXT,
+      edge_type             TEXT,
+      leaf_count            INTEGER,
+      min_width             REAL,
+      max_width             REAL,
+      min_height            REAL,
+      max_height            REAL,
+      attributes            TEXT,
+      source_template       TEXT,
+      form_storage_key      TEXT,
+      form_file_name        TEXT,
+      form_file_size        INTEGER NOT NULL DEFAULT 0,
+      form_sha256           TEXT,
+      form_uploaded_at      TEXT,
+      description           TEXT,
+      is_active             INTEGER NOT NULL DEFAULT 1,
+      created_at            TEXT NOT NULL,
+      updated_at            TEXT NOT NULL,
+      create_time           TEXT NOT NULL DEFAULT '',
+      update_time           TEXT NOT NULL DEFAULT '',
+      is_delete             INTEGER NOT NULL DEFAULT 0
+    )
+    """),
+    ("idx_products_category", _tbl_guard("products"),
+     "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category, series)"),
+    ("idx_products_active", _tbl_guard("products"),
+     "CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active, is_delete)"),
+    ("uq_products_code_active", _tbl_guard("products"),
+     "CREATE UNIQUE INDEX IF NOT EXISTS uq_products_code_active"
+     " ON products(code) WHERE is_delete = 0"),
+    ("deals.product_id", _col_guard("deals", "product_id"),
+     "ALTER TABLE deals ADD COLUMN product_id INTEGER"),
+    ("deals.product_code_snapshot", _col_guard("deals", "product_code_snapshot"),
+     "ALTER TABLE deals ADD COLUMN product_code_snapshot TEXT"),
+    ("deals.product_name_snapshot", _col_guard("deals", "product_name_snapshot"),
+     "ALTER TABLE deals ADD COLUMN product_name_snapshot TEXT"),
+    ("deals.product_config_snapshot", _col_guard("deals", "product_config_snapshot"),
+     "ALTER TABLE deals ADD COLUMN product_config_snapshot TEXT"),
+    ("orders.product_id", _col_guard("orders", "product_id"),
+     "ALTER TABLE orders ADD COLUMN product_id INTEGER"),
+    ("orders.product_code_snapshot", _col_guard("orders", "product_code_snapshot"),
+     "ALTER TABLE orders ADD COLUMN product_code_snapshot TEXT"),
+    ("orders.product_name_snapshot", _col_guard("orders", "product_name_snapshot"),
+     "ALTER TABLE orders ADD COLUMN product_name_snapshot TEXT"),
+    ("orders.product_config_snapshot", _col_guard("orders", "product_config_snapshot"),
+     "ALTER TABLE orders ADD COLUMN product_config_snapshot TEXT"),
+    ("idx_deals_product", _tbl_guard("deals"),
+     "CREATE INDEX IF NOT EXISTS idx_deals_product ON deals(product_id)"),
+    ("idx_orders_product", _tbl_guard("orders"),
+     "CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id)"),
+    # v2_009 columns precede the seed so old v2_008 catalogs gain their Excel immediately.
+    ("products.form_storage_key", _col_guard("products", "form_storage_key"),
+     "ALTER TABLE products ADD COLUMN form_storage_key TEXT"),
+    ("products.form_file_name", _col_guard("products", "form_file_name"),
+     "ALTER TABLE products ADD COLUMN form_file_name TEXT"),
+    ("products.form_file_size", _col_guard("products", "form_file_size"),
+     "ALTER TABLE products ADD COLUMN form_file_size INTEGER NOT NULL DEFAULT 0"),
+    ("products.form_sha256", _col_guard("products", "form_sha256"),
+     "ALTER TABLE products ADD COLUMN form_sha256 TEXT"),
+    ("products.form_uploaded_at", _col_guard("products", "form_uploaded_at"),
+     "ALTER TABLE products ADD COLUMN form_uploaded_at TEXT"),
+    ("product_catalog_seed", None, ""),
+    ("standardize_product_audit_columns", None, ""),
+    ("schema_migrations v2_008", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_008', datetime('now'), '产品主档：123 个下单表模板 + 商机/订单产品快照')"),
+    ("schema_migrations v2_009", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_009', datetime('now'), '每个产品必须包含一份对应 Excel 下单表')"),
+    ("user_version v2_009", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -735,9 +836,15 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
             try:
                 if label == "dict_items_seed":
                     seed_dict_items(conn)
+                elif label == "product_catalog_seed":
+                    from app.product_catalog import seed_product_catalog
+
+                    seed_product_catalog(conn)
                 elif label == "standardize_audit_columns":
                     ensure_standard_columns(conn)
                     ensure_active_lead_phone_unique(conn)
+                elif label == "standardize_product_audit_columns":
+                    ensure_standard_columns(conn)
                 else:
                     conn.execute(sql)
             except sqlite3.Error as exc:  # 带语句名报错，定位快
@@ -769,6 +876,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
     required_tables = (
         "leads", "lead_tags", "customer_contacts", "carriers", "orders",
         "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
+        "products",
     )
     for table in required_tables:
         assert table_exists(conn, table), f"缺表 {table}"
@@ -776,9 +884,18 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
     # 检查必要列是否存在
     required_columns = {
         "customers": ("customer_type", "source", "source_other", "intent_level", "company_name", "owner", "note"),
-        "deals": ("title", "lost_reason", "lost_reason_other", "source_lost_deal_id", "order_id", "owner"),
+        "deals": (
+            "title", "lost_reason", "lost_reason_other", "source_lost_deal_id",
+            "order_id", "owner", "product_id", "product_code_snapshot",
+            "product_name_snapshot", "product_config_snapshot",
+        ),
+        "orders": ("product_id", "product_code_snapshot", "product_name_snapshot", "product_config_snapshot"),
         "follow_ups": ("object_type", "object_id", "method"),
         "attachments": ("object_type", "object_id", "follow_up_id"),
+        "products": (
+            "form_storage_key", "form_file_name", "form_file_size",
+            "form_sha256", "form_uploaded_at",
+        ),
     }
     for table, columns in required_columns.items():
         for column in columns:

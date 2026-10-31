@@ -19,7 +19,8 @@ from app.enums import (
     LOGISTICS_MODE_LABELS,
 )
 from app.errors import ApiError
-from app.models import DealDetailOut, DealIn, DealOut, DealUpdate
+from app.models import DealDetailOut, DealIn, DealOut, DealUpdate, normalize_spec
+from app.product_catalog import config_summary, get_product, product_snapshot
 from app.routers.auth import require_auth
 from app.security import now_iso, now_local_iso
 from app.services import next_no
@@ -34,7 +35,8 @@ router = APIRouter(
 STAGES = DEAL_STAGE_ORDER
 #: 会写「编辑」履历的字段
 _CHANGE_TRACKED = (
-    "product_type", "model", "spec", "drive_type",
+    "product_id", "product_code_snapshot", "product_name_snapshot",
+    "product_config_snapshot", "product_type", "model", "spec", "drive_type",
     "amount", "deposit", "balance", "note",
 )
 _UPDATABLE = _CHANGE_TRACKED + ("stage",)
@@ -103,8 +105,15 @@ def _spec_from_model(model: str | None) -> str | None:
         return None
     for item in dict_svc.items("product_model"):
         if item["key"] == model:
-            return (item.get("meta") or {}).get("size")
+            return normalize_spec((item.get("meta") or {}).get("size"))
     return None
+
+
+def _product(conn, product_id: int) -> dict:
+    product = get_product(conn, int(product_id), active_only=True)
+    if product is None:
+        raise ApiError(status_code=400, code="product_not_found", message="关联产品不存在或已停用")
+    return product
 
 
 def _deal_row(conn, deal_id: int):
@@ -147,8 +156,11 @@ def list_deals(
         params.append(value)
     if q:
         like = f"%{q.strip()}%"
-        where.append("(d.model LIKE ? OR d.spec LIKE ? OR c.name LIKE ?)")
-        params.extend([like, like, like])
+        where.append(
+            "(d.model LIKE ? OR d.spec LIKE ? OR c.name LIKE ?"
+            " OR d.product_name_snapshot LIKE ? OR d.product_code_snapshot LIKE ?)"
+        )
+        params.extend([like, like, like, like, like])
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     with db_conn() as conn:
@@ -194,10 +206,23 @@ def create_deal(payload: DealIn) -> DealOut:
             (payload.customer_id,),
         ).fetchone() is None:
             raise HTTPException(status_code=404, detail="客户不存在")
+        product = _product(conn, payload.product_id) if payload.product_id else None
 
-    drive = _drive_type(payload.drive_type)
-    product_type = _product_type(payload.product_type)
-    model = _model(payload.model)
+    linked_drive = product.get("drive_type") if product else None
+    drive = _drive_type(payload.drive_type or linked_drive)
+    if product:
+        product_type = product["category"]
+        model = product["code"]
+        snapshot = product_snapshot(product)
+    else:
+        product_type = _product_type(payload.product_type)
+        model = _model(payload.model)
+        snapshot = {
+            "product_id": None,
+            "product_code_snapshot": None,
+            "product_name_snapshot": None,
+            "product_config_snapshot": None,
+        }
     # 定稿：新建阶段固定「报价」
     if payload.stage and payload.stage.strip() not in ("quote", ""):
         raise ApiError(
@@ -205,16 +230,21 @@ def create_deal(payload: DealIn) -> DealOut:
             code="invalid_initial_stage",
             message="新建商机的阶段固定为「报价」，请建好后再推进",
         )
-    spec = payload.spec or _spec_from_model(model)
+    spec = payload.spec or (None if product else _spec_from_model(model))
     amount = round(float(payload.amount), 2)
 
     with db_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO deals (customer_id, product_type, model, spec, amount, deposit, balance,"
-            " stage, closed_at, created_at, updated_at, drive_type, note)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, 'quote', NULL, ?, ?, ?, ?)",
+            "INSERT INTO deals (customer_id, product_id, product_code_snapshot,"
+            " product_name_snapshot, product_config_snapshot, product_type, model, spec,"
+            " amount, deposit, balance, stage, closed_at, created_at, updated_at, drive_type, note)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'quote', NULL, ?, ?, ?, ?)",
             (
                 payload.customer_id,
+                snapshot["product_id"],
+                snapshot["product_code_snapshot"],
+                snapshot["product_name_snapshot"],
+                snapshot["product_config_snapshot"],
                 product_type,
                 model,
                 spec,
@@ -236,7 +266,8 @@ def create_deal(payload: DealIn) -> DealOut:
             customer_id=payload.customer_id,
             deal_id=deal_id,
             content=(
-                f"创建商机：{product_type or '未填产品'} {model or ''} {spec or ''}，"
+                f"创建商机：{snapshot['product_name_snapshot'] or product_type or '未填产品'}"
+                f" {model or ''} {spec or ''}，"
                 f"报价 ¥{amount:,.2f}"
             ).strip(),
             detail={"amount": amount, "drive_type": drive},
@@ -254,18 +285,48 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
         old = _deal_row(conn, deal_id)
 
         # ① 先判冻结：锁定/流失的商机，除备注外一律拦掉（错误码优先于字段校验）
+        requested_fields = set(updates)
+        if "product_id" in fields:
+            requested_fields.add("product_id")
         if old["order_id"] is not None:
-            if [k for k in updates if k not in _LOCKED_ALLOWED]:
+            if [k for k in requested_fields if k not in _LOCKED_ALLOWED]:
                 raise _deal_locked()
         elif old["stage"] == "lost":
-            if [k for k in updates if k not in _LOCKED_ALLOWED]:
+            if [k for k in requested_fields if k not in _LOCKED_ALLOWED]:
                 raise ApiError(
                     status_code=409,
                     code="deal_frozen",
                     message="该商机已判流失，不可修改（只允许改备注）",
                 )
 
-        # ② 再校验取值
+        # ② 关联产品：只保存主档外键与快照；主档后续改名不改写已建商机。
+        linked_product_id = old["product_id"]
+        if "product_id" in fields:
+            requested_product_id = fields["product_id"]
+            if requested_product_id is None:
+                updates.update({
+                    "product_id": None,
+                    "product_code_snapshot": None,
+                    "product_name_snapshot": None,
+                    "product_config_snapshot": None,
+                })
+                linked_product_id = None
+            else:
+                product = _product(conn, int(requested_product_id))
+                snapshot = product_snapshot(product)
+                updates.update({
+                    "product_id": snapshot["product_id"],
+                    "product_code_snapshot": snapshot["product_code_snapshot"],
+                    "product_name_snapshot": snapshot["product_name_snapshot"],
+                    "product_config_snapshot": snapshot["product_config_snapshot"],
+                    "product_type": snapshot["product_type"],
+                    "model": snapshot["model"],
+                })
+                if "drive_type" not in updates and snapshot.get("drive_type"):
+                    updates["drive_type"] = snapshot["drive_type"]
+                linked_product_id = snapshot["product_id"]
+
+        # ③ 再校验取值
         if "stage" in updates and updates["stage"] is None:
             raise ApiError(status_code=400, code="stage_required", message="阶段不能为空")
         if updates.get("stage") == "lost":
@@ -282,9 +343,15 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
         if "drive_type" in updates:
             updates["drive_type"] = _drive_type(updates["drive_type"])
         if "product_type" in updates:
-            updates["product_type"] = _product_type(updates["product_type"])
+            if linked_product_id:
+                updates["product_type"] = str(updates["product_type"] or "").strip() or None
+            else:
+                updates["product_type"] = _product_type(updates["product_type"])
         if "model" in updates:
-            updates["model"] = _model(updates["model"])
+            if linked_product_id:
+                updates["model"] = str(updates["model"] or "").strip() or None
+            else:
+                updates["model"] = _model(updates["model"])
         if "amount" in updates and updates["amount"] is None:
             raise ApiError(status_code=400, code="amount_required", message="金额不能为空")
         for key in ("amount", "deposit", "balance"):
@@ -302,7 +369,7 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
             elif old_stage == "won":
                 updates["closed_at"] = None
 
-        # ③ 字段真变化 → 一条「编辑」履历
+        # ④ 字段真变化 → 一条「编辑」履历
         lines, detail = change_summary(dict(old), updates, _CHANGE_TRACKED)
         if lines:
             add_entry(
@@ -322,7 +389,7 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
             [*updates.values(), now_iso(), deal_id],
         )
 
-        # ④ 阶段变化 → 一条「状态变更」履历
+        # ⑤ 阶段变化 → 一条「状态变更」履历
         if new_stage != old_stage:
             add_entry(
                 conn,
@@ -445,16 +512,22 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
     order_no = next_no(conn, "orders", "order_no", "SO", now_local_iso()[:8])
     now = now_iso()
     cur = conn.execute(
-        "INSERT INTO orders (order_no, customer_id, deal_id, product_type, model, spec, amount,"
+        "INSERT INTO orders (order_no, customer_id, deal_id, product_id,"
+        " product_code_snapshot, product_name_snapshot, product_config_snapshot,"
+        " product_type, model, spec, amount,"
         " deposit_amount, balance_amount, deposit_paid, balance_paid, logistics_mode, carrier_id,"
         " logistics_fee, tracking_no, address_id, receiver_name, receiver_phone, receiver_address,"
         " status, note, owner, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?,"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?,"
         " 'pending_payment', ?, ?, ?, ?)",
         (
             order_no,
             deal["customer_id"],
             deal_id,
+            deal["product_id"],
+            deal["product_code_snapshot"],
+            deal["product_name_snapshot"],
+            deal["product_config_snapshot"],
             deal["product_type"],
             deal["model"],
             deal["spec"],

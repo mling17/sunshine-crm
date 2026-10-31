@@ -134,7 +134,8 @@ def get_order(order_id: int) -> OrderDetailOut:
         ]
         # 关联商机（可点回）
         deal_row = conn.execute(
-            "SELECT id, product_type, model, spec, amount, stage, drive_type"
+            "SELECT id, product_id, product_code_snapshot, product_name_snapshot,"
+            " product_config_snapshot, product_type, model, spec, amount, stage, drive_type"
             " FROM deals WHERE id = ?", (row['deal_id'],)
         ).fetchone()
         order_dict['deal'] = dict(deal_row) if deal_row else None

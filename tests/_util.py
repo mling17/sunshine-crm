@@ -43,9 +43,13 @@ def reset_data() -> None:
         for table in (
             "aftersale_status_log", "aftersales", "order_status_log", "orders",
             "attachments", "follow_ups", "deals", "customer_tags",
-            "lead_tags", "leads", "customers", "tags", "sessions", "import_log",
+            "lead_tags", "leads", "customers", "tags", "sessions", "import_log", "products",
         ):
             conn.execute(f"DELETE FROM {table}")
+        # Product master is seeded reference data; recreate it after the test wipe.
+        from app.product_catalog import seed_product_catalog
+
+        seed_product_catalog(conn)
 
 
 def login(client: TestClient, password: str = ADMIN["password"]) -> TestClient:

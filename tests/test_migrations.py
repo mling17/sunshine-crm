@@ -66,7 +66,7 @@ class TestMigrations(unittest.TestCase):
         expected = {
             "leads", "lead_tags", "customer_contacts", "carriers", "orders",
             "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
-            "customers", "deals", "follow_ups", "attachments",
+            "customers", "deals", "follow_ups", "attachments", "products",
         }
         conn = sqlite3.connect(str(self.db))
         try:
@@ -76,6 +76,11 @@ class TestMigrations(unittest.TestCase):
             conn.close()
         self.assertTrue(expected <= tables, f"缺表：{expected - tables}")
         self.assertIn("trg_fu_object_fill", triggers)
+
+    def test_product_catalog_seeded_once(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        run_migrations(self.db, backup=False, verbose=False)
+        self.assertEqual(_rows(self.db, "products"), 123)
 
     def test_migration_clear_data(self):
         run_migrations(self.db, backup=False, verbose=False)
@@ -186,6 +191,49 @@ class TestMigrations(unittest.TestCase):
         finally:
             conn.close()
         self.assertEqual(rows, [("陈明", "18366326404", "游戏520", 1)])
+
+    def test_v2_007_normalizes_existing_spec_separators(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-11-01T00:00:00Z"
+        try:
+            customer_id = int(conn.execute(
+                "INSERT INTO customers (name, customer_type, created_at, updated_at)"
+                " VALUES ('尺寸客户','personal',?,?)",
+                (now, now),
+            ).lastrowid)
+            deal_id = int(conn.execute(
+                "INSERT INTO deals"
+                " (customer_id, spec, amount, stage, created_at, updated_at)"
+                " VALUES (?, '1200x2400', 1000, 'quote', ?, ?)",
+                (customer_id, now, now),
+            ).lastrowid)
+            conn.execute(
+                "INSERT INTO orders"
+                " (order_no, customer_id, deal_id, spec, amount, status, created_at, updated_at)"
+                " VALUES ('SO-SPEC-001', ?, ?, '1300×2500', 1000, 'pending_payment', ?, ?)",
+                (customer_id, deal_id, now, now),
+            )
+            conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_007'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        run_migrations(self.db, backup=False, verbose=False)
+        run_migrations(self.db, backup=False, verbose=False)
+
+        conn = sqlite3.connect(str(self.db))
+        try:
+            deal_spec = conn.execute(
+                "SELECT spec FROM deals WHERE id = ?", (deal_id,)
+            ).fetchone()[0]
+            order_spec = conn.execute(
+                "SELECT spec FROM orders WHERE deal_id = ?", (deal_id,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(deal_spec, "1200*2400")
+        self.assertEqual(order_spec, "1300*2500")
 
 
 if __name__ == "__main__":

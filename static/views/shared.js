@@ -34,8 +34,8 @@ function dealFormHtml() {
       '<div class="field"><label>型号</label>' +
         '<input name="model" type="text" maxlength="64" placeholder="如 XW-120"></div>' +
     '</div>' +
-    '<div class="field"><label>尺寸 / 洞口</label>' +
-      '<input name="spec" type="text" maxlength="200" placeholder="如 1200×2400"></div>' +
+    '<div class="field"><label>尺寸/洞口尺寸</label>' +
+      '<input name="spec" type="text" maxlength="200" placeholder="如 1200*2400"></div>' +
     '<div class="row-3">' +
       '<div class="field"><label>报价金额 *</label>' +
         '<input name="amount" type="number" min="0" step="0.01" inputmode="decimal" required></div>' +
@@ -92,7 +92,8 @@ function barsHtml(counts, pairs) {
 }
 /* 商机列表项（客户详情页 / 商机页共用） */
 function dealItemHtml(deal) {
-  var parts = [deal.product_type, deal.model, deal.spec].filter(Boolean).join(' / ') || '未填产品';
+  var parts = [deal.product_name_snapshot, deal.product_code_snapshot || deal.model, deal.spec]
+    .filter(Boolean).join(' / ') || [deal.product_type, deal.model, deal.spec].filter(Boolean).join(' / ') || '未填产品';
   var amounts = '报价 ' + money(deal.amount);
   if (deal.deposit) { amounts += ' · 定金 ' + money(deal.deposit); }
   if (deal.balance) { amounts += ' · 尾款 ' + money(deal.balance); }
@@ -513,4 +514,203 @@ function bindModelCombo(comboEl, items, onPick) {
     value: function () { return hidden.value; },
     set: function (key) { hidden.value = key || ''; input.value = key || ''; }
   };
+}
+
+/* ===== 产品主档选择器（商机必须从产品库选，旧商机保留型号兜底） ===== */
+var PRODUCT_CATALOG_CACHE = null;
+
+function loadProductCatalog(force) {
+  if (PRODUCT_CATALOG_CACHE && !force) {
+    return Promise.resolve(PRODUCT_CATALOG_CACHE);
+  }
+  return api('/products').then(function (items) {
+    PRODUCT_CATALOG_CACHE = items || [];
+    return PRODUCT_CATALOG_CACHE;
+  });
+}
+
+function productSelectHtml(products, currentId, emptyLabel) {
+  var groups = {};
+  (products || []).forEach(function (product) {
+    var key = product.category || '其他';
+    if (!groups[key]) { groups[key] = []; }
+    groups[key].push(product);
+  });
+  var html = '<select name="product_id"><option value="">' + esc(emptyLabel || '请选择产品') + '</option>';
+  Object.keys(groups).forEach(function (category) {
+    html += '<optgroup label="' + esc(category) + '">';
+    html += groups[category].map(function (product) {
+      var detail = [product.series, product.structure, product.config_summary]
+        .filter(Boolean).join(' · ');
+      var unavailable = product.is_active === false || product.form_available === false;
+      return '<option value="' + product.id + '"' +
+        (String(currentId || '') === String(product.id) ? ' selected' : '') +
+        (unavailable ? ' disabled' : '') + '>' +
+        esc(product.code + ' · ' + product.name + (detail ? '（' + detail + '）' : '') +
+          (product.form_available === false ? '（缺少 Excel）' : '')) + '</option>';
+    }).join('');
+    html += '</optgroup>';
+  });
+  return html + '</select>';
+}
+
+function findProduct(products, productId) {
+  return (products || []).filter(function (product) {
+    return String(product.id) === String(productId || '');
+  })[0] || null;
+}
+
+/* 线索 / 客户转商机共用弹层，确保字段与交互完全一致。 */
+function openDealConvertModal(source, sourceType) {
+  var isCustomer = sourceType === 'customer';
+  var sourceId = Number(source && source.id);
+  if (!sourceId) {
+    toast('来源记录不存在', true);
+    return;
+  }
+
+  var sourceName = isCustomer
+    ? (source.name || source.company_name || ('客户 #' + sourceId))
+    : (source.name || source.company_name || ('线索 #' + sourceId));
+  var sourceText = sourceName + (isCustomer ? '（客户）' : '（线索）');
+  var sourceHint = isCustomer ? '商机会归入当前客户档案。' : '转化会同时建立客户档案。';
+
+  loadProductCatalog().then(function (products) {
+    var modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML =
+    '<div class="modal-overlay"></div>' +
+    '<div class="modal-content wide">' +
+    '<div class="modal-header"><h3>转商机</h3>' +
+    '<button type="button" class="btn btn-link modal-close">×</button></div>' +
+    '<div class="modal-body">' +
+    '<form id="dealConvertForm" class="form-grid" autocomplete="off">' +
+    '<p class="small muted" style="margin-top:0">来源：' + esc(sourceText) + '　' + sourceHint + '</p>' +
+    '<div class="field"><label>关联产品 *</label>' + productSelectHtml(products, '', '请选择产品') +
+    '<div class="small muted" data-product-hint>先从产品主档选择，产品类型、型号和驱动方式会自动带出。</div></div>' +
+    '<div class="row-2">' +
+    '<div class="field"><label>产品类型</label>' +
+    '<select name="product_type">' + dictOptions('product_type', '天窗', '请选择') + '</select></div>' +
+    '<div class="field"><label>手动 / 电动 *</label>' +
+    '<select name="drive_type">' +
+    '<option value="manual">手动</option>' +
+    '<option value="electric">电动</option>' +
+    '</select></div>' +
+    '</div>' +
+    '<div class="row-2">' +
+    '<div class="field"><label>产品型号 *</label>' + modelComboHtml('') + '</div>' +
+    '<div class="field"><label>尺寸/洞口尺寸 *</label>' +
+    '<input name="spec" maxlength="32" required placeholder="按现场量尺填，如 1480*2350"></div>' +
+    '</div>' +
+    '<div class="row-2">' +
+    '<div class="field"><label>金额（报价）*</label>' +
+    '<input name="amount" type="number" min="0" step="0.01" inputmode="decimal" required placeholder="12000"></div>' +
+    '<div class="field"><label>阶段</label>' +
+    '<input value="报价" disabled title="新建商机固定为报价"></div>' +
+    '</div>' +
+    '<div class="field"><label>备注</label>' +
+    '<textarea name="note" maxlength="300" placeholder="客户需求、现场情况、特殊要求…"></textarea></div>' +
+    '<div class="form-actions">' +
+    '<button type="button" class="btn modal-cancel">取消</button>' +
+    '<button type="submit" class="btn btn-primary">创建商机</button>' +
+    '</div>' +
+    '</form>' +
+    '</div></div>';
+    document.body.appendChild(modal);
+
+    function close() {
+      if (modal.parentNode) { document.body.removeChild(modal); }
+    }
+    modal.querySelector('.modal-close').addEventListener('click', close);
+    modal.querySelector('.modal-cancel').addEventListener('click', close);
+
+    var form = modal.querySelector('form');
+    var productSelect = form.querySelector('[name="product_id"]');
+    var modelCombo = bindModelCombo(form.querySelector('[data-model-combo]'), dictItems('product_model'), function (hit) {
+      if (hit && hit.meta) {
+        if (hit.meta.drive) { form.querySelector('[name="drive_type"]').value = hit.meta.drive; }
+        if (hit.meta.product) { form.querySelector('[name="product_type"]').value = hit.meta.product; }
+      }
+    });
+
+    function applyProduct(product) {
+      var hint = form.querySelector('[data-product-hint]');
+      if (!product) {
+        if (hint) { hint.textContent = '未关联产品时，型号仍从旧型号字典选择。'; }
+        return;
+      }
+      form.querySelector('[name="product_type"]').value = product.category || '';
+      if (product.drive_type) { form.querySelector('[name="drive_type"]').value = product.drive_type; }
+      modelCombo.set(product.code);
+      if (hint) {
+        hint.textContent = product.config_summary || [product.series, product.structure].filter(Boolean).join(' · ');
+      }
+    }
+    productSelect.addEventListener('change', function () {
+      applyProduct(findProduct(products, productSelect.value));
+    });
+
+    form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var btn = form.querySelector('button[type="submit"]');
+    var amount = numOrNull(form.querySelector('[name="amount"]').value);
+    var model = String(form.querySelector('[name="model"]').value || '').trim();
+    var spec = String(form.querySelector('[name="spec"]').value || '').trim();
+    if (!model) { toast('请选择产品型号', true); return; }
+    if (!spec) { toast('尺寸/洞口尺寸必填', true); return; }
+    if (amount === null || !(amount > 0)) { toast('金额必须大于 0', true); return; }
+
+    function val(name) {
+      var el = form.querySelector('[name="' + name + '"]');
+      return el ? String(el.value || '').trim() : '';
+    }
+
+    var product = findProduct(products, productSelect.value);
+    if (!product) { toast('请从产品主档选择产品', true); return; }
+    var deal = {
+      title: [val('product_type'), model].filter(Boolean).join(' ').slice(0, 100) || null,
+      product_id: product.id,
+      product_type: val('product_type') || null,
+      model: model,
+      spec: spec,
+      amount: amount,
+      drive_type: val('drive_type') || null,
+      note: val('note') || null
+    };
+    var request = isCustomer
+      ? api('/deals', {
+        method: 'POST',
+        body: {
+          customer_id: sourceId,
+          product_id: deal.product_id,
+          product_type: deal.product_type,
+          model: deal.model,
+          spec: deal.spec,
+          amount: deal.amount,
+          drive_type: deal.drive_type,
+          stage: 'quote',
+          note: deal.note
+        }
+      })
+      : api('/leads/' + sourceId + '/convert', {
+        method: 'POST',
+        body: { mode: 'new', deal: deal }
+      });
+
+    btn.disabled = true;
+    request.then(function (res) {
+      var created = isCustomer ? res : (res && res.deal);
+      toast('已转商机');
+      close();
+      invalidateCustomerIndex();
+      if (created && created.id) { navigate('#/deals/' + created.id); }
+      else { navigate('#/deals'); }
+    }).catch(function (err) {
+      toast(err.message, true);
+      btn.disabled = false;
+    });
+    });
+  }).catch(function (err) {
+    toast(err && err.message ? err.message : '加载产品失败', true);
+  });
 }

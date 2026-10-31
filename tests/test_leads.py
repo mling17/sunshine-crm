@@ -320,7 +320,7 @@ class LeadsTest(ApiTestCase):
                 "title": "测试商机",
                 "product_type": "天窗",
                 "model": "XW-120",
-                "spec": "1200*2400",
+                "spec": "1200x2400",
                 "drive_type": "manual",
                 "amount": 12800.0,
             }
@@ -499,6 +499,7 @@ class LeadsTest(ApiTestCase):
         self.assertIsNotNone(body["customer"])
         self.assertIsNotNone(body["deal"])
         self.assertEqual(body["dedupe"], "forced")
+        self.assertEqual(body["deal"]["spec"], "1200*2400")
         self.assertEqual(body["customer"]["created_at"], body["lead"]["created_at"])
 
     def test_company_lead_conversion_keeps_primary_contact_searchable(self):

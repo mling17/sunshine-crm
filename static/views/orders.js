@@ -55,7 +55,8 @@ function viewOrders(root, route) {
                 return esc(o.customer_name || index[o.customer_id] || ('客户 #' + o.customer_id));
             } },
             { title: '产品', nowrap: true, render: function (o) {
-                return esc([o.product_type, o.model].filter(Boolean).join(' ') || '—');
+                return esc([o.product_name_snapshot, o.product_code_snapshot || o.model]
+                    .filter(Boolean).join(' / ') || [o.product_type, o.model].filter(Boolean).join(' ') || '—');
             } },
             { title: '总额', align: 'right', nowrap: true, render: function (o) { return money(o.amount); } },
             { title: '已收', align: 'right', nowrap: true, render: function (o) {
@@ -157,7 +158,13 @@ function viewOrderDetail(root, rawId) {
         var infoHtml = infoGrid([
             ['客户', '<a href="#/customers/' + order.customer_id + '">' + esc(customerName) + '</a>', true],
             ['关联商机', dealHtml, true],
-            ['产品 / 型号', [order.product_type, order.model, order.spec].filter(Boolean).join(' ')],
+            ['关联产品', order.product_id
+                ? '<a href="#/products/' + order.product_id + '">' +
+                  esc(order.product_name_snapshot || ('产品 #' + order.product_id)) + '</a>'
+                : '未关联产品', true],
+            ['产品 / 型号', [order.product_code_snapshot, order.product_type, order.model, order.spec]
+                .filter(Boolean).join(' ')],
+            ['产品配置', order.product_config_snapshot || '—'],
             ['物流方式', order.logistics_mode_label],
             ['承运公司', (order.carrier && (order.carrier.name || order.carrier.company)) || '不指定'],
             ['运单号', order.tracking_number || order.tracking_no || '待补'],

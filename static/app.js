@@ -415,6 +415,8 @@
       if (route.parts[1] === 'new') { job = viewDealNew(root, route); }
       else if (route.parts[1]) { job = viewDealDetail(root, route.parts[1]); }
       else { job = viewDeals(root, route); }
+    } else if (view === 'products') {
+      job = route.parts[1] ? viewProductDetail(root, route.parts[1]) : viewProducts(root);
     } else if (view === 'followups') {
       job = viewFollowups(root, route);
     } else if (view === 'orders') {

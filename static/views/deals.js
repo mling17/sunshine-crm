@@ -21,7 +21,8 @@ function driveBadge(deal) {
 }
 
 function dealProductText(deal) {
-    var parts = [deal.product_type, deal.model, deal.spec].filter(Boolean);
+    var parts = [deal.product_name_snapshot, deal.product_type, deal.model, deal.spec].filter(Boolean);
+    parts = parts.filter(function (value, index) { return parts.indexOf(value) === index; });
     return parts.length ? parts.join(' / ') : '未填产品';
 }
 
@@ -48,8 +49,8 @@ function viewDeals(root, route) {
             var customerName = index[d.customer_id] || ('客户 #' + d.customer_id);
             return '<tr>' +
                 '<td><a href="#/deals/' + d.id + '">' + esc(customerName) + '</a></td>' +
-                '<td>' + esc(d.product_type || '—') + '</td>' +
-                '<td>' + esc(d.model || '—') + '</td>' +
+                '<td>' + esc(d.product_name_snapshot || d.product_type || '—') + '</td>' +
+                '<td>' + esc(d.product_code_snapshot || d.model || '—') + '</td>' +
                 '<td>' + driveBadge(d) + '</td>' +
                 '<td>' + esc(d.spec || '—') + '</td>' +
                 '<td style="text-align:right;white-space:nowrap">' + money(d.amount) + '</td>' +
@@ -90,12 +91,14 @@ function viewDealDetail(root, rawId) {
     return Promise.all([
         api('/deals/' + id),
         ensureCustomerIndex(),
+        loadProductCatalog(),
         api('/follow-ups?object_type=deal&object_id=' + id + '&include_system=true')
             .catch(function () { return []; })
     ]).then(function (all) {
         var d = all[0];
         var index = all[1] || {};
-        var records = all[2] || [];
+        var products = all[2] || [];
+        var records = all[3] || [];
 
         if (!d) {
             root.innerHTML = '<div class="card">商机不存在，<a href="#/deals">回商机列表</a></div>';
@@ -139,6 +142,11 @@ function viewDealDetail(root, rawId) {
             '</div>' +
             '<div class="item-sub" style="line-height:1.9">' +
             '客户：<a href="#/customers/' + d.customer_id + '">' + esc(customerName) + '</a><br>' +
+            '关联产品：' + (d.product_id
+                ? '<a href="#/products/' + d.product_id + '">' + esc(d.product_name_snapshot || ('产品 #' + d.product_id)) + '</a>'
+                : '<span class="muted">未关联产品</span>') +
+            '　编码：' + esc(d.product_code_snapshot || d.model || '—') + '<br>' +
+            (d.product_config_snapshot ? '产品配置：' + esc(d.product_config_snapshot) + '<br>' : '') +
             '产品类型：' + esc(d.product_type || '—') + '　型号：' + esc(d.model || '—') + '<br>' +
             '手动/电动：' + driveBadge(d) + '　尺寸：' + esc(d.spec || '—') + '<br>' +
             '金额：' + money(d.amount) + '　定金：' + money(d.deposit) + '　尾款：' + money(d.balance) + '<br>' +
@@ -159,7 +167,7 @@ function viewDealDetail(root, rawId) {
         var editBtn = $('#dealEdit', root);
         if (editBtn) {
             editBtn.addEventListener('click', function () {
-                openDealEdit(d, function () { return render(); });
+                openDealEdit(d, products, function () { return render(); });
             });
         }
 
@@ -180,7 +188,7 @@ function viewDealDetail(root, rawId) {
 }
 
 /* ---------------- 编辑商机（弹层；产品类型/型号/阶段取字典） ---------------- */
-function openDealEdit(deal, done) {
+function openDealEdit(deal, products, done) {
     var modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML =
@@ -190,6 +198,10 @@ function openDealEdit(deal, done) {
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
         '<form id="dealEditForm" class="form-grid" autocomplete="off">' +
+        '<div class="field"><label>关联产品</label>' +
+        productSelectHtml(products || [], deal.product_id, '不关联产品（旧商机）') +
+        '<div class="small muted" data-product-hint>' +
+        esc(deal.product_config_snapshot || '选择产品后会自动带出类型、型号和驱动方式') + '</div></div>' +
         '<div class="row-2">' +
         '<div class="field"><label>产品类型</label>' +
         '<select name="product_type">' + dictOptions('product_type', deal.product_type, '不指定') + '</select></div>' +
@@ -202,8 +214,8 @@ function openDealEdit(deal, done) {
         '<option value="manual"' + (deal.drive_type === 'manual' ? ' selected' : '') + '>手动</option>' +
         '<option value="electric"' + (deal.drive_type === 'electric' ? ' selected' : '') + '>电动</option>' +
         '</select></div>' +
-        '<div class="field"><label>尺寸 / 洞口</label>' +
-        '<input name="spec" maxlength="200" placeholder="如 1200×2400" value="' + esc(deal.spec || '') + '"></div>' +
+        '<div class="field"><label>尺寸/洞口尺寸</label>' +
+        '<input name="spec" maxlength="200" placeholder="如 1200*2400" value="' + esc(deal.spec || '') + '"></div>' +
         '</div>' +
         '<div class="row-3">' +
         '<div class="field"><label>报价金额 *</label>' +
@@ -231,11 +243,26 @@ function openDealEdit(deal, done) {
 
     var form = modal.querySelector('form');
 
-    /* 型号可搜索；只带产品类型 / 手动电动，尺寸保留手填 */
-    bindModelCombo(form.querySelector('[data-model-combo]'), dictItems('product_model'), function (hit) {
+    var productSelect = form.querySelector('[name="product_id"]');
+    var modelCombo = bindModelCombo(form.querySelector('[data-model-combo]'), dictItems('product_model'), function (hit) {
         if (hit && hit.meta) {
             if (hit.meta.drive) { form.querySelector('[name="drive_type"]').value = hit.meta.drive; }
             if (hit.meta.product) { form.querySelector('[name="product_type"]').value = hit.meta.product; }
+        }
+    });
+    productSelect.addEventListener('change', function () {
+        var product = findProduct(products, productSelect.value);
+        var hint = form.querySelector('[data-product-hint]');
+        if (!product) {
+            if (hint) { hint.textContent = '保留旧商机产品字段，不关联产品主档。'; }
+            return;
+        }
+        form.querySelector('[name="product_type"]').value = product.category || '';
+        if (product.drive_type) { form.querySelector('[name="drive_type"]').value = product.drive_type; }
+        modelCombo.set(product.code);
+        if (hint) {
+            hint.textContent = product.config_summary ||
+                [product.series, product.structure].filter(Boolean).join(' · ');
         }
     });
 
@@ -260,6 +287,9 @@ function openDealEdit(deal, done) {
             stage: val('stage'),
             note: val('note') || null
         };
+        if (String(deal.product_id || '') !== String(productSelect.value || '')) {
+            payload.product_id = productSelect.value ? Number(productSelect.value) : null;
+        }
         btn.disabled = true;
         api('/deals/' + deal.id, { method: 'PUT', body: payload }).then(function () {
             toast('商机已保存');
@@ -336,7 +366,9 @@ function viewDealNew(root, route) {
     }
 
     var load = leadId ? api('/leads/' + leadId) : api('/customers/' + custId);
-    return load.then(function (src) {
+    return Promise.all([load, loadProductCatalog()]).then(function (all) {
+        var src = all[0];
+        var products = all[1] || [];
         var fromName = leadId
             ? ((src.name || src.company_name || '线索 #' + leadId) + '（线索）')
             : ((src.name || '客户 #' + custId) + '（客户）');
@@ -348,6 +380,8 @@ function viewDealNew(root, route) {
             '<div class="card-head"><h2><a href="' + backHash + '">‹ ' + backLabel + '</a> / 转商机</h2>' +
             '<span class="badge muted">来源：' + esc(fromName) + '</span></div>' +
             '<form id="dealNewForm" class="form-grid" autocomplete="off">' +
+            '<div class="field"><label>关联产品 *</label>' + productSelectHtml(products, '', '请选择产品') +
+            '<div class="small muted" data-product-hint>从产品主档选择后，类型、型号和驱动方式会自动带出。</div></div>' +
             '<div class="row-2">' +
             '<div class="field"><label>产品类型</label>' +
             '<select name="product_type">' + dictOptions('product_type', '天窗', '请选择') + '</select></div>' +
@@ -359,8 +393,8 @@ function viewDealNew(root, route) {
             '</div>' +
             '<div class="row-2">' +
             '<div class="field"><label>产品型号 *</label>' + modelComboHtml('') + '</div>' +
-            '<div class="field"><label>尺寸（宽×高 mm）*</label>' +
-            '<input name="spec" maxlength="32" required placeholder="1200×2400"></div>' +
+            '<div class="field"><label>尺寸/洞口尺寸 *</label>' +
+            '<input name="spec" maxlength="32" required placeholder="1200*2400"></div>' +
             '</div>' +
             '<div class="row-2">' +
             '<div class="field"><label>金额（报价）*</label>' +
@@ -381,11 +415,26 @@ function viewDealNew(root, route) {
 
         var form = $('#dealNewForm', root);
 
-        /* 型号可搜索；只带产品类型 / 手动电动，尺寸手填 */
-        bindModelCombo(form.querySelector('[data-model-combo]'), dictItems('product_model'), function (hit) {
+        var productSelect = form.querySelector('[name="product_id"]');
+        var modelCombo = bindModelCombo(form.querySelector('[data-model-combo]'), dictItems('product_model'), function (hit) {
             if (hit && hit.meta) {
                 if (hit.meta.drive) { form.querySelector('[name="drive_type"]').value = hit.meta.drive; }
                 if (hit.meta.product) { form.querySelector('[name="product_type"]').value = hit.meta.product; }
+            }
+        });
+        productSelect.addEventListener('change', function () {
+            var product = findProduct(products, productSelect.value);
+            var hint = form.querySelector('[data-product-hint]');
+            if (!product) {
+                if (hint) { hint.textContent = '必须选择产品主档中的产品。'; }
+                return;
+            }
+            form.querySelector('[name="product_type"]').value = product.category || '';
+            if (product.drive_type) { form.querySelector('[name="drive_type"]').value = product.drive_type; }
+            modelCombo.set(product.code);
+            if (hint) {
+                hint.textContent = product.config_summary ||
+                    [product.series, product.structure].filter(Boolean).join(' · ');
             }
         });
 
@@ -397,6 +446,8 @@ function viewDealNew(root, route) {
             var amount = numOrNull(form.querySelector('[name="amount"]').value);
             var model = String(form.querySelector('[name="model"]').value || '');
             var spec = String(form.querySelector('[name="spec"]').value || '').trim();
+            var product = findProduct(products, productSelect.value);
+            if (!product) { toast('请从产品主档选择产品', true); return; }
             if (!model) { toast('请选择产品型号', true); return; }
             if (!spec) { toast('尺寸必填', true); return; }
             if (amount === null || !(amount > 0)) { toast('金额必须大于 0', true); return; }
@@ -407,6 +458,7 @@ function viewDealNew(root, route) {
             }
             var deal = {
                 title: [val('product_type'), model].filter(Boolean).join(' ').slice(0, 100) || null,
+                product_id: product.id,
                 product_type: val('product_type') || null,
                 model: model,
                 spec: spec,
@@ -422,6 +474,7 @@ function viewDealNew(root, route) {
                     method: 'POST',
                     body: {
                         customer_id: custId,
+                        product_id: deal.product_id,
                         product_type: deal.product_type,
                         model: deal.model,
                         spec: deal.spec,

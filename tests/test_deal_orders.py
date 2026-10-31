@@ -46,7 +46,7 @@ class DealOrdersTest(ApiTestCase):
         )
         self.assertEqual(deal["product_type"], "天幕")
         self.assertEqual(deal["model"], "TM-300")
-        self.assertEqual(deal["spec"], "跨度 4m × 3m")
+        self.assertEqual(deal["spec"], "跨度 4m * 3m")
         self.assertEqual(deal["stage"], "quote")
         self.assertEqual(deal["stage_label"], "报价")
         self.assertEqual(deal["deposit"], 3000.0)
@@ -108,6 +108,31 @@ class DealOrdersTest(ApiTestCase):
         self.assertIn("invalid_model", resp.json()["code"])
 
     # ---------- GET /deals ----------
+    def test_spec_separators_normalize_to_star(self):
+        """尺寸支持 x/X/×/*，统一以 * 落库。"""
+        c = self.create_customer(name="张伟")
+        cases = {
+            "1000x2000": "1000*2000",
+            "1000X2000": "1000*2000",
+            "1000×2000": "1000*2000",
+            "1000 * 2000": "1000 * 2000",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                deal = self.create_deal(
+                    c["id"], amount=100.0, drive_type="electric", spec=raw
+                )
+                self.assertEqual(deal["spec"], expected)
+
+        deal = self.create_deal(
+            c["id"], amount=100.0, drive_type="electric", spec="1000x2000"
+        )
+        resp = self.client.put(
+            f"/api/crm/deals/{deal['id']}", json={"spec": "1200X2400"}
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["spec"], "1200*2400")
+
     def test_list_deals_exclude_title(self):
         """测试列表接口不返回 title 字段"""
         c = self.create_customer(name="张伟")
@@ -254,7 +279,7 @@ class DealOrdersTest(ApiTestCase):
         data = resp.json()
         changes = [t for t in data["timeline"] if t["type"] == "change"]
         self.assertEqual(len(changes), 1, "只应有一条编辑履历")
-        self.assertEqual(changes[0]["content"], "尺寸由「1000x2000」改为「1200x2400」")
+        self.assertEqual(changes[0]["content"], "尺寸由「1000*2000」改为「1200*2400」")
         self.assertIn("create", [t["type"] for t in data["timeline"]], "创建履历必须存在")
 
     def test_update_deal_stage_change_timeline(self):
@@ -279,7 +304,7 @@ class DealOrdersTest(ApiTestCase):
         deal = self.create_deal(c["id"], amount=1000.0, drive_type="electric", spec="1000x2000")
         
         # 修改为相同的值
-        resp = self.client.put(f"/api/crm/deals/{deal['id']}", json={"spec": "1000x2000"})
+        resp = self.client.put(f"/api/crm/deals/{deal['id']}", json={"spec": "1000X2000"})
         self.assertEqual(resp.status_code, 200)
         
         # 检查 timeline

@@ -24,7 +24,6 @@ class FormLayoutStructureTest(unittest.TestCase):
             "customers.js": '<form class="customer-form form-grid"',
             "leads.js": [
                 '<form class="lead-form form-grid"',
-                '<form id="leadDealForm" class="form-grid"',
                 '<form id="invalidateForm" class="invalidate-form form-grid"',
             ],
             "deals.js": [
@@ -42,6 +41,7 @@ class FormLayoutStructureTest(unittest.TestCase):
             "logistics.js": '<form id="carrierFormEl" class="form-grid"',
             "followups.js": '<form id="fuForm" class="form-grid"',
             "shared.js": [
+                '<form id="dealConvertForm" class="form-grid"',
                 '<form id="newDealForm" class="form-grid"',
                 '<form id="fuModalForm" class="form-grid"',
             ],
@@ -60,6 +60,19 @@ class FormLayoutStructureTest(unittest.TestCase):
 
         self.assertIn('<form id="profileForm" class="modal-body form-grid"', self.index)
         self.assertIn('<form id="passwordForm" class="modal-body form-grid"', self.index)
+
+    def test_customer_and_lead_share_deal_convert_modal(self):
+        self.assertIn("openDealConvertModal(source, sourceType)", self.views["shared.js"])
+        self.assertIn("openDealConvertModal(lead, 'lead')", self.views["leads.js"])
+        self.assertIn("openDealConvertModal(customer, 'customer')", self.views["customers.js"])
+        self.assertIn("openCustomerDealModal(c)", self.views["customers.js"])
+        self.assertNotIn("/deals/new?customer=", self.views["customers.js"])
+
+    def test_spec_labels_are_unified(self):
+        for filename in ("shared.js", "deals.js"):
+            self.assertIn("尺寸/洞口尺寸", self.views[filename])
+        for filename, source in self.views.items():
+            self.assertNotIn("尺寸（宽×高 mm）", source, filename)
 
     def test_long_fields_span_both_columns(self):
         for selector in (
