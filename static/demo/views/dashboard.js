@@ -119,7 +119,7 @@ function viewDashboard(root) {
       '</div>' +
       '<div class="card">' +
         '<div class="card-head"><h2>订单待办</h2><a class="btn btn-sm" href="#/orders">管理订单</a></div>' +
-        '<div class="grid-kpi">' + orderChips + '</div>' +
+        '<div class="chip-grid">' + orderChips + '</div>' +
       '</div>' +
       '<div class="card">' +
         '<div class="card-head"><h2>最近动态</h2>' +

@@ -268,3 +268,16 @@ a.kpi-link:active { transform: scale(0.98); }
   .modal-content.wide { width: calc(100vw - 16px); }
   .info-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 }
+
+/* 订单待办：自适应网格（7 个状态不再被塞进 4 列 KPI 网格里掉行） */
+.chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 8px;
+}
+@media (max-width: 520px) {
+  .chip-grid { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+  .chip-due { padding: 8px 4px; }
+  .chip-due-num { font-size: 17px; }
+  .chip-due-label { font-size: 11px; }
+}

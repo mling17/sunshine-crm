@@ -1052,3 +1052,114 @@ th {
     grid-template-columns: 1fr;
   }
 }
+/* ============================================================================
+ * 2026-10-31 样式整顿（追加在文件末尾，靠层叠覆盖前面几代遗留定义；不删旧规则，便于回滚）
+ *
+ * 修的坑：
+ *  1) 全文引用了 9 个 CSS 变量（--line/--card/--radius/--shadow/--muted/--accent/
+ *     --accent-weak/--danger 等）共 15 处，但从未定义 :root → 声明无效：
+ *     弹窗背景透明、页签没边框没高亮、客户360卡片没底没框、逾期左边框不显示。这里补齐。
+ *  2) .card 前后两代各带 margin（8px/12px），卡片间距和页边距不齐；且 #app 无最大宽度，
+ *     桌面端被拉满 1200+ px。这里统一容器与间距。
+ *  3) .card{overflow:hidden} 会裁掉 sticky 表头；放开。
+ *  4) 顶部导航 9 项在手机上会被挤爆；改为可横向滚动 + 窄屏分两行。
+ * ==========================================================================*/
+
+:root {
+  --line: #e6e8ec;
+  --card: #ffffff;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .06);
+  --muted: #8a909c;
+  --accent: #1f6feb;
+  --accent-weak: #e8f0fe;
+  --danger: #d9363e;
+  --ok: #1a9c62;
+  --warn: #d97706;
+  --text: #1f2329;
+  --bg: #f4f5f7;
+}
+
+body { background: var(--bg); color: var(--text); }
+
+/* 内容容器：桌面居中、手机满宽 */
+#app { max-width: 1120px; margin: 0 auto; padding: 10px 12px 48px; box-sizing: border-box; }
+
+/* 卡片：统一间距/圆角/描边 */
+.card {
+  margin: 0 0 12px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: visible;
+}
+.card-head { gap: 8px; flex-wrap: wrap; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.card-head h2 { font-size: 17px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* 弹窗：修掉 var() 失效导致的透明背景 */
+.modal-content { background: var(--card); border-radius: var(--radius); }
+.modal-header { border-bottom: 1px solid var(--line); }
+
+/* 页签 */
+.tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab-btn { border: 1px solid var(--line); background: #fff; color: var(--muted); border-radius: 999px; padding: 6px 12px; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.tab-btn.active { background: var(--accent-weak); color: var(--accent); border-color: #bcd2fb; font-weight: 600; }
+
+/* KPI 数字卡：自适应列数（5 个数字卡不再掉到第二行孤零零） */
+.grid-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 10px; }
+.kpi { background: #f8f9fb; border: 1px solid var(--line); border-radius: 10px; padding: 14px 12px; }
+.kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.kpi .value { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.kpi .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* 表格：描边容器 + 去掉最后一行的下边框 */
+.table-wrap { margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+table { font-size: 13px; }
+th, td { padding: 10px 12px; border-bottom: 1px solid #f0f1f4; }
+th { background: #fafbfc; font-weight: 600; font-size: 12px; color: #5c6270; }
+tbody tr:last-child td { border-bottom: none; }
+
+/* 徽标：统一高度，避免和文字基线错位 */
+.badge { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 10px; font-size: 12px; line-height: 1; vertical-align: middle; }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 12px; margin-right: 4px; }
+
+/* 顶部栏：窄屏分两行，导航可横向滚动 */
+.topbar { flex-wrap: wrap; gap: 6px 12px; padding: 10px 12px; position: sticky; top: 0; z-index: 20; }
+.brand { font-size: 16px; }
+.nav { flex: 1 1 100%; order: 3; overflow-x: auto; gap: 6px; padding-bottom: 2px; scrollbar-width: none; }
+.nav::-webkit-scrollbar { display: none; }
+.nav a { padding: 5px 10px; border-radius: 999px; font-size: 14px; white-space: nowrap; }
+.who { margin-left: auto; }
+
+@media (min-width: 720px) {
+  .nav { flex: 1 1 auto; order: 0; overflow: visible; }
+}
+
+/* 手机端收紧 */
+@media (max-width: 520px) {
+  #app { padding: 8px 8px 40px; }
+  .card { padding: 12px; border-radius: 10px; }
+  .kpi { padding: 10px 8px; }
+  .kpi .value { font-size: 19px; }
+  .grid-kpi { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------------------------------------------------------------------------
+ * 订单进度条重做：原来 7 个圆点绝对定位压在文字上（top:10px 与标签重叠），
+ * 且 nowrap 的标签在 390px 手机屏上把页面撑宽到 448px。这里改为「圆点在上、文字在下」，
+ * 窄屏标签允许两行。
+ * ------------------------------------------------------------------------- */
+.progress-bar { align-items: flex-start; margin: 18px 0 12px; }
+.progress-bar::before { top: 8px; height: 2px; background: var(--line); }
+.progress-bar .step { flex: 1 1 0; min-width: 0; padding: 24px 2px 0; }
+.progress-bar .step::after { top: 0; left: 50%; width: 16px; height: 16px; background: #e9ecf1; border: 2px solid #fff; }
+.progress-bar .step.active::after { background: var(--accent); border-color: var(--accent); }
+.progress-bar .step.done::after { background: var(--ok); border-color: var(--ok); }
+.progress-bar .step-label { font-size: 11px; color: var(--muted); white-space: normal; line-height: 1.25; overflow: visible; }
+.progress-bar .step.active .step-label { color: var(--accent); font-weight: 600; }
+.progress-bar .step.done .step-label { color: var(--ok); }
+.progress-bar .step.active { transform: none; }
