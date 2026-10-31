@@ -173,7 +173,7 @@ class LeadsTest(ApiTestCase):
         resp = self.create_lead(phone="13800138000")
         self.assertEqual(resp["phone"], "13800138000")
         self.assertEqual(resp["status"], "new")
-        self.assertIsNone(resp["intent_level"])  # 未显式传意向 → 不默认
+        self.assertEqual(resp["intent_level"], "medium")  # 定稿：新建线索意向默认「中」
 
     def test_create_lead_with_wechat_only(self):
         resp = self.create_lead(wechat="wechat123")
@@ -279,8 +279,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -419,8 +420,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -441,8 +443,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -462,8 +465,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -478,8 +482,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -496,8 +501,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -516,8 +522,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -543,8 +550,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 0,  # 无效金额
             }
         })
@@ -579,8 +587,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -593,8 +602,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
                 "stage": "invalid_stage",
             }
@@ -607,8 +617,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -622,8 +633,9 @@ class LeadsTest(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.0,
             }
         })
@@ -714,8 +726,9 @@ class FollowUpsV2Test(ApiTestCase):
             "deal": {
                 "title": "测试商机",
                 "product_type": "天窗",
-                "model": "平移",
-                "spec": "1200*1400",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
                 "amount": 12800.00
             }
         })

@@ -59,16 +59,28 @@ class DashboardTest(ApiTestCase):
         self.assertEqual(item["days_overdue"], 0)
 
     def test_overdue_sorted_oldest_first_and_future_excluded(self):
-        c = self.create_customer(name="李娜")
-        self.add_follow_up(c["id"], content="三天前该打", next_date=day(-3))
-        self.add_follow_up(c["id"], content="昨天该打", next_date=day(-1))
-        self.add_follow_up(c["id"], content="今天打", next_date=day(0))
-        self.add_follow_up(c["id"], content="明天打", next_date=day(1))
-        self.add_follow_up(c["id"], content="没定日期")
+        """每个客户只看最近一条跟进；逾期按天数倒序，未来日期不进列表（PLANNER-V3 §6.1）"""
+        a = self.create_customer(name="李娜")
+        self.add_follow_up(a["id"], content="三天前该打", next_date=day(-3))
+        b = self.create_customer(name="周强")
+        self.add_follow_up(b["id"], content="昨天该打", next_date=day(-1))
+        d = self.create_customer(name="孙丽")
+        self.add_follow_up(d["id"], content="今天打", next_date=day(0))
+        e = self.create_customer(name="吴敏")
+        self.add_follow_up(e["id"], content="明天打", next_date=day(1))
+        self.add_follow_up(e["id"], content="没定日期")
 
         items = self.dashboard()["today_followups"]
         self.assertEqual([i["content"] for i in items], ["三天前该打", "昨天该打", "今天打"])
         self.assertEqual([i["days_overdue"] for i in items], [3, 1, 0])
+
+    def test_new_follow_up_replaces_old_one(self):
+        """同一客户记了新跟进 → 旧的待跟进自动消失（定稿核心验收点）"""
+        c = self.create_customer(name="李娜")
+        self.add_follow_up(c["id"], content="旧记录", next_date=day(-2))
+        self.assertEqual([i["content"] for i in self.dashboard()["today_followups"]], ["旧记录"])
+        self.add_follow_up(c["id"], content="新记录", next_date=day(-10))
+        self.assertEqual([i["content"] for i in self.dashboard()["today_followups"]], ["新记录"])
 
     def test_closed_deals_do_not_enter_today_followups(self):
         c = self.create_customer(name="王强")

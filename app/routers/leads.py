@@ -13,6 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db import db_conn
+from app.enums import INTENT_LEVEL_LABELS
 from app.models import (
     LeadConvertCheckOut,
     LeadConvertIn,
@@ -55,7 +56,9 @@ def _fetch_lead(conn, lead_id: int) -> LeadOut:
         "SELECT t.name FROM tags t JOIN lead_tags lt ON t.id = lt.tag_id WHERE lt.lead_id = ? ORDER BY t.id",
         (lead_id,),
     ).fetchall()
-    return LeadOut(**dict(row), tags=[r[0] for r in tag_rows])
+    data = dict(row)
+    data["intent_level_label"] = INTENT_LEVEL_LABELS.get(data.get("intent_level") or "")
+    return LeadOut(**data, tags=[r[0] for r in tag_rows])
 
 
 def _fetch_lead_detail(conn, lead_id: int) -> LeadDetailOut:
@@ -118,13 +121,13 @@ def list_leads(
     params: list[object] = []
     
     if status is not None:
-        where_parts.append("status = ?")
+        where_parts.append("l.status = ?")
         params.append(status)
     if source is not None:
-        where_parts.append("source = ?")
+        where_parts.append("l.source = ?")
         params.append(source)
     if intent_level is not None:
-        where_parts.append("intent_level = ?")
+        where_parts.append("l.intent_level = ?")
         params.append(intent_level)
     if search is not None:
         where_parts.append("(name LIKE ? OR phone LIKE ? OR wechat LIKE ? OR location LIKE ?)")
@@ -134,25 +137,39 @@ def list_leads(
     
     with db_conn() as conn:
         total = conn.execute(
-            f"SELECT COUNT(*) AS n FROM leads {where_sql}",
+            f"SELECT COUNT(*) AS n FROM leads l {where_sql}",
             params,
         ).fetchone()["n"]
         
         offset = (page - 1) * size
         rows = conn.execute(
             f"""
-            SELECT id, name, phone, wechat, lead_type, company_name, source,
-                   source_other, location, note, intent_level, status,
-                   invalid_reason, invalid_reason_other, converted_customer_id,
-                   converted_deal_id, owner, created_at, updated_at
-            FROM leads {where_sql}
+            SELECT l.id, l.name, l.phone, l.wechat, l.lead_type, l.company_name, l.source,
+                   l.source_other, l.location, l.note, l.intent_level, l.status,
+                   l.invalid_reason, l.invalid_reason_other, l.converted_customer_id,
+                   l.converted_deal_id, l.owner, l.created_at, l.updated_at,
+                   (SELECT MAX(f.created_at) FROM follow_ups f
+                     WHERE f.object_type='lead' AND f.object_id=l.id AND f.kind='follow')
+                     AS last_follow_at,
+                   (SELECT f.next_date FROM follow_ups f
+                     WHERE f.object_type='lead' AND f.object_id=l.id AND f.kind='follow'
+                     ORDER BY datetime(f.created_at) DESC, f.id DESC LIMIT 1) AS next_date
+            FROM leads l {where_sql}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
             """,
             params + [size, offset],
         ).fetchall()
         
-        items = [LeadOut(**dict(row)) for row in rows]
+        from app.enums import INTENT_LEVEL_LABELS
+        from app.timeline import load_overdue_days
+
+        items = []
+        for row in rows:
+            data = dict(row)
+            data["intent_level_label"] = INTENT_LEVEL_LABELS.get(data.get("intent_level") or "", None)
+            data["days_overdue"] = load_overdue_days(data.get("next_date"))
+            items.append(LeadOut(**data))
     
     return LeadListOut(items=items, total=total, page=page, size=size)
 
@@ -169,6 +186,8 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
         raise HTTPException(status_code=400, detail="来源无效")
     
     created_at = now_iso()
+    # 定稿：新建线索意向默认「中」（PAGES-V2 §7.3）
+    intent_level = (lead_in.intent_level or "medium")
     with db_conn() as conn:
         # 检查是否有重复线索或客户（Q6）
         duplicate_hint = None
@@ -239,7 +258,7 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
                 lead_in.source_other,
                 lead_in.location,
                 lead_in.note,
-                lead_in.intent_level,
+                intent_level,
                 "new",
                 lead_in.owner,
                 created_at,

@@ -218,3 +218,15 @@ def change_summary(old: dict, new: dict, columns: Iterable[str]) -> tuple[list[s
             lines.append(f"{name}由 {before} 改为 {after}")
         detail[column] = {"from": old.get(column), "to": new[column]}
     return lines, detail
+
+def load_overdue_days(next_date: str | None) -> int:
+    """next_date 距今天几天（>0 逾期，0 今天，负数/空 = 0）。统一口径，别各写一份。"""
+    if not next_date:
+        return 0
+    from datetime import date, datetime as _dt
+
+    try:
+        due = _dt.strptime(str(next_date)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return 0
+    return max((date.today() - due).days, 0)

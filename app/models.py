@@ -316,6 +316,10 @@ class MonthWonOut(BaseModel):
 
 class DashboardStatsOut(BaseModel):
     customers_total: int = 0
+    #: 进行中商机（非成交/流失）
+    in_progress_deals: dict = Field(default_factory=dict)
+    #: 最近动态 10 条（跟进 + 订单事件混排）
+    recent_activities: list[dict] = Field(default_factory=list)
     deals_by_stage: dict[str, int] = Field(default_factory=dict)
     month_new_customers: int = 0
     repeat_customers: int = 0
@@ -439,6 +443,11 @@ class LeadOut(BaseModel):
     duplicate_hint: dict | None = None
     created_at: str
     updated_at: str
+    # 派生态（PLANNER-V3 §5.3）：最近一条真实跟进
+    last_follow_at: str | None = None
+    next_date: str | None = None
+    days_overdue: int = 0
+    intent_level_label: str | None = None
 
 
 class LeadDetailOut(LeadOut):
@@ -456,13 +465,18 @@ class LeadListOut(BaseModel):
 
 
 class LeadConvertDeal(BaseModel):
-    """转化时新建的商机（customer_id 由线索转化逻辑自动带上）。"""
+    """转化时新建的商机（PLANNER-V3 §5.3）。
 
-    title: str = Field(min_length=1, max_length=100)
+    ``drive_type``（手动/电动）必填；不再收定金/尾款；阶段固定「报价」。
+    """
+
+    title: OptionalText = Field(default=None, max_length=100)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
     spec: OptionalText = Field(default=None, max_length=200)
     amount: float = Field(gt=0)
+    drive_type: OptionalText = Field(default=None, max_length=32)
+    note: OptionalText = Field(default=None, max_length=500)
     stage: str | None = Field(default=None, max_length=32)
     owner: OptionalText = Field(default=None, max_length=32)
 

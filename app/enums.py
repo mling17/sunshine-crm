@@ -80,6 +80,17 @@ ORDER_STATUS = Literal[
     "pending_payment", "deposit_paid", "producing", "balance_paid",
     "ready_to_ship", "shipped", "completed"
 ]
+#: 订单状态顺序（状态机推进顺序，前端下拉/进度条按这个顺序）
+ORDER_STATUS_ORDER = (
+    "pending_payment",
+    "deposit_paid",
+    "producing",
+    "balance_paid",
+    "ready_to_ship",
+    "shipped",
+    "completed",
+)
+
 ORDER_STATUS_LABELS: Dict[str, str] = {
     "pending_payment": "待支付",
     "deposit_paid": "已支付押金",

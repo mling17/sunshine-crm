@@ -31,21 +31,33 @@ router = APIRouter(
     dependencies=[Depends(require_auth)],
 )
 
-#: 待跟进：next_date ≤ 今天且商机未闭环；按「该打却没打」的天数倒序（最久的排最前）
+#: 待跟进（PLANNER-V3 §6.1）：**按客户取最近一条 kind='follow' 的 next_date**，
+#: 不是「所有历史记录里 next_date ≤ 今天」——否则记了新跟进，旧记录会永远挂着。
 _TODAY_FOLLOWUPS_SQL = """
-SELECT fu.id, fu.customer_id, fu.deal_id, fu.content, fu.next_date,
+WITH latest AS (
+  SELECT customer_id, deal_id, content, next_date, created_at, id,
+         ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY datetime(created_at) DESC, id DESC) AS rn
+    FROM follow_ups
+   WHERE kind = 'follow'
+     AND object_type IN ('customer', 'deal', 'lead')
+     AND customer_id IS NOT NULL
+     AND next_date IS NOT NULL AND TRIM(next_date) <> ''
+)
+SELECT l.id, l.customer_id, l.deal_id, l.content, l.next_date,
        c.name AS customer_name,
        d.stage AS deal_stage,
-       CAST(julianday(date('now','localtime')) - julianday(date(fu.next_date)) AS INTEGER) AS days_overdue
-FROM follow_ups fu
-JOIN customers c ON c.id = fu.customer_id
-LEFT JOIN deals d ON d.id = fu.deal_id
-WHERE fu.next_date IS NOT NULL
-  AND TRIM(fu.next_date) <> ''
-  AND date(fu.next_date) <= date('now','localtime')
-  AND (d.id IS NULL OR d.stage NOT IN ('won', 'lost'))
-ORDER BY date(fu.next_date) ASC, fu.id ASC
+       CAST(julianday(date('now','localtime')) - julianday(date(l.next_date)) AS INTEGER) AS days_overdue
+  FROM latest l
+  JOIN customers c ON c.id = l.customer_id
+  LEFT JOIN deals d ON d.id = l.deal_id
+ WHERE l.rn = 1
+   AND date(l.next_date) <= date('now','localtime')
+   -- 以这条跟进自己关联的商机为准：该商机已成交/流失 → 不再提醒；
+   -- 跟进不挂商机（纯客户回访）→ 照常提醒（安装回访/老客维护不能漏）
+   AND (l.deal_id IS NULL OR d.id IS NULL OR d.stage NOT IN ('won','lost'))
+ ORDER BY date(l.next_date) ASC, l.id ASC
 """
+
 
 #: 本月成交（金额按 deal.amount 汇总；deposit/balance 不参与，等 O2 确认）
 _MONTH_WON_SQL = """
@@ -60,6 +72,30 @@ _ORDERS_BY_STATUS_SQL = """
 SELECT status, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
 FROM orders
 GROUP BY status
+"""
+
+#: 进行中商机（非 won/lost）
+_IN_PROGRESS_SQL = """
+SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
+  FROM deals WHERE stage NOT IN ('won','lost')
+"""
+
+#: 最近动态（跟进 + 订单事件，时间倒序 10 条）
+_RECENT_ACTIVITIES_SQL = """
+SELECT at, type, customer_name, text FROM (
+  SELECT f.created_at AS at, 'follow' AS type, COALESCE(c.name, '') AS customer_name,
+         f.content AS text
+    FROM follow_ups f LEFT JOIN customers c ON c.id = f.customer_id
+   WHERE f.kind = 'follow'
+  UNION ALL
+  SELECT l.created_at AS at, COALESCE(l.event_type, 'stage') AS type,
+         COALESCE(c.name, '') AS customer_name, COALESCE(l.note, '') AS text
+    FROM order_status_log l
+    JOIN orders o ON o.id = l.order_id
+    LEFT JOIN customers c ON c.id = o.customer_id
+)
+ORDER BY datetime(at) DESC
+LIMIT 10
 """
 
 #: 最近订单（按创建时间倒序）
@@ -152,6 +188,22 @@ def get_dashboard() -> DashboardOut:
                 "created_at": row["created_at"]
             })
 
+        # 进行中商机 + 最近动态
+        row_ip = conn.execute(_IN_PROGRESS_SQL).fetchone()
+        in_progress = {
+            "count": int(row_ip["count"] or 0),
+            "amount": round(float(row_ip["amount"] or 0.0), 2),
+        }
+        recent_activities = [
+            {
+                "at": row["at"],
+                "type": row["type"],
+                "customer_name": row["customer_name"],
+                "text": row["text"],
+            }
+            for row in conn.execute(_RECENT_ACTIVITIES_SQL).fetchall()
+        ]
+
         # 待处理售后单超期
         aftersale_sla_alerts = []
         for row in conn.execute(_AFTERSALE_SLA_ALERTS_SQL).fetchall():
@@ -190,5 +242,7 @@ def get_dashboard() -> DashboardOut:
             orders_by_status=orders_by_status,
             recent_orders=recent_orders,
             aftersale_sla_alerts=aftersale_sla_alerts,
+            in_progress_deals=in_progress,
+            recent_activities=recent_activities,
         ),
     )

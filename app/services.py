@@ -282,22 +282,23 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     deal_in = convert_in.deal
     created_at = now_iso()
     
-    # 验证商机阶段（非法枚举 → 400 invalid_enum，计划 §2.6）
-    _stages = {"confirm", "quote", "negotiate", "won", "lost"}
-    if deal_in.stage is not None and deal_in.stage not in _stages:
-        raise HTTPException(status_code=400, detail=f"非法阶段 '{deal_in.stage}'，合法值：confirm、quote、negotiate、won、lost")
-    # 验证商机信息
-    if not deal_in.title:
-        raise HTTPException(status_code=400, detail="商机名称不能为空")
+    # 阶段固定「报价」（定稿 §1.1），不再接受前端指定
+    if deal_in.stage is not None and deal_in.stage not in ("quote", ""):
+        raise HTTPException(status_code=400, detail="转化生成的商机阶段固定为「报价」")
+    # 「手动/电动」必填（定稿 §7.5 关键属性）
+    if not deal_in.drive_type:
+        raise ApiError(status_code=400, code="drive_type_required", message="请选择手动 / 电动")
+    if deal_in.drive_type not in ("manual", "electric"):
+        raise ApiError(status_code=400, code="invalid_drive_type", message="手动 / 电动 只能是 manual 或 electric")
     if deal_in.amount <= 0:
         raise HTTPException(status_code=400, detail="商机金额必须大于0")
     
     cur = conn.execute(
         """
-        INSERT INTO deals 
-            (customer_id, title, product_type, model, spec, amount, 
+        INSERT INTO deals
+            (customer_id, title, product_type, model, spec, amount, drive_type, note,
              stage, owner, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'quote', ?, ?, ?)
         """,
         (
             customer_id,
@@ -306,7 +307,8 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
             deal_in.model,
             deal_in.spec,
             deal_in.amount,
-            "confirm",  # 默认阶段
+            (deal_in.drive_type or "manual"),
+            deal_in.note,
             deal_in.owner,
             created_at,
             created_at,

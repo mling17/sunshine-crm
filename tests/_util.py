@@ -190,6 +190,22 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         return resp.json()
 
+    def dashboard(self) -> dict:
+        resp = self.client.get("/api/crm/dashboard")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
+
+    def add_follow_up(self, customer_id: int, *, content: str,
+                      next_date: str | None = None, deal_id: int | None = None) -> dict:
+        data = {"customer_id": str(customer_id), "content": content}
+        if next_date is not None:
+            data["next_date"] = next_date
+        if deal_id is not None:
+            data["deal_id"] = str(deal_id)
+        resp = self.client.post("/api/crm/follow-ups", data=data)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
+
     def create_carrier(self, name: str = "顺丰快运", **payload) -> dict:
         """建物流公司；同名已存在时直接复用（测试用例常多次调用）。"""
         body = {"name": name}
