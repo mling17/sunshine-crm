@@ -38,15 +38,21 @@ def create_aftersale(payload: AftersaleIn) -> AftersaleOut:
     - `description`：问题描述（≤2000字符）
     """
     with db_conn() as conn:
-        # 检查订单是否存在
+        # 检查订单是否存在 + 必须已完成才能报售后（PLANNER-V3 §5.8）
         order = conn.execute(
-            "SELECT id FROM orders WHERE id = ?", (payload.order_id,)
+            "SELECT id, status FROM orders WHERE id = ?", (payload.order_id,)
         ).fetchone()
         if not order:
             raise ApiError(
                 status_code=status.HTTP_404_NOT_FOUND,
                 code="order_not_found",
                 message="订单不存在"
+            )
+        if order["status"] != "completed":
+            raise ApiError(
+                status_code=status.HTTP_409_CONFLICT,
+                code="order_not_completed",
+                message="订单完成后才能添加售后",
             )
         
         # 生成售后单号
@@ -178,7 +184,15 @@ def get_aftersale_detail(id: int) -> AftersaleDetailOut:
                 created_at=log_row["created_at"]
             ))
         
+        from app.timeline import entries_for
+
+        timeline = entries_for(conn, object_type="aftersale", object_id=id)
+        materials = [
+            f for entry in timeline if entry.get("type") == "follow" for f in entry.get("files", [])
+        ]
         return AftersaleDetailOut(
+            timeline=timeline,
+            materials=materials,
             id=row["id"],
             no=row["no"],
             type=row["type"],
@@ -288,78 +302,10 @@ def list_aftersales(
         )
 
 
-@router.post("/{id}/start", response_model=AftersaleOut)
-def start_aftersale(id: int) -> AftersaleOut:
-    """开始处理售后单"""
-    with db_conn() as conn:
-        # 检查售后单是否存在
-        aftersale = conn.execute(
-            "SELECT id, status FROM aftersales WHERE id = ?", (id,)
-        ).fetchone()
-        
-        if not aftersale:
-            raise ApiError(
-                status_code=status.HTTP_404_NOT_FOUND,
-                code="aftersale_not_found",
-                message="售后单不存在"
-            )
-        
-        # 检查状态是否可以开始处理
-        if aftersale["status"] != "pending":
-            raise ApiError(
-                status_code=status.HTTP_409_CONFLICT,
-                code="illegal_transition",
-                message="售后单状态不允许开始处理",
-                current_status=aftersale["status"]
-            )
-        
-        # 更新状态为处理中
-        conn.execute(
-            "UPDATE aftersales SET status = 'processing', updated_at = ? WHERE id = ?",
-            (datetime.now().isoformat(), id)
-        )
-        
-        # 记录状态日志
-        conn.execute(
-            """
-            INSERT INTO aftersale_status_log (aftersale_id, from_status, to_status, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (id, "pending", "processing", datetime.now().isoformat())
-        )
-        
-        conn.commit()
-        
-        # 查询返回结果
-        row = conn.execute(
-            """
-            SELECT a.id, a.no, a.type, a.type_other, a.description, a.status, 
-                   a.reject_reason, a.result, a.closed_at, a.created_at, a.updated_at,
-                   o.order_no, c.name AS customer_name
-            FROM aftersales a
-            JOIN orders o ON o.id = a.order_id
-            JOIN customers c ON c.id = a.customer_id
-            WHERE a.id = ?
-            """,
-            (id,)
-        ).fetchone()
-        
-        return AftersaleOut(
-            id=row["id"],
-            no=row["no"],
-            type=row["type"],
-            type_other=row["type_other"],
-            description=row["description"],
-            status=row["status"],
-            reject_reason=row["reject_reason"],
-            result=row["result"],
-            closed_at=row["closed_at"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            order_no=row["order_no"],
-            customer_name=row["customer_name"]
-        )
-
+@router.post("/{id}/start", response_model=dict)
+def start_aftersale_deprecated(id: int) -> dict:
+    """已下线（PLANNER-V3 §6.4）：保留路由只为给旧前端明确提示，不落库。"""
+    raise ApiError(status_code=410, code="deprecated", message="该操作已下线：记一条跟进后会自动进入「处理中」")
 
 @router.post("/{id}/finish", response_model=AftersaleOut)
 def finish_aftersale(id: int, payload: AftersaleUpdate) -> AftersaleOut:
@@ -401,11 +347,20 @@ def finish_aftersale(id: int, payload: AftersaleUpdate) -> AftersaleOut:
         
         # 记录状态日志
         conn.execute(
-            """
-            INSERT INTO aftersale_status_log (aftersale_id, from_status, to_status, note, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (id, "processing", "done", payload.result, datetime.now().isoformat())
+            "INSERT INTO aftersale_status_log (aftersale_id, from_status, to_status, note, created_at)"
+            " VALUES (?, 'processing', 'done', ?, ?)",
+            (id, payload.result, datetime.now().isoformat()),
+        )
+        # 履历（PLANNER-V3 §3.5：售后完成写 kind='stage'）
+        from app.timeline import add_entry
+
+        add_entry(
+            conn,
+            object_type="aftersale",
+            object_id=id,
+            kind="stage",
+            content=f"状态变更：处理中 → 已完成（{payload.result}）",
+            detail={"from": "processing", "to": "done"},
         )
         
         conn.commit()
@@ -441,81 +396,8 @@ def finish_aftersale(id: int, payload: AftersaleUpdate) -> AftersaleOut:
         )
 
 
-@router.post("/{id}/reject", response_model=AftersaleOut)
-def reject_aftersale(id: int, payload: AftersaleUpdate) -> AftersaleOut:
-    """拒绝售后单"""
-    if not payload.reject_reason:
-        raise ApiError(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="reject_reason_required",
-            message="拒绝售后单必须填写拒绝原因"
-        )
-        
-    with db_conn() as conn:
-        # 检查售后单是否存在
-        aftersale = conn.execute(
-            "SELECT id, status FROM aftersales WHERE id = ?", (id,)
-        ).fetchone()
-        
-        if not aftersale:
-            raise ApiError(
-                status_code=status.HTTP_404_NOT_FOUND,
-                code="aftersale_not_found",
-                message="售后单不存在"
-            )
-        
-        # 检查状态是否可以拒绝（待处理或处理中都可以拒绝）
-        if aftersale["status"] not in ("pending", "processing"):
-            raise ApiError(
-                status_code=status.HTTP_409_CONFLICT,
-                code="illegal_transition",
-                message="售后单状态不允许拒绝",
-                current_status=aftersale["status"]
-            )
-        
-        # 更新状态为已拒绝
-        conn.execute(
-            "UPDATE aftersales SET status = 'rejected', reject_reason = ?, closed_at = ?, updated_at = ? WHERE id = ?",
-            (payload.reject_reason, datetime.now().isoformat(), datetime.now().isoformat(), id)
-        )
-        
-        # 记录状态日志
-        conn.execute(
-            """
-            INSERT INTO aftersale_status_log (aftersale_id, from_status, to_status, note, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (id, aftersale["status"], "rejected", payload.reject_reason, datetime.now().isoformat())
-        )
-        
-        conn.commit()
-        
-        # 查询返回结果
-        row = conn.execute(
-            """
-            SELECT a.id, a.no, a.type, a.type_other, a.description, a.status, 
-                   a.reject_reason, a.result, a.closed_at, a.created_at, a.updated_at,
-                   o.order_no, c.name AS customer_name
-            FROM aftersales a
-            JOIN orders o ON o.id = a.order_id
-            JOIN customers c ON c.id = a.customer_id
-            WHERE a.id = ?
-            """,
-            (id,)
-        ).fetchone()
-        
-        return AftersaleOut(
-            id=row["id"],
-            no=row["no"],
-            type=row["type"],
-            type_other=row["type_other"],
-            description=row["description"],
-            status=row["status"],
-            reject_reason=row["reject_reason"],
-            result=row["result"],
-            closed_at=row["closed_at"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            order_no=row["order_no"],
-            customer_name=row["customer_name"]
-        )
+@router.post("/{id}/reject", response_model=dict)
+def reject_aftersale_deprecated(id: int) -> dict:
+    """已下线（PLANNER-V3 §6.4）：保留路由只为给旧前端明确提示，不落库。"""
+    raise ApiError(status_code=410, code="deprecated", message="售后不再支持「拒绝」：待处理只保留自动流转，完成请用「标记完成」")
+

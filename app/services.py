@@ -106,6 +106,37 @@ def read_images(photos: list) -> list[tuple[str, str, str, bytes]]:
     return prepared
 
 
+def read_files(files: list, *, max_count: int | None = None) -> list[tuple[str, str, str, bytes]]:
+    """读取任意类型附件（PLANNER-V3 §6.5）：白名单 + 单文件 20MB + 单条上限 10。
+
+    先全部读完再落盘/写库，保证 400 时磁盘和 DB 都干净。
+    """
+    from app.storage import MAX_FILE_BYTES, MAX_FILES_PER_FOLLOWUP, ext_and_mime_any
+
+    limit = max_count or MAX_FILES_PER_FOLLOWUP
+    prepared: list[tuple[str, str, str, bytes]] = []
+    for upload in files or []:
+        filename = getattr(upload, "filename", "") or ""
+        data = upload.read() if hasattr(upload, "read") else b""
+        if not filename and not data:
+            continue  # 空 file input
+        if not data:
+            raise HTTPException(status_code=400, detail=f"附件 {filename} 是空文件")
+        if len(data) > MAX_FILE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"附件 {filename} 超过 {MAX_FILE_BYTES // (1024 * 1024)}MB",
+            )
+        ext, mime = ext_and_mime_any(filename)
+        prepared.append((filename or f"file{ext}", mime, ext, data))
+    if len(prepared) > limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"一条跟进最多 {limit} 个附件，本次选了 {len(prepared)} 个",
+        )
+    return prepared
+
+
 def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> LeadConvertOut:
     """线索转化（单事务 8 步）。
 

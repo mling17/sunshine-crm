@@ -91,31 +91,35 @@ def _clean_stage(raw: str | None) -> str | None:
     return value
 
 
-async def _read_photos(photos: list[UploadFile]) -> list[tuple[str, str, str, bytes]]:
-    """读完所有照片并校验：空条目跳过、非图片 400、单张超 20MB 400、总数 >3 400。
+async def _read_photos(files: list[UploadFile]) -> list[tuple[str, str, str, bytes]]:
+    """读完所有附件并校验（PLANNER-V3 §6.5）。
 
+    允许：图片 / PDF / Excel / Word / CSV / CAD / ZIP / TXT；单个 ≤20MB；一条跟进 ≤10 个。
     先全部读完再落盘/写库，保证 400 时磁盘和 DB 都干净（不留半截数据）。
     """
+    from app.storage import MAX_FILE_BYTES, MAX_FILES_PER_FOLLOWUP, ext_and_mime_any
+
     prepared: list[tuple[str, str, str, bytes]] = []
-    for upload in photos or []:
+    for upload in files or []:
         data = await upload.read()
         filename = (upload.filename or "").strip()
         # 浏览器空 file input 会送一个 filename 为空、内容为空的条目，直接忽略
         if not filename and not data:
             continue
-        ext, mime = ext_and_mime(filename, upload.content_type)
         if not data:
-            raise HTTPException(status_code=400, detail=f"照片 {filename} 是空文件")
-        if len(data) > MAX_PHOTO_BYTES:
+            raise HTTPException(status_code=400, detail=f"附件 {filename} 是空文件")
+        if len(data) > MAX_FILE_BYTES:
             raise HTTPException(
                 status_code=400,
-                detail=f"照片 {filename} 超过 {MAX_PHOTO_BYTES // (1024 * 1024)}MB",
+                detail=f"附件 {filename} 超过 {MAX_FILE_BYTES // (1024 * 1024)}MB",
             )
-        prepared.append((filename or f"photo{ext}", mime, ext, data))
+        ext, mime = ext_and_mime_any(filename)
+        prepared.append((filename or f"file{ext}", mime, ext, data))
 
-    if len(prepared) > MAX_PHOTOS:
+    if len(prepared) > MAX_FILES_PER_FOLLOWUP:
         raise HTTPException(
-            status_code=400, detail=f"一条跟进最多 {MAX_PHOTOS} 张照片"
+            status_code=400,
+            detail=f"一条跟进最多 {MAX_FILES_PER_FOLLOWUP} 个附件，本次选了 {len(prepared)} 个",
         )
     return prepared
 
@@ -234,7 +238,8 @@ async def create_follow_up(
     next_date: str | None = Form(default=None),
     intent_level: str | None = Form(default=None),
     stage: str | None = Form(default=None),
-    photos: list[UploadFile] = File(default=[]),
+    photos: list[UploadFile] = File(default=[], description="兼容旧前端：图片附件"),
+    files: list[UploadFile] = File(default=[], description="任意类型附件（≤10 个，单个 ≤20MB）"),
 ) -> FollowUpItemOut:
     """建跟进（multipart）。照片 0~3 张；带 stage+deal_id 顺手改阶段。
 
@@ -331,15 +336,21 @@ async def create_follow_up(
             if order is None:
                 raise HTTPException(status_code=404, detail="订单不存在")
         elif object_type == "aftersale":
-            # 检查售后单是否存在
+            # 检查售后单是否存在 + 状态守卫（PLANNER-V3 §6.4）
             aftersale = conn.execute(
-                "SELECT id FROM aftersales WHERE id = ?",
+                "SELECT id, status FROM aftersales WHERE id = ?",
                 (object_id_value,),
             ).fetchone()
             if aftersale is None:
                 raise HTTPException(status_code=404, detail="售后单不存在")
+            if aftersale["status"] == "done":
+                raise ApiError(
+                    status_code=409,
+                    code="aftersale_closed",
+                    message="该售后单已完成，不能再添加跟进记录",
+                )
 
-    prepared = await _read_photos(photos)
+    prepared = await _read_photos([*(photos or []), *(files or [])])
 
     created_at = now_iso()
     with db_conn() as conn:
@@ -385,9 +396,10 @@ async def create_follow_up(
         # 插入跟进记录
         cur = conn.execute(
             """
-            INSERT INTO follow_ups 
-                (object_type, object_id, customer_id, deal_id, method, content, next_date, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO follow_ups
+                (object_type, object_id, customer_id, deal_id, method, kind, content, next_date,
+                 created_at)
+            VALUES (?, ?, ?, ?, ?, 'follow', ?, ?, ?)
             """,
             (
                 object_type,
@@ -401,6 +413,22 @@ async def create_follow_up(
             ),
         )
         follow_up_id = int(cur.lastrowid or 0)
+
+        # 售后：待处理遇到跟进 → 自动进入「处理中」（定稿 v2.4 #9 / PLANNER-V3 §6.4）
+        if object_type == "aftersale":
+            current = conn.execute(
+                "SELECT status FROM aftersales WHERE id = ?", (object_id_value,)
+            ).fetchone()
+            if current and current["status"] == "pending":
+                conn.execute(
+                    "UPDATE aftersales SET status = 'processing', updated_at = ? WHERE id = ?",
+                    (created_at, object_id_value),
+                )
+                conn.execute(
+                    "INSERT INTO aftersale_status_log (aftersale_id, from_status, to_status, note,"
+                    " created_at) VALUES (?, 'pending', 'processing', ?, ?)",
+                    (object_id_value, "记跟进后自动进入处理中", created_at),
+                )
 
         # 处理照片
         for file_name, mime, ext, data in prepared:
@@ -497,6 +525,58 @@ def list_follow_ups(
     return [
         _to_item(row, photos_map.get(row["id"], []))
         for row in rows
+    ]
+
+
+@router.get("/follow-ups/materials")
+def list_materials(
+    object_type: str = Query(..., description="customer / deal / lead / aftersale"),
+    object_id: int = Query(..., gt=0),
+    deep: bool = Query(default=False, description="客户：连其商机/售后的附件一起汇总"),
+) -> list[dict]:
+    """资料汇总卡（PLANNER-V3 §5.7）：某对象所有跟进的附件，时间倒序。
+
+    客户的 ``deep=true`` 会把名下商机、售后单的跟进附件也并进来。
+    """
+    targets: list[tuple[str, int]] = [(object_type, object_id)]
+    with db_conn() as conn:
+        if deep and object_type == "customer":
+            for row in conn.execute(
+                "SELECT id FROM deals WHERE customer_id = ?", (object_id,)
+            ).fetchall():
+                targets.append(("deal", int(row["id"])))
+            for row in conn.execute(
+                "SELECT id FROM aftersales WHERE customer_id = ?", (object_id,)
+            ).fetchall():
+                targets.append(("aftersale", int(row["id"])))
+
+        rows = []
+        for otype, oid in targets:
+            rows.extend(
+                conn.execute(
+                    "SELECT a.id, a.file_name, a.mime_type, a.size, a.created_at,"
+                    "       f.id AS follow_up_id, f.content"
+                    "  FROM attachments a JOIN follow_ups f ON f.id = a.follow_up_id"
+                    " WHERE f.object_type = ? AND f.object_id = ?"
+                    " ORDER BY datetime(a.created_at) DESC, a.id DESC",
+                    (otype, oid),
+                ).fetchall()
+            )
+
+    rows.sort(key=lambda r: (str(r["created_at"]), r["id"]), reverse=True)
+    return [
+        {
+            "id": r["id"],
+            "name": r["file_name"],
+            "mime": r["mime_type"],
+            "size": r["size"],
+            "is_image": str(r["mime_type"] or "").startswith("image/"),
+            "url": f"/api/crm/attachments/{r['id']}",
+            "at": r["created_at"],
+            "content": r["content"],
+            "follow_up_id": r["follow_up_id"],
+        }
+        for r in rows
     ]
 
 

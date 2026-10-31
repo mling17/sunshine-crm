@@ -46,8 +46,44 @@ EXT_BY_MIME: dict[str, str] = {
     "image/heif": ".heif",
 }
 
-#: 单张照片上限（微信原图一般 2~5MB；3 张 × 20MB 仍远低于 nginx 的 100M）
+#: 单个附件上限（PLANNER-V3 §6.5：20MB；一条跟进最多 10 个）
 MAX_PHOTO_BYTES = 20 * 1024 * 1024
+MAX_FILE_BYTES = 20 * 1024 * 1024
+#: 一条跟进最多挂几个附件
+MAX_FILES_PER_FOLLOWUP = 10
+
+#: 允许的非图片附件（PLANNER-V3 §6.5 白名单；.html/.svg/.js 一律不收）
+ALLOWED_DOC_EXT: frozenset[str] = frozenset(
+    {".pdf", ".xls", ".xlsx", ".doc", ".docx", ".csv", ".dwg", ".dxf", ".zip", ".txt"}
+)
+
+DOC_MIME_BY_EXT: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".csv": "text/csv",
+    ".dwg": "application/acad",
+    ".dxf": "image/vnd.dxf",
+    ".zip": "application/zip",
+    ".txt": "text/plain",
+}
+
+
+def ext_and_mime_any(filename: str | None) -> tuple[str, str]:
+    """任意附件：白名单扩展名 → (ext, mime)；不在白名单一律 400。"""
+    suffix = Path((filename or "").strip()).suffix.lower()
+    if suffix in ALLOWED_IMAGE_EXT:
+        return suffix, MIME_BY_EXT[suffix]
+    if suffix in ALLOWED_DOC_EXT:
+        return suffix, DOC_MIME_BY_EXT[suffix]
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "不支持的附件类型：只接受图片、PDF、Excel、Word、CSV、CAD(dwg/dxf)、ZIP、TXT"
+        ),
+    )
 
 
 def _not_found() -> HTTPException:

@@ -738,6 +738,10 @@ class AftersaleStatusLogOut(BaseModel):
 
 
 class AftersaleDetailOut(AftersaleOut):
+    #: 售后履历（跟进 + 状态变更），PLANNER-V3 §5.8
+    timeline: list[dict] = Field(default_factory=list)
+    #: 资料汇总（该售后单的跟进附件）
+    materials: list[dict] = Field(default_factory=list)
     """售后单详情。"""
 
     order_id: int

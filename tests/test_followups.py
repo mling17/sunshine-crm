@@ -109,23 +109,44 @@ class FollowUpsTest(ApiTestCase):
             got.headers.get("content-type"),
         )
 
-    def test_more_than_three_photos_rejected_without_side_effects(self):
+    def test_ten_files_allowed_eleven_rejected(self):
+        """定稿 v2.6：一条跟进最多 10 个附件（原来是 3 张照片）"""
         c = self.create_customer(name="李娜")
-        before = {p for p in settings.uploads_path.rglob("*") if p.is_file()}
-        resp = self.post_follow_up(c["id"], photo_count=4)
-        self.assertEqual(resp.status_code, 400, resp.text)
-        self.assertIn("3", resp.json()["detail"])
-        self.assertEqual(self.count_follow_ups(), 0, "超限请求不能留下跟进记录")
-        after = {p for p in settings.uploads_path.rglob("*") if p.is_file()}
-        self.assertEqual(after, before, "超限请求不能落任何照片文件")
-
-    def test_non_image_rejected(self):
-        c = self.create_customer(name="王强")
-        resp = self.post_follow_up(
-            c["id"], photo_count=1, filename="note.txt", mime="text/plain", payload=b"hello"
+        ten = [("photos", (f"{i}_site.png", b"\x89PNG" + b"0" * 10, "image/png")) for i in range(10)]
+        ok = self.client.post(
+            "/api/crm/follow-ups",
+            data={"customer_id": str(c["id"]), "content": "十张图"},
+            files=ten,
         )
-        self.assertEqual(resp.status_code, 400, resp.text)
-        self.assertEqual(self.count_follow_ups(), 0)
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json()["photo_count"], 10)
+
+        eleven = [("photos", (f"{i}_x.png", b"\x89PNG" + b"0" * 10, "image/png")) for i in range(11)]
+        bad = self.client.post(
+            "/api/crm/follow-ups",
+            data={"customer_id": str(c["id"]), "content": "十一个"},
+            files=eleven,
+        )
+        self.assertEqual(bad.status_code, 400, bad.text)
+        self.assertIn("10", bad.json()["detail"])
+
+    def test_non_image_allowed_and_html_rejected(self):
+        """定稿 v2.4：附件任意类型（PDF/Excel/图纸…）；.html/.svg 这类可执行内容仍然拒"""
+        c = self.create_customer(name="王强")
+        ok = self.client.post(
+            "/api/crm/follow-ups",
+            data={"customer_id": str(c["id"]), "content": "报价单"},
+            files=[("files", ("quote.xlsx", b"PK\x03\x04demo", "application/vnd.ms-excel"))],
+        )
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json()["photo_count"], 1)
+
+        bad = self.client.post(
+            "/api/crm/follow-ups",
+            data={"customer_id": str(c["id"]), "content": "网页"},
+            files=[("files", ("x.html", b"<script>alert(1)</script>", "text/html"))],
+        )
+        self.assertEqual(bad.status_code, 400, bad.text)
 
     def test_three_photos_allowed(self):
         c = self.create_customer(name="赵敏")

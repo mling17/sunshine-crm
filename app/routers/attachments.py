@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from app.db import db_conn
@@ -25,7 +25,10 @@ router = APIRouter(
 
 
 @router.get("/attachments/{attachment_id}")
-def get_attachment(attachment_id: int) -> FileResponse:
+def get_attachment(
+    attachment_id: int,
+    inline: bool = Query(default=False, description="图片可内联预览；非图片一律下载"),
+) -> FileResponse:
     with db_conn() as conn:
         row = conn.execute(
             "SELECT storage_key, file_name, mime_type FROM attachments WHERE id = ?",
@@ -39,8 +42,16 @@ def get_attachment(attachment_id: int) -> FileResponse:
     path = resolve_upload_path(row["storage_key"])
 
     media_type = row["mime_type"] or MIME_BY_EXT.get(path.suffix.lower(), "application/octet-stream")
+    is_image = str(media_type).startswith("image/")
+    # 安全（PLANNER-V3 §6.5）：非图片强制下载 + nosniff，杜绝 .html/.svg 被当页面执行
+    disposition = "inline" if (is_image and inline) else "attachment"
     return FileResponse(
         path,
         media_type=media_type,
-        headers={"Cache-Control": "private, max-age=86400"},
+        filename=row["file_name"] or path.name,
+        content_disposition_type=disposition,
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
