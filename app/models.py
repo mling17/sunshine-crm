@@ -139,6 +139,20 @@ class CustomerOut(BaseModel):
     deals_total: int = 0
     total_closed_amount: float = 0.0
     is_repeat: bool = False
+    # 中文显示名（走数据字典，改名即生效）
+    source_label: str | None = None
+    customer_type_label: str | None = None
+    intent_level_label: str | None = None
+
+    @model_validator(mode="after")
+    def _fill_labels(self) -> "CustomerOut":
+        if self.source_label is None:
+            self.source_label = labels.source(self.source) if self.source != "other" else (self.source_other or "其他")
+        if self.customer_type_label is None:
+            self.customer_type_label = labels.customer_type(self.customer_type)
+        if self.intent_level_label is None:
+            self.intent_level_label = labels.intent_level(self.intent_level)
+        return self
 
     @model_validator(mode="after")
     def _fill_is_repeat(self) -> "CustomerOut":
@@ -170,6 +184,7 @@ class DealOut(BaseModel):
     stage_label: str | None = None
     lost_reason: str | None = None
     lost_reason_other: str | None = None
+    lost_reason_label: str | None = None
     source_lost_deal_id: int | None = None
     order_id: int | None = None
     owner: str | None = None
@@ -187,6 +202,12 @@ class DealOut(BaseModel):
     def _fill_stage_label(self) -> "DealOut":
         if self.stage_label is None:
             self.stage_label = labels.deal_stage(self.stage)
+        return self
+
+    @model_validator(mode="after")
+    def _fill_lost_reason_label(self) -> "DealOut":
+        if self.lost_reason_label is None and self.lost_reason:
+            self.lost_reason_label = labels.lost_reason(self.lost_reason)
         return self
 
     @model_validator(mode="after")
@@ -232,6 +253,7 @@ class AttachmentOut(BaseModel):
     mime_type: str | None = None
     size: int = 0
     url: str
+    method_label: str | None = None
 
 
 class FollowUpItemOut(FollowUpOut):

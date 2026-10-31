@@ -23,8 +23,8 @@
   var MAX_PHOTO_MB = 20;
   var MAX_TAGS = 20;
 
-  /* 与后端 app/enums.py::DEAL_STAGE_LABELS 一致（V2 阶段：需求确认→报价→成交洽谈→赢单/流失）
-     唯一来源在后端，这里只做展示映射；改名务必同步 enums.py */
+  /* 定稿阶段：报价 → 待客户确认 → 成交 / 流失（PLANNER-V3 §1.1）
+     展示名以数据字典 deal_stage 为准（GET /dicts），这里只是兜底常量 */
   var STAGES = [
     ['quote', '报价'],
     ['confirm', '待客户确认'],

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Query
 
 from app import dicts as dict_svc
+from app import labels as labels_svc
 from app.dicts import DICT_REGISTRY
 from app.errors import ApiError
 from app.routers.auth import require_auth
@@ -98,6 +99,7 @@ def create_item(code: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if meta is not None and not isinstance(meta, dict):
         raise ApiError(status_code=400, code="dict_meta_invalid", message="meta 必须是对象")
 
+    labels_svc.invalidate()
     return dict_svc.create_item(
         code,
         key=key,

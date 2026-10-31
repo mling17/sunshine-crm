@@ -16,6 +16,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
+from app import labels
 from app.db import db_conn
 from app.errors import ApiError
 from app.models import (
@@ -151,8 +152,11 @@ def _photos_for(conn, follow_up_ids: list[int]) -> dict[int, list[AttachmentOut]
 
 
 def _to_item(row, photos: list[AttachmentOut]) -> FollowUpItemOut:
+    data = dict(row)
+    # 跟进方式的中文也走字典（follow_method 是 A 类，可改名）
+    data["method_label"] = labels.follow_method(data.get("method"))
     return FollowUpItemOut(
-        **dict(row), photo_count=len(photos), photos=photos
+        **data, photo_count=len(photos), photos=photos
     )
 
 
