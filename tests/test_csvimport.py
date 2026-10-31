@@ -316,7 +316,7 @@ class LeadCsvImportTest(ApiTestCase):
         self.assertEqual(resp.status_code, 400, resp.text)
         self.assertIn("来源", resp.json()["detail"])
 
-    def test_import_deduplicates_normalized_phone_and_wechat(self):
+    def test_import_fails_entire_batch_when_phone_exists(self):
         existing = self.client.post("/api/crm/leads", json={
             "name": "已有线索",
             "phone": "138-0013-8000",
@@ -328,17 +328,44 @@ class LeadCsvImportTest(ApiTestCase):
         data = (
             "姓名,电话,微信,地区,来源\n"
             "重复电话,138 0013 8000,newwx,济南,微信\n"
-            "重复微信,13700137000,qdzs,青岛,转介绍\n"
-            "有效新线索一,13600136000,unique,烟台,电话\n"
-            "文件内重复电话,136-0013-6000,samefile,潍坊,电话\n"
-            "有效新线索二,13500135000,newunique,临沂,微信\n"
+            "本该成功,13600136000,unique,烟台,电话\n"
         ).encode("utf-8")
         resp = self.commit_leads(data)
-        self.assertEqual(resp.status_code, 200, resp.text)
-        body = resp.json()
-        self.assertEqual(body["imported"], 2)
-        self.assertEqual(body["duplicate_count"], 3)
-        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 3)
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertIn("电话", resp.json()["detail"])
+        self.assertIn("重复", resp.json()["detail"])
+        # 这是整批失败，不是跳过重复后部分导入。
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 1)
+
+    def test_import_fails_for_duplicate_phone_inside_file(self):
+        data = (
+            "姓名,电话,微信,地区,来源\n"
+            "第一条,13600136000,one,烟台,电话\n"
+            "第二条,136-0013-6000,two,潍坊,微信\n"
+        ).encode("utf-8")
+        resp = self.commit_leads(data)
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertIn("第 3 行", resp.json()["detail"])
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 0)
+
+    def test_template_is_generated_from_current_dictionary_every_time(self):
+        first = self.client.get("/api/crm/import/leads-template")
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertIn("no-store", first.headers["cache-control"])
+        first_text = first.content.decode("utf-8-sig")
+        self.assertIn("微信", first_text)
+
+        created = self.client.post(
+            "/api/crm/dicts/customer_source/items",
+            json={"key": "douyin", "label": "抖音", "sort": 20},
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        second = self.client.get("/api/crm/import/leads-template")
+        second_text = second.content.decode("utf-8-sig")
+        self.assertIn("抖音", second_text)
+        self.assertNotEqual(first.content, second.content)
+        removed = self.client.delete("/api/crm/dicts/customer_source/items/douyin")
+        self.assertEqual(removed.status_code, 200, removed.text)
 
 
 if __name__ == "__main__":

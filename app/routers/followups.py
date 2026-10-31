@@ -136,7 +136,9 @@ def _photos_for(conn, follow_up_ids: list[int]) -> dict[int, list[AttachmentOut]
     rows = conn.execute(
         f"""
         SELECT id, follow_up_id, file_name, mime_type, size
-        FROM attachments WHERE follow_up_id IN ({placeholders}) ORDER BY id
+        FROM attachments
+        WHERE follow_up_id IN ({placeholders}) AND is_delete = 0
+        ORDER BY id
         """,
         follow_up_ids,
     ).fetchall()
@@ -169,7 +171,7 @@ def _fetch_item(conn, follow_up_id: int) -> FollowUpItemOut:
         FROM follow_ups fu
         LEFT JOIN customers c ON c.id = fu.customer_id
         LEFT JOIN deals d ON d.id = fu.deal_id
-        WHERE fu.id = ?
+        WHERE fu.id = ? AND fu.is_delete = 0
         """,
         (follow_up_id,),
     ).fetchone()
@@ -213,7 +215,7 @@ def _validate_object_type(object_type: str) -> None:
 def _check_deal_frozen(conn, deal_id: int) -> None:
     """检查商机是否被冻结"""
     deal = conn.execute(
-        "SELECT stage FROM deals WHERE id = ?",
+        "SELECT stage FROM deals WHERE id = ? AND is_delete = 0",
         (deal_id,),
     ).fetchone()
     if deal is None:
@@ -260,7 +262,10 @@ async def create_follow_up(
     # V1 兼容：客户 + 商机同时传时先校验归属（计划 §2.3：deal 必须属于该客户）
     if customer_id and deal_id:
         with db_conn() as _c:
-            _row = _c.execute("SELECT customer_id FROM deals WHERE id = ?", (int(deal_id),)).fetchone()
+            _row = _c.execute(
+                "SELECT customer_id FROM deals WHERE id = ? AND is_delete = 0",
+                (int(deal_id),),
+            ).fetchone()
             if _row is None:
                 raise HTTPException(status_code=404, detail="商机不存在")
             if int(_row["customer_id"]) != int(customer_id):
@@ -284,7 +289,9 @@ async def create_follow_up(
     if deal_id:
         with db_conn() as _conn:
             deal_row_checked = _conn.execute(
-                "SELECT id, customer_id, stage FROM deals WHERE id = ?", (int(deal_id),)
+                "SELECT id, customer_id, stage FROM deals"
+                " WHERE id = ? AND is_delete = 0",
+                (int(deal_id),),
             ).fetchone()
         if deal_row_checked is None:
             raise HTTPException(status_code=404, detail="商机不存在")
@@ -296,7 +303,7 @@ async def create_follow_up(
         if object_type == "lead":
             # 检查线索是否存在
             lead = conn.execute(
-                "SELECT status FROM leads WHERE id = ?",
+                "SELECT status FROM leads WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if lead is None:
@@ -311,7 +318,7 @@ async def create_follow_up(
         elif object_type == "customer":
             # 检查客户是否存在
             customer = conn.execute(
-                "SELECT id FROM customers WHERE id = ?",
+                "SELECT id FROM customers WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if customer is None:
@@ -319,7 +326,7 @@ async def create_follow_up(
         elif object_type == "deal":
             # 检查商机是否存在
             deal = conn.execute(
-                "SELECT id, stage FROM deals WHERE id = ?",
+                "SELECT id, stage FROM deals WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if deal is None:
@@ -334,7 +341,7 @@ async def create_follow_up(
         elif object_type == "order":
             # 检查订单是否存在
             order = conn.execute(
-                "SELECT id FROM orders WHERE id = ?",
+                "SELECT id FROM orders WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if order is None:
@@ -342,7 +349,7 @@ async def create_follow_up(
         elif object_type == "aftersale":
             # 检查售后单是否存在 + 状态守卫（PLANNER-V3 §6.4）
             aftersale = conn.execute(
-                "SELECT id, status FROM aftersales WHERE id = ?",
+                "SELECT id, status FROM aftersales WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if aftersale is None:
@@ -374,7 +381,7 @@ async def create_follow_up(
         elif object_type == "deal":
             # 获取商机对应的客户ID
             deal = conn.execute(
-                "SELECT customer_id FROM deals WHERE id = ?",
+                "SELECT customer_id FROM deals WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if deal:
@@ -383,7 +390,7 @@ async def create_follow_up(
         elif object_type == "order":
             # 获取订单对应的客户ID
             order = conn.execute(
-                "SELECT customer_id FROM orders WHERE id = ?",
+                "SELECT customer_id FROM orders WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if order:
@@ -391,7 +398,7 @@ async def create_follow_up(
         elif object_type == "aftersale":
             # 获取售后单对应的客户ID
             aftersale = conn.execute(
-                "SELECT customer_id FROM aftersales WHERE id = ?",
+                "SELECT customer_id FROM aftersales WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if aftersale:
@@ -422,7 +429,8 @@ async def create_follow_up(
         # 转化/失效是终态，前面已经拦截，这里只处理仍在流程中的线索。
         if object_type == "lead":
             current_lead = conn.execute(
-                "SELECT status FROM leads WHERE id = ?", (object_id_value,)
+                "SELECT status FROM leads WHERE id = ? AND is_delete = 0",
+                (object_id_value,),
             ).fetchone()
             if current_lead and current_lead["status"] == "new":
                 conn.execute(
@@ -446,7 +454,8 @@ async def create_follow_up(
         # 售后：待处理遇到跟进 → 自动进入「处理中」（定稿 v2.4 #9 / PLANNER-V3 §6.4）
         if object_type == "aftersale":
             current = conn.execute(
-                "SELECT status FROM aftersales WHERE id = ?", (object_id_value,)
+                "SELECT status FROM aftersales WHERE id = ? AND is_delete = 0",
+                (object_id_value,),
             ).fetchone()
             if current and current["status"] == "pending":
                 conn.execute(
@@ -491,7 +500,7 @@ async def create_follow_up(
         if stage_value and deal_id_value is not None:
             # 获取商机原始阶段
             deal = conn.execute(
-                "SELECT stage FROM deals WHERE id = ?",
+                "SELECT stage FROM deals WHERE id = ? AND is_delete = 0",
                 (deal_id_value,),
             ).fetchone()
             old_stage = deal["stage"] if deal else ""
@@ -535,7 +544,6 @@ def list_follow_ups(
         where_parts.append("fu.object_id = ?")
         params.append(object_id)
 
-    where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     with db_conn() as conn:
         rows = conn.execute(
             f"""
@@ -545,7 +553,8 @@ def list_follow_ups(
             FROM follow_ups fu
             LEFT JOIN customers c ON c.id = fu.customer_id
             LEFT JOIN deals d ON d.id = fu.deal_id
-            {where_sql}
+            WHERE fu.is_delete = 0
+            {" AND " + " AND ".join(where_parts) if where_parts else ""}
             ORDER BY fu.created_at DESC, fu.id DESC
             """,
             params,
@@ -572,11 +581,13 @@ def list_materials(
     with db_conn() as conn:
         if deep and object_type == "customer":
             for row in conn.execute(
-                "SELECT id FROM deals WHERE customer_id = ?", (object_id,)
+                "SELECT id FROM deals WHERE customer_id = ? AND is_delete = 0",
+                (object_id,),
             ).fetchall():
                 targets.append(("deal", int(row["id"])))
             for row in conn.execute(
-                "SELECT id FROM aftersales WHERE customer_id = ?", (object_id,)
+                "SELECT id FROM aftersales WHERE customer_id = ? AND is_delete = 0",
+                (object_id,),
             ).fetchall():
                 targets.append(("aftersale", int(row["id"])))
 
@@ -588,6 +599,7 @@ def list_materials(
                     "       f.id AS follow_up_id, f.content"
                     "  FROM attachments a JOIN follow_ups f ON f.id = a.follow_up_id"
                     " WHERE f.object_type = ? AND f.object_id = ?"
+                    " AND f.is_delete = 0 AND a.is_delete = 0"
                     " ORDER BY datetime(a.created_at) DESC, a.id DESC",
                     (otype, oid),
                 ).fetchall()
@@ -615,11 +627,20 @@ def delete_follow_up(follow_up_id: int) -> dict:
     """删跟进；``attachments`` 行由外键级联清掉，磁盘文件留给备份清理。"""
     with db_conn() as conn:
         exists = conn.execute(
-            "SELECT 1 FROM follow_ups WHERE id = ?",
+            "SELECT 1 FROM follow_ups WHERE id = ? AND is_delete = 0",
             (follow_up_id,),
         ).fetchone()
         if exists is None:
             raise HTTPException(status_code=404, detail="跟进记录不存在")
-        conn.execute("DELETE FROM follow_ups WHERE id = ?", (follow_up_id,))
+        now = now_iso()
+        conn.execute(
+            "UPDATE follow_ups SET is_delete = 1, update_time = ? WHERE id = ?",
+            (now, follow_up_id),
+        )
+        conn.execute(
+            "UPDATE attachments SET is_delete = 1, update_time = ?"
+            " WHERE follow_up_id = ?",
+            (now, follow_up_id),
+        )
 
     return {"ok": True, "id": follow_up_id}

@@ -208,8 +208,11 @@ def _usage_by_key(conn: sqlite3.Connection, code: str) -> Dict[str, int]:
             continue
         table, column = pair.split(".", 1)
         try:
+            columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
+            where = " WHERE is_delete = 0" if "is_delete" in columns else ""
             rows = conn.execute(
-                f"SELECT {column} AS k, COUNT(*) AS n FROM {table} GROUP BY {column}"
+                f"SELECT {column} AS k, COUNT(*) AS n FROM {table}{where}"
+                f" GROUP BY {column}"
             ).fetchall()
         except sqlite3.Error:
             continue
@@ -233,7 +236,10 @@ def items(code: str, include_disabled: bool = False) -> List[Dict[str, Any]]:
         with db_conn() as conn:
             if not _table_ready(conn):
                 raise _NoDictTable()
-            sql = "SELECT key, label, sort, enabled, meta FROM dict_items WHERE dict_code = ?"
+            sql = (
+                "SELECT key, label, sort, enabled, meta FROM dict_items"
+                " WHERE dict_code = ? AND is_delete = 0"
+            )
             params: List[Any] = [code]
             if not include_disabled:
                 sql += " AND enabled = 1"
@@ -274,7 +280,9 @@ def exists(code: str, key: str) -> bool:
                 raise _NoDictTable()
             return (
                 conn.execute(
-                    "SELECT 1 FROM dict_items WHERE dict_code = ? AND key = ?", (code, key)
+                    "SELECT 1 FROM dict_items"
+                    " WHERE dict_code = ? AND key = ? AND is_delete = 0",
+                    (code, key),
                 ).fetchone()
                 is not None
             )
@@ -290,7 +298,8 @@ def validate(code: str, key: str) -> bool:
                 raise _NoDictTable()
             return (
                 conn.execute(
-                    "SELECT 1 FROM dict_items WHERE dict_code = ? AND key = ? AND enabled = 1",
+                    "SELECT 1 FROM dict_items"
+                    " WHERE dict_code = ? AND key = ? AND enabled = 1 AND is_delete = 0",
                     (code, key),
                 ).fetchone()
                 is not None
@@ -329,10 +338,21 @@ def create_item(code: str, key: str, label: str, sort: int = 0,
                 enabled: bool = True, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     with db_conn() as conn:
         conn.execute(
-            "INSERT INTO dict_items (dict_code, key, label, sort, enabled, meta, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (code, key, label, int(sort), 1 if enabled else 0,
-             json.dumps(meta, ensure_ascii=False) if meta else None),
+            "INSERT INTO dict_items"
+            " (dict_code, key, label, sort, enabled, meta, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))"
+            " ON CONFLICT(dict_code, key) DO UPDATE SET"
+            " label = excluded.label, sort = excluded.sort, enabled = excluded.enabled,"
+            " meta = excluded.meta, is_delete = 0, updated_at = datetime('now'),"
+            " update_time = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+            (
+                code,
+                key,
+                label,
+                int(sort),
+                1 if enabled else 0,
+                json.dumps(meta, ensure_ascii=False) if meta else None,
+            ),
         )
     label_map.cache_clear()
     return get_item(code, key)
@@ -355,7 +375,7 @@ def update_item(code: str, key: str, **fields: Any) -> Dict[str, Any]:
     with db_conn() as conn:
         conn.execute(
             f"UPDATE dict_items SET {', '.join(sets)}, updated_at = datetime('now')"
-            " WHERE dict_code = ? AND key = ?",
+            " WHERE dict_code = ? AND key = ? AND is_delete = 0",
             [*values, code, key],
         )
     label_map.cache_clear()
@@ -364,7 +384,12 @@ def update_item(code: str, key: str, **fields: Any) -> Dict[str, Any]:
 
 def delete_item(code: str, key: str) -> None:
     with db_conn() as conn:
-        conn.execute("DELETE FROM dict_items WHERE dict_code = ? AND key = ?", (code, key))
+        conn.execute(
+            "UPDATE dict_items SET is_delete = 1,"
+            " update_time = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+            " WHERE dict_code = ? AND key = ?",
+            (code, key),
+        )
     label_map.cache_clear()
 
 

@@ -133,13 +133,23 @@ class CustomersTest(ApiTestCase):
         self.assertEqual(self.client.get(f"/api/crm/customers/{c['id']}").status_code, 404)
         self.assertEqual(self.client.get("/api/crm/customers").json()["total"], 0)
         with db_conn() as conn:
-            self.assertIsNone(
-                conn.execute("SELECT 1 FROM deals WHERE id = ?", (deal_id,)).fetchone(),
-                "客户的 deals 必须被级联删除",
+            self.assertEqual(
+                conn.execute("SELECT is_delete FROM deals WHERE id = ?", (deal_id,)).fetchone()[0],
+                1,
+                "客户的 deals 必须软删除",
             )
-            self.assertIsNone(
-                conn.execute("SELECT 1 FROM follow_ups WHERE id = ?", (fu_id,)).fetchone(),
-                "客户的 follow_ups 必须被级联删除",
+            self.assertEqual(
+                conn.execute(
+                    "SELECT is_delete FROM follow_ups WHERE id = ?", (fu_id,)
+                ).fetchone()[0],
+                1,
+                "客户的 follow_ups 必须软删除",
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT is_delete FROM customers WHERE id = ?", (c["id"],)
+                ).fetchone()[0],
+                1,
             )
 
     def test_update_null_name_rejected(self):

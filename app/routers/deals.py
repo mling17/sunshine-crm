@@ -107,7 +107,8 @@ def _spec_from_model(model: str | None) -> str | None:
 def _deal_row(conn, deal_id: int):
     row = conn.execute(
         "SELECT d.*, c.name AS customer_name FROM deals d"
-        " LEFT JOIN customers c ON c.id = d.customer_id WHERE d.id = ?",
+        " LEFT JOIN customers c ON c.id = d.customer_id"
+        " WHERE d.id = ? AND d.is_delete = 0 AND c.is_delete = 0",
         (deal_id,),
     ).fetchone()
     if row is None:
@@ -131,7 +132,7 @@ def list_deals(
     stage: str | None = Query(default=None, max_length=32),
     q: str | None = Query(default=None, max_length=64),
 ) -> list[DealOut]:
-    where, params = [], []
+    where, params = ["d.is_delete = 0", "c.is_delete = 0"], []
     if customer_id is not None:
         where.append("d.customer_id = ?")
         params.append(customer_id)
@@ -173,7 +174,7 @@ def get_deal(deal_id: int) -> DealDetailOut:
             for f in entry.get("files", [])
         ]
         order_row = conn.execute(
-            "SELECT * FROM orders WHERE deal_id = ?", (deal_id,)
+            "SELECT * FROM orders WHERE deal_id = ? AND is_delete = 0", (deal_id,)
         ).fetchone()
         data["order"] = dict(order_row) if order_row else None
     return DealDetailOut(**data)
@@ -186,7 +187,8 @@ def get_deal(deal_id: int) -> DealDetailOut:
 def create_deal(payload: DealIn) -> DealOut:
     with db_conn() as conn:
         if conn.execute(
-            "SELECT 1 FROM customers WHERE id = ?", (payload.customer_id,)
+            "SELECT 1 FROM customers WHERE id = ? AND is_delete = 0",
+            (payload.customer_id,),
         ).fetchone() is None:
             raise HTTPException(status_code=404, detail="客户不存在")
 

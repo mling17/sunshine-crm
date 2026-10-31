@@ -36,13 +36,14 @@ def _pack(conn, row) -> dict:
         }
         for c in conn.execute(
             "SELECT id, name, phone, tags FROM carrier_contacts"
-            " WHERE carrier_id = ? ORDER BY sort, id",
+            " WHERE carrier_id = ? AND is_delete = 0 ORDER BY sort, id",
             (row["id"],),
         ).fetchall()
     ]
     data["order_count"] = int(
         conn.execute(
-            "SELECT COUNT(*) FROM orders WHERE carrier_id = ?", (row["id"],)
+            "SELECT COUNT(*) FROM orders WHERE carrier_id = ? AND is_delete = 0",
+            (row["id"],),
         ).fetchone()[0]
     )
     return data
@@ -52,8 +53,12 @@ def _save_contacts(conn, carrier_id: int, contacts) -> None:
     """整组覆盖；payload 没带 contacts 就不动。"""
     if contacts is None:
         return
-    conn.execute("DELETE FROM carrier_contacts WHERE carrier_id = ?", (carrier_id,))
     now = now_iso()
+    conn.execute(
+        "UPDATE carrier_contacts SET is_delete = 1, update_time = ?"
+        " WHERE carrier_id = ? AND is_delete = 0",
+        (now, carrier_id),
+    )
     for index, item in enumerate(contacts):
         name = str((item or {}).get("name") or "").strip()
         phone = str((item or {}).get("phone") or "").strip()
@@ -79,14 +84,18 @@ def _save_contacts(conn, carrier_id: int, contacts) -> None:
 def list_carriers():
     """物流公司列表（含联系人 + 被引用次数）。"""
     with db_conn() as conn:
-        rows = conn.execute("SELECT * FROM carriers ORDER BY id DESC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM carriers WHERE is_delete = 0 ORDER BY id DESC"
+        ).fetchall()
         return [CarrierOut(**_pack(conn, row)) for row in rows]
 
 
 @router.get("/carriers/{carrier_id}", response_model=CarrierOut)
 def get_carrier(carrier_id: int):
     with db_conn() as conn:
-        row = conn.execute("SELECT * FROM carriers WHERE id = ?", (carrier_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM carriers WHERE id = ? AND is_delete = 0", (carrier_id,)
+        ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="物流公司不存在")
         return CarrierOut(**_pack(conn, row))
@@ -95,7 +104,9 @@ def get_carrier(carrier_id: int):
 @router.post("/carriers", response_model=CarrierOut)
 def create_carrier(payload: CarrierIn):
     with db_conn() as conn:
-        if conn.execute("SELECT 1 FROM carriers WHERE name = ?", (payload.name,)).fetchone():
+        if conn.execute(
+            "SELECT 1 FROM carriers WHERE name = ? AND is_delete = 0", (payload.name,)
+        ).fetchone():
             raise ApiError(
                 status_code=409, code="carrier_exists", message=f"物流公司「{payload.name}」已存在"
             )
@@ -117,7 +128,9 @@ def create_carrier(payload: CarrierIn):
         )
         carrier_id = int(cur.lastrowid or 0)
         _save_contacts(conn, carrier_id, contacts)
-        row = conn.execute("SELECT * FROM carriers WHERE id = ?", (carrier_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM carriers WHERE id = ? AND is_delete = 0", (carrier_id,)
+        ).fetchone()
         return CarrierOut(**_pack(conn, row))
 
 
@@ -143,19 +156,24 @@ def update_carrier(carrier_id: int, payload: CarrierUpdate):
                 [*assignments.values(), now_iso(), carrier_id],
             )
         _save_contacts(conn, carrier_id, contacts)
-        updated = conn.execute("SELECT * FROM carriers WHERE id = ?", (carrier_id,)).fetchone()
+        updated = conn.execute(
+            "SELECT * FROM carriers WHERE id = ? AND is_delete = 0", (carrier_id,)
+        ).fetchone()
         return CarrierOut(**_pack(conn, updated))
 
 
 @router.delete("/carriers/{carrier_id}", response_model=dict)
 def delete_carrier(carrier_id: int):
     with db_conn() as conn:
-        row = conn.execute("SELECT * FROM carriers WHERE id = ?", (carrier_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM carriers WHERE id = ? AND is_delete = 0", (carrier_id,)
+        ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="物流公司不存在")
 
         used = conn.execute(
-            "SELECT COUNT(*) FROM orders WHERE carrier_id = ?", (carrier_id,)
+            "SELECT COUNT(*) FROM orders WHERE carrier_id = ? AND is_delete = 0",
+            (carrier_id,),
         ).fetchone()[0]
         if used > 0:
             raise ApiError(
@@ -163,5 +181,10 @@ def delete_carrier(carrier_id: int):
                 code="carrier_in_use",
                 message=f"有 {used} 张订单在用，只能停用不能删除",
             )
-        conn.execute("DELETE FROM carriers WHERE id = ?", (carrier_id,))
+        conn.execute(
+            "UPDATE carriers SET is_delete = 1,"
+            " update_time = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+            " WHERE id = ?",
+            (carrier_id,),
+        )
         return {"message": "删除成功"}

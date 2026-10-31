@@ -111,7 +111,10 @@ def get_stats(months: int = Query(default=6, ge=1, le=24)) -> dict:
         # ---------- 线索转化 ----------
         lead_rows = {
             row["status"]: int(row["n"])
-            for row in conn.execute("SELECT status, COUNT(*) AS n FROM leads GROUP BY status").fetchall()
+            for row in conn.execute(
+                "SELECT status, COUNT(*) AS n FROM leads"
+                " WHERE is_delete = 0 GROUP BY status"
+            ).fetchall()
         }
         lead_total = sum(lead_rows.values())
         converted = lead_rows.get("converted", 0)

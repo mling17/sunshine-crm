@@ -30,8 +30,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-MIGRATION_VERSION = "v2_004"
-SCHEMA_USER_VERSION = 4
+from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
+
+MIGRATION_VERSION = "v2_005"
+SCHEMA_USER_VERSION = 5
 
 
 def default_db_path() -> Path:
@@ -617,7 +619,13 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_004", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_004', datetime('now'), '线索有跟进后进入跟进中')"),
-    ("user_version v2_004", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    ("user_version v2_004", None, "PRAGMA user_version = 4"),
+    # ---------- 22. v2_005：全局 create_time/update_time/is_delete + 线索电话唯一 ----------
+    ("standardize_audit_columns", None, ""),
+    ("schema_migrations v2_005", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_005', datetime('now'), '统一审计时间与软删除字段；线索电话唯一')"),
+    ("user_version v2_005", None, "PRAGMA user_version = 5"),
 ]
 
 
@@ -692,6 +700,9 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
             try:
                 if label == "dict_items_seed":
                     seed_dict_items(conn)
+                elif label == "standardize_audit_columns":
+                    ensure_standard_columns(conn)
+                    ensure_active_lead_phone_unique(conn)
                 else:
                     conn.execute(sql)
             except sqlite3.Error as exc:  # 带语句名报错，定位快

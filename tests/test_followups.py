@@ -61,14 +61,17 @@ class FollowUpsTest(ApiTestCase):
     def attachments(self, follow_up_id: int) -> list[dict]:
         with db_conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM attachments WHERE follow_up_id = ? ORDER BY id",
+                "SELECT * FROM attachments"
+                " WHERE follow_up_id = ? AND is_delete = 0 ORDER BY id",
                 (follow_up_id,),
             ).fetchall()
         return [dict(row) for row in rows]
 
     def count_follow_ups(self) -> int:
         with db_conn() as conn:
-            return conn.execute("SELECT COUNT(*) AS n FROM follow_ups").fetchone()["n"]
+            return conn.execute(
+                "SELECT COUNT(*) AS n FROM follow_ups WHERE is_delete = 0"
+            ).fetchone()["n"]
 
     # ---------- 新建 + 照片 ----------
     def test_create_with_one_photo_and_fetch_bytes(self):
@@ -257,6 +260,18 @@ class FollowUpsTest(ApiTestCase):
         self.assertEqual(resp.json(), {"ok": True, "id": body["id"]})
         self.assertEqual(self.count_follow_ups(), 0)
         self.assertEqual(self.attachments(body["id"]), [])
+        with db_conn() as conn:
+            follow_deleted = conn.execute(
+                "SELECT is_delete FROM follow_ups WHERE id = ?", (body["id"],)
+            ).fetchone()[0]
+            attachment_flags = [
+                row[0] for row in conn.execute(
+                    "SELECT is_delete FROM attachments WHERE follow_up_id = ?",
+                    (body["id"],),
+                ).fetchall()
+            ]
+        self.assertEqual(follow_deleted, 1)
+        self.assertTrue(attachment_flags and all(flag == 1 for flag in attachment_flags))
         self.assertEqual(
             self.client.delete(f"/api/crm/follow-ups/{body['id']}").status_code, 404
         )

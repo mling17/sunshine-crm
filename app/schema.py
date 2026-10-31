@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 from app.db import DBPath, db_conn
 
 ENSURE_SQL: list[str] = [
@@ -122,3 +123,5 @@ def ensure_schema(db_path: DBPath = None) -> None:
     with db_conn(db_path) as conn:
         for statement in ENSURE_SQL:
             conn.execute(statement)
+        ensure_standard_columns(conn)
+        ensure_active_lead_phone_unique(conn)

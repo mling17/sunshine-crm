@@ -168,7 +168,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     lead_row = conn.execute(
         "SELECT id, status, phone, wechat, name, lead_type, company_name, "
         "source, source_other, location, note, intent_level, owner "
-        "FROM leads WHERE id = ?",
+        "FROM leads WHERE id = ? AND is_delete = 0",
         (lead_id,),
     ).fetchone()
     if lead_row is None:
@@ -186,7 +186,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     if lead_row["phone"]:
         customer_rows = conn.execute(
             "SELECT id, name, phone, wechat FROM customers "
-            "WHERE (phone = ? AND ? <> '')",
+            "WHERE is_delete = 0 AND (phone = ? AND ? <> '')",
             (lead_row["phone"], lead_row["phone"]),
         ).fetchall()
         for row in customer_rows:
@@ -198,7 +198,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     if not duplicate_matches and lead_row["wechat"]:
         customer_rows = conn.execute(
             "SELECT id, name, phone, wechat FROM customers "
-            "WHERE (wechat = ? AND ? <> '')",
+            "WHERE is_delete = 0 AND (wechat = ? AND ? <> '')",
             (lead_row["wechat"], lead_row["wechat"]),
         ).fetchall()
         for row in customer_rows:
@@ -320,8 +320,12 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     # 迁移标签
     conn.execute(
         """
-        INSERT OR IGNORE INTO customer_tags (customer_id, tag_id)
-        SELECT ?, tag_id FROM lead_tags WHERE lead_id = ?
+        INSERT INTO customer_tags (customer_id, tag_id)
+        SELECT ?, tag_id FROM lead_tags
+        WHERE lead_id = ? AND is_delete = 0
+        ON CONFLICT(customer_id, tag_id) DO UPDATE SET
+          is_delete = 0,
+          update_time = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
         """,
         (customer_id, lead_id),
     )
@@ -331,7 +335,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
         """
         UPDATE follow_ups 
         SET object_type = 'customer', object_id = ?, customer_id = ?
-        WHERE object_type = 'lead' AND object_id = ?
+        WHERE object_type = 'lead' AND object_id = ? AND is_delete = 0
         """,
         (customer_id, customer_id, lead_id),
     )
@@ -364,7 +368,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
         "source_other, location, note, intent_level, status, invalid_reason, "
         "invalid_reason_other, converted_customer_id, converted_deal_id, owner, "
         "created_at, updated_at "
-        "FROM leads WHERE id = ?",
+        "FROM leads WHERE id = ? AND is_delete = 0",
         (lead_id,),
     ).fetchone()
     
@@ -372,7 +376,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     customer_row = conn.execute(
         "SELECT id, name, phone, wechat, customer_type, company_name, source, "
         "source_other, location, note, intent_level, owner, created_at, updated_at "
-        "FROM customers WHERE id = ?",
+        "FROM customers WHERE id = ? AND is_delete = 0",
         (customer_id,),
     ).fetchone()
     

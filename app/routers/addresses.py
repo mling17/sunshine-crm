@@ -19,7 +19,8 @@ _COLUMNS = "id, customer_id, label, receiver_name, phone, address, is_default, c
 
 def _row(conn, customer_id: int, address_id: int):
     row = conn.execute(
-        f"SELECT {_COLUMNS} FROM customer_addresses WHERE id = ? AND customer_id = ?",
+        f"SELECT {_COLUMNS} FROM customer_addresses"
+        " WHERE id = ? AND customer_id = ? AND is_delete = 0",
         (address_id, customer_id),
     ).fetchone()
     if row is None:
@@ -47,7 +48,8 @@ def _clean(payload: dict) -> dict:
 def list_addresses(customer_id: int) -> list[dict]:
     with db_conn() as conn:
         rows = conn.execute(
-            f"SELECT {_COLUMNS} FROM customer_addresses WHERE customer_id = ?"
+            f"SELECT {_COLUMNS} FROM customer_addresses"
+            " WHERE customer_id = ? AND is_delete = 0"
             " ORDER BY is_default DESC, id DESC",
             (customer_id,),
         ).fetchall()
@@ -58,7 +60,9 @@ def list_addresses(customer_id: int) -> list[dict]:
 def create_address(customer_id: int, payload: dict) -> dict:
     data = _clean(payload)
     with db_conn() as conn:
-        if conn.execute("SELECT 1 FROM customers WHERE id = ?", (customer_id,)).fetchone() is None:
+        if conn.execute(
+            "SELECT 1 FROM customers WHERE id = ? AND is_delete = 0", (customer_id,)
+        ).fetchone() is None:
             raise HTTPException(status_code=404, detail="客户不存在")
         now = now_iso()
         cur = conn.execute(
@@ -78,7 +82,8 @@ def create_address(customer_id: int, payload: dict) -> dict:
         address_id = int(cur.lastrowid or 0)
         if payload.get("is_default"):
             conn.execute(
-                "UPDATE customer_addresses SET is_default = 0 WHERE customer_id = ? AND id <> ?",
+                "UPDATE customer_addresses SET is_default = 0"
+                " WHERE customer_id = ? AND id <> ? AND is_delete = 0",
                 (customer_id, address_id),
             )
         return _row(conn, customer_id, address_id)
@@ -103,12 +108,13 @@ def update_address(customer_id: int, address_id: int, payload: dict) -> dict:
             raise ApiError(status_code=400, code="nothing_to_update", message="没有要更新的字段")
         conn.execute(
             f"UPDATE customer_addresses SET {', '.join(sets)}, updated_at = ?"
-            " WHERE id = ? AND customer_id = ?",
+            " WHERE id = ? AND customer_id = ? AND is_delete = 0",
             [*values, now_iso(), address_id, customer_id],
         )
         if payload.get("is_default"):
             conn.execute(
-                "UPDATE customer_addresses SET is_default = 0 WHERE customer_id = ? AND id <> ?",
+                "UPDATE customer_addresses SET is_default = 0"
+                " WHERE customer_id = ? AND id <> ? AND is_delete = 0",
                 (customer_id, address_id),
             )
         return _row(conn, customer_id, address_id)
@@ -123,7 +129,9 @@ def delete_address(customer_id: int, address_id: int) -> dict:
             "UPDATE orders SET address_id = NULL WHERE address_id = ?", (address_id,)
         )
         conn.execute(
-            "DELETE FROM customer_addresses WHERE id = ? AND customer_id = ?",
+            "UPDATE customer_addresses SET is_delete = 1,"
+            " update_time = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+            " WHERE id = ? AND customer_id = ? AND is_delete = 0",
             (address_id, customer_id),
         )
     return {"id": address_id, "deleted": True}

@@ -40,16 +40,16 @@ _CUSTOMER_SELECT = """
 SELECT c.id, c.name, c.phone, c.wechat, c.location, c.note,
        c.customer_type, c.source, c.source_other, c.intent_level, c.company_name, c.owner,
        c.created_at, c.updated_at,
-       (SELECT COUNT(*) FROM deals d WHERE d.customer_id = c.id) AS deals_total,
+       (SELECT COUNT(*) FROM deals d WHERE d.customer_id = c.id AND d.is_delete = 0) AS deals_total,
        (SELECT COALESCE(SUM(d.amount), 0) FROM deals d
-         WHERE d.customer_id = c.id AND d.stage = 'won') AS total_closed_amount
+         WHERE d.customer_id = c.id AND d.stage = 'won' AND d.is_delete = 0) AS total_closed_amount
 FROM customers c
 """
 
 #: 按标签筛选时追加的 JOIN（UNIQUE(customer_id, tag_id) 保证不会重复出行）
 _TAG_JOIN = (
-    " INNER JOIN customer_tags ct ON ct.customer_id = c.id"
-    " INNER JOIN tags t ON t.id = ct.tag_id"
+    " INNER JOIN customer_tags ct ON ct.customer_id = c.id AND ct.is_delete = 0"
+    " INNER JOIN tags t ON t.id = ct.tag_id AND t.is_delete = 0"
 )
 
 #: PUT 允许改的列（白名单：列名会拼进 SQL，绝不能用客户端传来的 key 直接拼）
@@ -92,6 +92,7 @@ def _tags_for(conn, customer_ids: list[int]) -> dict[int, list[str]]:
         SELECT ct.customer_id AS customer_id, t.name AS name
         FROM customer_tags ct JOIN tags t ON t.id = ct.tag_id
         WHERE ct.customer_id IN ({placeholders})
+          AND ct.is_delete = 0 AND t.is_delete = 0
         ORDER BY t.name
         """,
         customer_ids,
@@ -108,16 +109,23 @@ def _set_customer_tags(conn, customer_id: int, names: Iterable[str]) -> None:
     tags = _normalize_tags(names)
     created_at = now_iso()
 
-    conn.execute("DELETE FROM customer_tags WHERE customer_id = ?", (customer_id,))
+    conn.execute(
+        "UPDATE customer_tags SET is_delete = 1, update_time = ?"
+        " WHERE customer_id = ? AND is_delete = 0",
+        (created_at, customer_id),
+    )
     for name in tags:
         conn.execute(
-            "INSERT OR IGNORE INTO tags (name, created_at) VALUES (?, ?)",
-            (name, created_at),
+            "INSERT INTO tags (name, created_at) VALUES (?, ?)"
+            " ON CONFLICT(name) DO UPDATE SET is_delete = 0, update_time = ?",
+            (name, created_at, created_at),
         )
         tag_row = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
         conn.execute(
-            "INSERT OR IGNORE INTO customer_tags (customer_id, tag_id) VALUES (?, ?)",
-            (customer_id, tag_row["id"]),
+            "INSERT INTO customer_tags (customer_id, tag_id) VALUES (?, ?)"
+            " ON CONFLICT(customer_id, tag_id) DO UPDATE SET"
+            " is_delete = 0, update_time = ?",
+            (customer_id, tag_row["id"], created_at),
         )
 
 
@@ -132,7 +140,7 @@ def list_customers(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
 ) -> CustomerListOut:
-    where_parts: list[str] = []
+    where_parts: list[str] = ["c.is_delete = 0"]
     params: list[object] = []
     join_sql = ""
 
@@ -177,7 +185,9 @@ def list_customers(
 def list_tags() -> list[str]:
     """标签字典（供前端筛选 chips / 输入自动补全）。"""
     with db_conn() as conn:
-        rows = conn.execute("SELECT DISTINCT name FROM tags ORDER BY name").fetchall()
+        rows = conn.execute(
+            "SELECT DISTINCT name FROM tags WHERE is_delete = 0 ORDER BY name"
+        ).fetchall()
     return [row["name"] for row in rows]
 
 
@@ -185,6 +195,18 @@ def list_tags() -> list[str]:
 def create_customer(payload: CustomerIn) -> CustomerOut:
     now = now_iso()
     with db_conn() as conn:
+        if payload.phone:
+            exists = conn.execute(
+                "SELECT 1 FROM customers"
+                " WHERE phone = ? AND is_delete = 0",
+                (payload.phone,),
+            ).fetchone()
+            if exists:
+                raise ApiError(
+                    status_code=409,
+                    code="duplicate_phone",
+                    message=f"电话 {payload.phone} 已存在",
+                )
         cur = conn.execute(
             """
             INSERT INTO customers
@@ -210,7 +232,9 @@ def create_customer(payload: CustomerIn) -> CustomerOut:
         )
         customer_id = int(cur.lastrowid or 0)
         _set_customer_tags(conn, customer_id, payload.tags)
-        row = conn.execute(f"{_CUSTOMER_SELECT} WHERE c.id = ?", (customer_id,)).fetchone()
+        row = conn.execute(
+            f"{_CUSTOMER_SELECT} WHERE c.id = ? AND c.is_delete = 0", (customer_id,)
+        ).fetchone()
         tags = _tags_for(conn, [customer_id]).get(customer_id, [])
 
     return _to_out(row, tags)
@@ -219,17 +243,20 @@ def create_customer(payload: CustomerIn) -> CustomerOut:
 @router.get("/customers/{customer_id}", response_model=CustomerDetailOut)
 def get_customer(customer_id: int) -> CustomerDetailOut:
     with db_conn() as conn:
-        row = conn.execute(f"{_CUSTOMER_SELECT} WHERE c.id = ?", (customer_id,)).fetchone()
+        row = conn.execute(
+            f"{_CUSTOMER_SELECT} WHERE c.id = ? AND c.is_delete = 0", (customer_id,)
+        ).fetchone()
         if row is None:
             raise _not_found()
 
         deal_rows = conn.execute(
-            "SELECT * FROM deals WHERE customer_id = ? ORDER BY id DESC", (customer_id,)
+            "SELECT * FROM deals WHERE customer_id = ? AND is_delete = 0"
+            " ORDER BY id DESC", (customer_id,)
         ).fetchall()
         follow_rows = conn.execute(
             """
             SELECT id, customer_id, deal_id, content, next_date, created_at
-            FROM follow_ups WHERE customer_id = ?
+            FROM follow_ups WHERE customer_id = ? AND is_delete = 0
             ORDER BY created_at DESC, id DESC LIMIT ?
             """,
             (customer_id, _RECENT_FOLLOW_UPS_LIMIT),
@@ -238,11 +265,13 @@ def get_customer(customer_id: int) -> CustomerDetailOut:
 
     with db_conn() as conn:
         order_rows = conn.execute(
-            "SELECT id, order_no, amount, status, created_at FROM orders WHERE customer_id = ? ORDER BY id DESC",
+            "SELECT id, order_no, amount, status, created_at FROM orders"
+            " WHERE customer_id = ? AND is_delete = 0 ORDER BY id DESC",
             (customer_id,),
         ).fetchall()
         asale_rows = conn.execute(
-            "SELECT id, no, type, status, created_at FROM aftersales WHERE customer_id = ? ORDER BY id DESC",
+            "SELECT id, no, type, status, created_at FROM aftersales"
+            " WHERE customer_id = ? AND is_delete = 0 ORDER BY id DESC",
             (customer_id,),
         ).fetchall()
     out = _to_out(row, tags)
@@ -270,7 +299,7 @@ def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
 
     with db_conn() as conn:
         exists = conn.execute(
-            "SELECT 1 FROM customers WHERE id = ?", (customer_id,)
+            "SELECT 1 FROM customers WHERE id = ? AND is_delete = 0", (customer_id,)
         ).fetchone()
         if exists is None:
             raise _not_found()
@@ -285,7 +314,9 @@ def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
         if has_tags:
             _set_customer_tags(conn, customer_id, tags_payload or [])
 
-        row = conn.execute(f"{_CUSTOMER_SELECT} WHERE c.id = ?", (customer_id,)).fetchone()
+        row = conn.execute(
+            f"{_CUSTOMER_SELECT} WHERE c.id = ? AND c.is_delete = 0", (customer_id,)
+        ).fetchone()
         tags = _tags_for(conn, [customer_id]).get(customer_id, [])
 
     return _to_out(row, tags)
@@ -295,18 +326,32 @@ def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
 def delete_customer(customer_id: int) -> dict:
     """删客户。名下有订单/售后 → 409 customer_has_orders（计划 §2.6）。"""
     with db_conn() as conn:
-        if conn.execute("SELECT 1 FROM customers WHERE id = ?", (customer_id,)).fetchone() is None:
+        if conn.execute(
+            "SELECT 1 FROM customers WHERE id = ? AND is_delete = 0", (customer_id,)
+        ).fetchone() is None:
             raise _not_found()
         orders = conn.execute(
-            "SELECT COUNT(*) FROM orders WHERE customer_id = ?", (customer_id,)
+            "SELECT COUNT(*) FROM orders WHERE customer_id = ? AND is_delete = 0",
+            (customer_id,),
         ).fetchone()[0]
         afters = conn.execute(
-            "SELECT COUNT(*) FROM aftersales WHERE customer_id = ?", (customer_id,)
+            "SELECT COUNT(*) FROM aftersales WHERE customer_id = ? AND is_delete = 0",
+            (customer_id,),
         ).fetchone()[0]
         if orders or afters:
             raise ApiError(status_code=409, code="customer_has_orders",
                            message="客户名下存在订单或售后，不能删除")
-        conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        now = now_iso()
+        conn.execute(
+            "UPDATE customers SET is_delete = 1, updated_at = ?, update_time = ?"
+            " WHERE id = ?",
+            (now, now, customer_id),
+        )
+        for table in ("deals", "follow_ups", "customer_tags", "customer_addresses", "customer_contacts"):
+            conn.execute(
+                f"UPDATE {table} SET is_delete = 1, update_time = ? WHERE customer_id = ?",
+                (now, customer_id),
+            )
     return {"deleted": True}
 
 
@@ -314,20 +359,23 @@ def delete_customer(customer_id: int) -> dict:
 def get_customer_360(customer_id: int) -> CustomerDetailOut:
     """获取客户360度视图"""
     with db_conn() as conn:
-        row = conn.execute(f"{_CUSTOMER_SELECT} WHERE c.id = ?", (customer_id,)).fetchone()
+        row = conn.execute(
+            f"{_CUSTOMER_SELECT} WHERE c.id = ? AND c.is_delete = 0", (customer_id,)
+        ).fetchone()
         if row is None:
             raise _not_found()
         
         # 获取客户的所有商机
         deal_rows = conn.execute(
-            "SELECT * FROM deals WHERE customer_id = ? ORDER BY id DESC", (customer_id,)
+            "SELECT * FROM deals WHERE customer_id = ? AND is_delete = 0"
+            " ORDER BY id DESC", (customer_id,)
         ).fetchall()
         
         # 获取客户的所有跟进记录
         follow_rows = conn.execute(
             """
             SELECT id, customer_id, deal_id, content, next_date, created_at
-            FROM follow_ups WHERE customer_id = ?
+            FROM follow_ups WHERE customer_id = ? AND is_delete = 0
             ORDER BY created_at DESC, id DESC LIMIT ?
             """,
             (customer_id, _RECENT_FOLLOW_UPS_LIMIT),
@@ -337,11 +385,13 @@ def get_customer_360(customer_id: int) -> CustomerDetailOut:
     
     with db_conn() as conn:
         order_rows = conn.execute(
-            "SELECT id, order_no, amount, status, created_at FROM orders WHERE customer_id = ? ORDER BY id DESC",
+            "SELECT id, order_no, amount, status, created_at FROM orders"
+            " WHERE customer_id = ? AND is_delete = 0 ORDER BY id DESC",
             (customer_id,),
         ).fetchall()
         asale_rows = conn.execute(
-            "SELECT id, no, type, status, created_at FROM aftersales WHERE customer_id = ? ORDER BY id DESC",
+            "SELECT id, no, type, status, created_at FROM aftersales"
+            " WHERE customer_id = ? AND is_delete = 0 ORDER BY id DESC",
             (customer_id,),
         ).fetchall()
     out = _to_out(row, tags)

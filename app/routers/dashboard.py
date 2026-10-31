@@ -40,6 +40,7 @@ WITH latest AS (
          ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY datetime(created_at) DESC, id DESC) AS rn
     FROM follow_ups
    WHERE kind = 'follow'
+     AND is_delete = 0
      AND object_type IN ('customer', 'deal', 'lead')
      AND customer_id IS NOT NULL
      AND next_date IS NOT NULL AND TRIM(next_date) <> ''
@@ -65,6 +66,7 @@ _MONTH_WON_SQL = """
 SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
 FROM deals
 WHERE stage = 'won'
+  AND is_delete = 0
   AND strftime('%Y-%m', closed_at) = strftime('%Y-%m', 'now', 'localtime')
 """
 
@@ -72,13 +74,14 @@ WHERE stage = 'won'
 _ORDERS_BY_STATUS_SQL = """
 SELECT status, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
 FROM orders
+WHERE is_delete = 0
 GROUP BY status
 """
 
 #: 进行中商机（非 won/lost）
 _IN_PROGRESS_SQL = """
 SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
-  FROM deals WHERE stage NOT IN ('won','lost')
+  FROM deals WHERE stage NOT IN ('won','lost') AND is_delete = 0
 """
 
 #: 最近动态（跟进 + 订单事件，时间倒序 10 条）
@@ -87,13 +90,14 @@ SELECT at, type, customer_name, text FROM (
   SELECT f.created_at AS at, 'follow' AS type, COALESCE(c.name, '') AS customer_name,
          f.content AS text
     FROM follow_ups f LEFT JOIN customers c ON c.id = f.customer_id
-   WHERE f.kind = 'follow'
+   WHERE f.kind = 'follow' AND f.is_delete = 0
   UNION ALL
   SELECT l.created_at AS at, COALESCE(l.event_type, 'stage') AS type,
          COALESCE(c.name, '') AS customer_name, COALESCE(l.note, '') AS text
     FROM order_status_log l
     JOIN orders o ON o.id = l.order_id
     LEFT JOIN customers c ON c.id = o.customer_id
+   WHERE o.is_delete = 0
 )
 ORDER BY datetime(at) DESC
 LIMIT 10
@@ -104,6 +108,7 @@ _RECENT_ORDERS_SQL = """
 SELECT o.id, o.order_no, c.name AS customer_name, o.amount, o.status, o.created_at
 FROM orders o
 JOIN customers c ON c.id = o.customer_id
+WHERE o.is_delete = 0 AND c.is_delete = 0
 ORDER BY o.created_at DESC
 LIMIT 10
 """
@@ -117,6 +122,7 @@ FROM aftersales a
 JOIN orders o ON o.id = a.order_id
 JOIN customers c ON c.id = a.customer_id
 WHERE a.status = 'pending'
+  AND a.is_delete = 0 AND o.is_delete = 0 AND c.is_delete = 0
   AND julianday(date('now','localtime')) - julianday(date(a.created_at)) > 3
 ORDER BY a.created_at ASC
 """
@@ -134,20 +140,21 @@ def get_dashboard() -> DashboardOut:
         month_won = _month_won(conn)
 
         customers_total = conn.execute(
-            "SELECT COUNT(*) AS n FROM customers"
+            "SELECT COUNT(*) AS n FROM customers WHERE is_delete = 0"
         ).fetchone()["n"]
 
         # 阶段计数：所有阶段都给键（含 0），前端不用做兜底
         deals_by_stage = {stage: 0 for stage in STAGES}
         for row in conn.execute(
-            "SELECT stage, COUNT(*) AS n FROM deals GROUP BY stage"
+            "SELECT stage, COUNT(*) AS n FROM deals"
+            " WHERE is_delete = 0 GROUP BY stage"
         ).fetchall():
             deals_by_stage[row["stage"]] = row["n"]
 
         month_new_customers = conn.execute(
             """
             SELECT COUNT(*) AS n FROM customers
-            WHERE datetime(created_at, 'localtime')
+            WHERE is_delete = 0 AND datetime(created_at, 'localtime')
                   >= datetime('now', 'localtime', 'start of month')
             """
         ).fetchone()["n"]
@@ -155,7 +162,9 @@ def get_dashboard() -> DashboardOut:
         repeat_customers = conn.execute(
             """
             SELECT COUNT(*) AS n FROM (
-                SELECT customer_id FROM deals GROUP BY customer_id HAVING COUNT(*) >= 2
+                SELECT customer_id FROM deals
+                WHERE is_delete = 0
+                GROUP BY customer_id HAVING COUNT(*) >= 2
             )
             """
         ).fetchone()["n"]

@@ -26,7 +26,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -346,30 +346,27 @@ def _normalize_phone(raw: str | None) -> str:
     return re.sub(r"[\s\-()]+", "", str(raw or "").strip())
 
 
-def _normalize_wechat(raw: str | None) -> str:
-    """微信号按 ASCII 大小写不敏感处理。"""
-    return str(raw or "").strip().casefold()
-
-
-def _active_contacts(conn) -> tuple[set[str], set[str]]:
-    """线索池与客户档案里仍在用的联系方式，用于导入去重。"""
-    phones: set[str] = set()
-    wechats: set[str] = set()
+def _active_phones(conn) -> dict[str, dict]:
+    """数据库内未删除线索/客户的电话及简要信息；电话是导入唯一键。"""
     rows = conn.execute(
         """
-        SELECT phone, wechat FROM leads WHERE status IN ('new', 'following')
+        SELECT 'lead' AS object_type, id, name, phone FROM leads
+        WHERE is_delete = 0 AND phone IS NOT NULL AND TRIM(phone) <> ''
         UNION ALL
-        SELECT phone, wechat FROM customers
+        SELECT 'customer' AS object_type, id, name, phone FROM customers
+        WHERE is_delete = 0 AND phone IS NOT NULL AND TRIM(phone) <> ''
         """
     ).fetchall()
+    result: dict[str, dict] = {}
     for row in rows:
         phone = _normalize_phone(row["phone"])
-        wechat = _normalize_wechat(row["wechat"])
         if phone:
-            phones.add(phone)
-        if wechat:
-            wechats.add(wechat)
-    return phones, wechats
+            result[phone] = {
+                "id": row["id"],
+                "name": row["name"] or "未知",
+                "type": row["object_type"],
+            }
+    return result
 
 
 # ---------------- 路由 ----------------
@@ -413,6 +410,65 @@ async def preview_import(file: UploadFile = File(..., description="CSV 文件"))
         last_mapping=last_mapping,
         system_fields=SYSTEM_FIELDS,
         message="" if parsed.rows else "文件里只有表头，没有数据行",
+    )
+
+
+def _template_cell(value: str | None) -> str:
+    return '="' + str(value or "").replace('"', '""') + '"'
+
+
+@router.get("/import/leads-template")
+def download_leads_template() -> Response:
+    """每次请求实时读取数据字典并生成线索导入模板。"""
+    source_labels = [
+        str(item.get("label") or item.get("key") or "").strip()
+        for item in _source_records()
+    ]
+    source_labels = [label for label in source_labels if label]
+    allowed = "、".join(source_labels) or "请先在数据字典添加客户来源"
+    first_source = source_labels[0] if source_labels else ""
+    third_source = source_labels[2] if len(source_labels) > 2 else first_source
+    rows = [
+        ["姓名", "电话", "微信", "地区", "来源", "备注"],
+        [
+            "张三",
+            "13800000000",
+            "zhangsan",
+            "济南·历下区",
+            first_source,
+            "示例行，填真数据前删掉。来源只能填写：" + allowed,
+        ],
+        [
+            "某某装饰公司",
+            "0531-88888888",
+            "abc888",
+            "青岛·崂山区",
+            third_source,
+            "来源必须与数据字典完全一致，不能自行填写",
+        ],
+        [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "填写说明：来源只能填写 " + allowed + "。本行姓名为空，导入时会自动跳过。",
+        ],
+    ]
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\r\n")
+    writer.writerows([[_template_cell(cell) for cell in row] for row in rows])
+    content = "\ufeff" + output.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="leads-import-template.csv"; '
+                "filename*=UTF-8''%E5%AE%A2%E6%88%B7%E5%AF%BC%E5%85%A5%E6%A8%A1%E6%9D%BF.csv"
+            ),
+            "Cache-Control": "no-store, max-age=0",
+        },
     )
 
 
@@ -509,7 +565,6 @@ async def commit_import(request: Request) -> ImportCommitOut:
         now = now_iso()
         imported = 0
         skipped = 0
-        duplicate_count = 0
 
         if target == "leads":
             if "source" not in field_index:
@@ -545,11 +600,32 @@ async def commit_import(request: Request) -> ImportCommitOut:
                 if source_key and (phone or wechat):
                     validated_rows.append((row_number, values, source_key))
 
+            existing_phones = _active_phones(conn)
+            seen_phones: dict[str, int] = {}
+            for row_number, values, _source_key in validated_rows:
+                phone_key = _normalize_phone(values.get("phone"))
+                if not phone_key:
+                    continue
+                values["phone"] = phone_key
+                if phone_key in existing_phones:
+                    existing = existing_phones[phone_key]
+                    issues.append(
+                        f"第 {row_number} 行电话「{phone_key}」与已有记录"
+                        f"「{existing['name']}」重复"
+                    )
+                elif phone_key in seen_phones:
+                    issues.append(
+                        f"第 {row_number} 行电话「{phone_key}」与"
+                        f"第 {seen_phones[phone_key]} 行重复"
+                    )
+                else:
+                    seen_phones[phone_key] = row_number
+
             if issues:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "导入校验未通过："
+                        "导入失败："
                         + "；".join(issues[:20])
                         + (f"（另有 {len(issues) - 20} 个问题）" if len(issues) > 20 else "")
                         + "。来源只能填写数据字典中的值："
@@ -557,22 +633,9 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     ),
                 )
 
-            existing_phones, existing_wechats = _active_contacts(conn)
-            seen_phones: set[str] = set()
-            seen_wechats: set[str] = set()
             from app.timeline import add_entry as _add_entry
 
             for _row_number, values, source_key in validated_rows:
-                phone_key = _normalize_phone(values.get("phone"))
-                wechat_key = _normalize_wechat(values.get("wechat"))
-                duplicate = (
-                    (phone_key and (phone_key in existing_phones or phone_key in seen_phones))
-                    or (wechat_key and (wechat_key in existing_wechats or wechat_key in seen_wechats))
-                )
-                if duplicate:
-                    duplicate_count += 1
-                    continue
-
                 cur = conn.execute(
                     """
                     INSERT INTO leads (name, phone, wechat, location, note, lead_type, source,
@@ -599,10 +662,6 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     content="导入线索：" + values["name"],
                     created_at=now,
                 )
-                if phone_key:
-                    seen_phones.add(phone_key)
-                if wechat_key:
-                    seen_wechats.add(wechat_key)
                 imported += 1
         else:
             source_records = _source_records()
@@ -660,7 +719,6 @@ async def commit_import(request: Request) -> ImportCommitOut:
         ok=True,
         imported=imported,
         skipped=skipped,
-        duplicate_count=duplicate_count,
         total_rows=len(parsed.rows),
         import_log_id=import_log_id,
         mapping_used=mapping,

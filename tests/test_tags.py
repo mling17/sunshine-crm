@@ -106,7 +106,8 @@ class TagsTest(ApiTestCase):
                 r["name"]
                 for r in conn.execute(
                     """SELECT t.name FROM customer_tags ct JOIN tags t ON t.id = ct.tag_id
-                       WHERE ct.customer_id = ? ORDER BY t.name""",
+                       WHERE ct.customer_id = ? AND ct.is_delete = 0
+                       ORDER BY t.name""",
                     (a["id"],),
                 )
             ]
@@ -134,10 +135,18 @@ class TagsTest(ApiTestCase):
         self.assertEqual(self.client.delete(f"/api/crm/customers/{a['id']}").status_code, 200)
         with db_conn() as conn:
             left = conn.execute(
-                "SELECT COUNT(*) AS n FROM customer_tags WHERE customer_id = ?", (a["id"],)
+                "SELECT COUNT(*) AS n FROM customer_tags"
+                " WHERE customer_id = ? AND is_delete = 0",
+                (a["id"],),
+            ).fetchone()["n"]
+            tombstones = conn.execute(
+                "SELECT COUNT(*) AS n FROM customer_tags"
+                " WHERE customer_id = ? AND is_delete = 1",
+                (a["id"],),
             ).fetchone()["n"]
             tag_rows = conn.execute("SELECT COUNT(*) AS n FROM tags").fetchone()["n"]
         self.assertEqual(left, 0, "删客户必须级联清 customer_tags")
+        self.assertGreater(tombstones, 0, "删客户必须保留软删除标记")
         self.assertEqual(tag_rows, 1, "标签字典不能被连带删掉")
         self.assertEqual(
             self.client.get("/api/crm/customers", params={"tag": "重点"}).json()["total"], 1

@@ -326,6 +326,33 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(body["invalid_reason"], "other")
         self.assertEqual(body["invalid_reason_other"], "客户不愿意合作")
 
+    def test_only_invalid_lead_can_be_soft_deleted(self):
+        lead = self.create_lead(phone="13800138000")
+        blocked = self.client.delete(f"/api/crm/leads/{lead['id']}")
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertEqual(blocked.json()["code"], "lead_not_invalid")
+
+        invalidated = self.client.post(
+            f"/api/crm/leads/{lead['id']}/invalidate",
+            json={"invalid_reason": "no_intent"},
+        )
+        self.assertEqual(invalidated.status_code, 200, invalidated.text)
+        deleted = self.client.delete(f"/api/crm/leads/{lead['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(self.client.get(f"/api/crm/leads/{lead['id']}").status_code, 404)
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT is_delete, create_time, update_time FROM leads WHERE id = ?",
+                (lead["id"],),
+            ).fetchone()
+        self.assertEqual(row["is_delete"], 1)
+        self.assertTrue(row["create_time"])
+        self.assertTrue(row["update_time"])
+
+        # 软删除释放电话唯一键，可以重新建一条有效线索。
+        recreated = self.create_lead(name="重新录入", phone="13800138000")
+        self.assertEqual(recreated["phone"], "13800138000")
+
     def test_invalidate_lead_missing_reason_400(self):
         lead = self.create_lead(phone="13800138000")
         resp = self.client.post(f"/api/crm/leads/{lead['id']}/invalidate", json={})
@@ -392,16 +419,12 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(resp["duplicate_hint"]["object_id"], customer["id"])
         self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 0)
 
-    def test_create_lead_duplicate_wechat(self):
-        # 创建一个客户
-        customer = self.create_customer(wechat="wechat123")
-        
-        # 创建线索时检测到重复微信
+    def test_create_lead_allows_same_wechat_because_phone_is_unique_key(self):
+        self.create_customer(wechat="wechat123")
         resp = self.create_lead(phone=None, wechat="WECHAT123")
-        self.assertEqual(resp["code"], "duplicate_contact")
-        self.assertEqual(resp["duplicate_hint"]["object_type"], "customer")
-        self.assertEqual(resp["duplicate_hint"]["object_id"], customer["id"])
-        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 0)
+        self.assertEqual(resp["status"], "new")
+        self.assertIsNone(resp["phone"])
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 1)
 
     # ---------- 跟进兼容性 ----------
     def test_v1_follow_up_compatibility(self):

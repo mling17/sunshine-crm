@@ -1980,6 +1980,15 @@ table.data-table a:hover { text-decoration: underline; }
   color: #334b6c;
   line-height: 1.65;
 }
+.danger-notice {
+  margin-bottom: 14px;
+  padding: 12px 13px;
+  border: 1px solid #f2cccc;
+  border-radius: 10px;
+  background: #fff5f5;
+  color: #8f2727;
+  line-height: 1.65;
+}
 
 .toast {
   top: 76px;

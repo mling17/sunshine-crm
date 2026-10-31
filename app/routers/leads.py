@@ -37,10 +37,6 @@ def _normalize_phone(raw: str | None) -> str:
     return "".join(ch for ch in str(raw or "") if ch not in " -()").strip()
 
 
-def _normalize_wechat(raw: str | None) -> str:
-    return str(raw or "").strip().casefold()
-
-
 def _source_allowed(key: str) -> bool:
     """来源是否合法：**以数据字典 customer_source 为准**（A 级，用户可自由增删）。
 
@@ -74,14 +70,16 @@ def _fetch_lead(conn, lead_id: int) -> LeadOut:
                source_other, location, note, intent_level, status,
                invalid_reason, invalid_reason_other, converted_customer_id,
                converted_deal_id, owner, created_at, updated_at
-        FROM leads WHERE id = ?
+        FROM leads WHERE id = ? AND is_delete = 0
         """,
         (lead_id,),
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="线索不存在")
     tag_rows = conn.execute(
-        "SELECT t.name FROM tags t JOIN lead_tags lt ON t.id = lt.tag_id WHERE lt.lead_id = ? ORDER BY t.id",
+        "SELECT t.name FROM tags t JOIN lead_tags lt ON t.id = lt.tag_id"
+        " WHERE lt.lead_id = ? AND lt.is_delete = 0 AND t.is_delete = 0"
+        " ORDER BY t.id",
         (lead_id,),
     ).fetchall()
     data = dict(row)
@@ -96,7 +94,7 @@ def _fetch_lead_detail(conn, lead_id: int) -> LeadDetailOut:
                source_other, location, note, intent_level, status,
                invalid_reason, invalid_reason_other, converted_customer_id,
                converted_deal_id, owner, created_at, updated_at
-        FROM leads WHERE id = ?
+        FROM leads WHERE id = ? AND is_delete = 0
         """,
         (lead_id,),
     ).fetchone()
@@ -108,7 +106,7 @@ def _fetch_lead_detail(conn, lead_id: int) -> LeadDetailOut:
         """
         SELECT t.name FROM tags t
         JOIN lead_tags lt ON t.id = lt.tag_id
-        WHERE lt.lead_id = ?
+        WHERE lt.lead_id = ? AND lt.is_delete = 0 AND t.is_delete = 0
         """,
         (lead_id,),
     ).fetchall()
@@ -119,7 +117,7 @@ def _fetch_lead_detail(conn, lead_id: int) -> LeadDetailOut:
         """
         SELECT fu.id, fu.customer_id, fu.deal_id, fu.content, fu.next_date, fu.created_at
         FROM follow_ups fu
-        WHERE fu.object_type = 'lead' AND fu.object_id = ?
+        WHERE fu.object_type = 'lead' AND fu.object_id = ? AND fu.is_delete = 0
         ORDER BY fu.created_at DESC
         """,
         (lead_id,),
@@ -149,7 +147,7 @@ def list_leads(
     ),
 ) -> LeadListOut:
     """线索列表。"""
-    where_parts: list[str] = []
+    where_parts: list[str] = ["l.is_delete = 0"]
     params: list[object] = []
     
     if status is not None:
@@ -197,10 +195,12 @@ def list_leads(
                    l.invalid_reason, l.invalid_reason_other, l.converted_customer_id,
                    l.converted_deal_id, l.owner, l.created_at, l.updated_at,
                    (SELECT MAX(f.created_at) FROM follow_ups f
-                     WHERE f.object_type='lead' AND f.object_id=l.id AND f.kind='follow')
+                     WHERE f.object_type='lead' AND f.object_id=l.id
+                       AND f.kind='follow' AND f.is_delete=0)
                      AS last_follow_at,
                    (SELECT f.next_date FROM follow_ups f
-                     WHERE f.object_type='lead' AND f.object_id=l.id AND f.kind='follow'
+                     WHERE f.object_type='lead' AND f.object_id=l.id
+                       AND f.kind='follow' AND f.is_delete=0
                      ORDER BY datetime(f.created_at) DESC, f.id DESC LIMIT 1) AS next_date
             FROM leads l {where_sql}
             ORDER BY created_at DESC
@@ -222,6 +222,7 @@ def list_leads(
                 SELECT lt.lead_id, t.name FROM lead_tags lt
                 JOIN tags t ON t.id = lt.tag_id
                 WHERE lt.lead_id IN ({placeholders})
+                  AND lt.is_delete = 0 AND t.is_delete = 0
                 ORDER BY t.id
                 """,
                 lead_ids,
@@ -257,32 +258,27 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
         # 检查是否有重复线索或客户（Q6）
         duplicate_hint = None
         phone_key = _normalize_phone(lead_in.phone)
-        wechat_key = _normalize_wechat(lead_in.wechat)
         candidates = [
             {"object_type": "lead", **dict(row)}
             for row in conn.execute(
-                "SELECT id, name, phone, wechat FROM leads"
-                " WHERE status IN ('new', 'following')"
+                "SELECT id, name, phone FROM leads"
+                " WHERE is_delete = 0"
             ).fetchall()
         ] + [
             {"object_type": "customer", **dict(row)}
             for row in conn.execute(
-                "SELECT id, name, phone, wechat FROM customers"
+                "SELECT id, name, phone FROM customers WHERE is_delete = 0"
             ).fetchall()
         ]
         for candidate in candidates:
             phone_match = phone_key and phone_key == _normalize_phone(candidate["phone"])
-            wechat_match = wechat_key and wechat_key == _normalize_wechat(candidate["wechat"])
-            if phone_match or wechat_match:
+            if phone_match:
                 duplicate_hint = {
                     "object_type": candidate["object_type"],
                     "object_id": candidate["id"],
                     "name": candidate["name"] or "未知",
+                    "phone": phone_key,
                 }
-                if phone_match:
-                    duplicate_hint["phone"] = lead_in.phone
-                if wechat_match:
-                    duplicate_hint["wechat"] = lead_in.wechat
                 break
 
         if duplicate_hint:
@@ -303,7 +299,7 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
             """,
             (
                 lead_in.name,
-                lead_in.phone,
+                phone_key or None,
                 lead_in.wechat,
                 lead_in.lead_type,
                 lead_in.company_name,
@@ -335,11 +331,17 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
                     )
                     tag_id = int(cur.lastrowid or 0)
                 else:
+                    conn.execute(
+                        "UPDATE tags SET is_delete = 0, update_time = ? WHERE id = ?",
+                        (now_iso(), tag_row["id"]),
+                    )
                     tag_id = tag_row["id"]
                 
                 # 关联标签
                 conn.execute(
-                    "INSERT OR IGNORE INTO lead_tags (lead_id, tag_id) VALUES (?, ?)",
+                    "INSERT INTO lead_tags (lead_id, tag_id) VALUES (?, ?)"
+                    " ON CONFLICT(lead_id, tag_id) DO UPDATE SET"
+                    " is_delete = 0, update_time = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
                     (lead_id, tag_id),
                 )
         
@@ -368,7 +370,8 @@ def convert_check(phone: str | None = None, wechat: str | None = None) -> LeadCo
         if phone:
             # 检查线索
             lead_rows = conn.execute(
-                "SELECT id, name FROM leads WHERE phone = ?",
+                "SELECT id, name FROM leads"
+                " WHERE phone = ? AND is_delete = 0",
                 (phone,),
             ).fetchall()
             for row in lead_rows:
@@ -394,7 +397,8 @@ def convert_check(phone: str | None = None, wechat: str | None = None) -> LeadCo
         if wechat:
             # 检查线索
             lead_rows = conn.execute(
-                "SELECT id, name FROM leads WHERE wechat = ?",
+                "SELECT id, name FROM leads"
+                " WHERE wechat = ? AND is_delete = 0",
                 (wechat,),
             ).fetchall()
             for row in lead_rows:
@@ -435,7 +439,7 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
             """
             SELECT status, name, phone, wechat, lead_type, company_name,
                    source, source_other, location, note, intent_level
-            FROM leads WHERE id = ?
+            FROM leads WHERE id = ? AND is_delete = 0
             """,
             (lead_id,),
         ).fetchone()
@@ -472,10 +476,32 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
         ]
         for field, label in field_map:
             value = getattr(lead_update, field)
+            if field == "phone" and value is not None:
+                value = _normalize_phone(value) or None
             if value is not None and value != lead[field]:
                 updates.append(f"{field} = ?")
                 params.append(value)
                 changed.append(label)
+
+                if field == "phone" and value:
+                    conflicts = [
+                        dict(row) for row in conn.execute(
+                            "SELECT id, name, phone FROM leads"
+                            " WHERE id <> ? AND is_delete = 0",
+                            (lead_id,),
+                        ).fetchall()
+                    ] + [
+                        dict(row) for row in conn.execute(
+                            "SELECT id, name, phone FROM customers"
+                            " WHERE is_delete = 0"
+                        ).fetchall()
+                    ]
+                    if any(_normalize_phone(row["phone"]) == value for row in conflicts):
+                        raise ApiError(
+                            status_code=409,
+                            code="duplicate_phone",
+                            message=f"电话 {value} 已被其它线索或客户使用",
+                        )
 
         tags_changed = (
             lead_update.tags is not None
@@ -504,7 +530,11 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
             # 处理标签更新
             if lead_update.tags is not None:
                 # 删除现有标签
-                conn.execute("DELETE FROM lead_tags WHERE lead_id = ?", (lead_id,))
+                conn.execute(
+                    "UPDATE lead_tags SET is_delete = 1, update_time = ?"
+                    " WHERE lead_id = ?",
+                    (now_iso(), lead_id),
+                )
                 
                 # 添加新标签
                 if lead_update.tags:
@@ -521,11 +551,17 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
                             )
                             tag_id = int(cur.lastrowid or 0)
                         else:
+                            conn.execute(
+                                "UPDATE tags SET is_delete = 0, update_time = ? WHERE id = ?",
+                                (now_iso(), tag_row["id"]),
+                            )
                             tag_id = tag_row["id"]
                         
                         # 关联标签
                         conn.execute(
-                            "INSERT OR IGNORE INTO lead_tags (lead_id, tag_id) VALUES (?, ?)",
+                            "INSERT INTO lead_tags (lead_id, tag_id) VALUES (?, ?)"
+                            " ON CONFLICT(lead_id, tag_id) DO UPDATE SET"
+                            " is_delete = 0, update_time = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
                             (lead_id, tag_id),
                         )
         
@@ -552,7 +588,7 @@ def invalidate_lead(lead_id: int, reason: dict) -> LeadOut:
     with db_conn() as conn:
         # 检查线索是否存在
         lead = conn.execute(
-            "SELECT status FROM leads WHERE id = ?",
+            "SELECT status FROM leads WHERE id = ? AND is_delete = 0",
             (lead_id,),
         ).fetchone()
         if lead is None:
@@ -591,3 +627,32 @@ def convert_lead_endpoint(lead_id: int, convert_in: LeadConvertIn) -> LeadConver
     """线索转化。"""
     with db_conn() as conn:
         return convert_lead(conn, lead_id, convert_in)
+
+
+@router.delete("/leads/{lead_id}")
+def delete_lead(lead_id: int) -> dict:
+    """线索只能软删除；只有已失效线索允许删除。"""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT status FROM leads WHERE id = ? AND is_delete = 0",
+            (lead_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="线索不存在")
+        if row["status"] != "invalid":
+            raise ApiError(
+                status_code=409,
+                code="lead_not_invalid",
+                message="只有已失效的线索才能删除",
+            )
+        now = now_iso()
+        conn.execute(
+            "UPDATE leads SET is_delete = 1, updated_at = ?, update_time = ?"
+            " WHERE id = ?",
+            (now, now, lead_id),
+        )
+        conn.execute(
+            "UPDATE lead_tags SET is_delete = 1, update_time = ? WHERE lead_id = ?",
+            (now, lead_id),
+        )
+    return {"ok": True, "id": lead_id, "deleted": True}

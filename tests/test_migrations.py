@@ -83,6 +83,71 @@ class TestMigrations(unittest.TestCase):
             self.assertEqual(_rows(self.db, t), 0, f"Q2：{t} 应被清空")
         self.assertEqual(_rows(self.db, "users"), 1, "Q2：users 必须保留")
 
+    def test_every_table_has_standard_audit_and_soft_delete_columns(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            tables = [
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master"
+                    " WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                )
+            ]
+            for table in tables:
+                columns = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+                }
+                self.assertTrue(
+                    {"create_time", "update_time", "is_delete"} <= columns,
+                    f"{table} 缺标准列：{columns}",
+                )
+            index = conn.execute(
+                "SELECT 1 FROM sqlite_master"
+                " WHERE type = 'index' AND name = 'uq_leads_phone_active'"
+            ).fetchone()
+            self.assertIsNotNone(index, "线索电话必须建立未删除记录唯一索引")
+        finally:
+            conn.close()
+
+    def test_standard_timestamps_are_filled_by_trigger(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            conn.execute(
+                "INSERT INTO tags (name, created_at)"
+                " VALUES ('标准字段', '2026-10-31T00:00:00Z')"
+            )
+            row = conn.execute(
+                "SELECT create_time, update_time, is_delete FROM tags"
+                " WHERE name = '标准字段'"
+            ).fetchone()
+        finally:
+            conn.commit()
+            conn.close()
+        self.assertTrue(row[0])
+        self.assertTrue(row[1])
+        self.assertEqual(row[2], 0)
+
+    def test_database_enforces_unique_active_lead_phone(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-10-31T00:00:00Z"
+        try:
+            conn.execute(
+                "INSERT INTO leads (name, phone, source, status, created_at, updated_at)"
+                " VALUES ('电话一','13800138000','wechat','new',?,?)",
+                (now, now),
+            )
+            conn.commit()
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO leads (name, phone, source, status, created_at, updated_at)"
+                    " VALUES ('电话二','13800138000','wechat','new',?,?)",
+                    (now, now),
+                )
+        finally:
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -142,6 +142,7 @@ function loadLeads(root) {
                 var ops = [];
                 if (l.status === 'invalid') {
                     ops.push({ op: 'follow', arg: l.id, label: '查看' });
+                    ops.push({ op: 'delete', arg: l.id, label: '删除', danger: true });
                     ops.push({ op: 'toDeal', arg: l.id, label: '转商机', disabled: true, tip: '已失效线索不能转商机' });
                 } else {
                     ops.push({ op: 'edit', arg: l.id, label: '编辑' });
@@ -164,6 +165,7 @@ function loadLeads(root) {
         bindOps(root, {
             edit: function (id) { return openLeadEdit(id, root); },
             follow: function (id) { navigate('#/leads/' + id + '/follow'); },
+            delete: function (id) { return openLeadDeleteConfirm(id); },
             toDeal: function (id) {
                 api('/leads/' + id).then(function (l) { openLeadDealModal(l); })
                     .catch(function (err) { toast(err.message, true); });
@@ -376,7 +378,8 @@ function viewLeadDetail(root, rawId) {
                 actions += '<a class="btn btn-sm" href="#/customers/' + l.converted_customer_id + '">看客户档案 ›</a>';
             }
         } else if (invalid) {
-            actions += '<button type="button" class="btn btn-sm" disabled title="已失效线索不能转商机">转商机</button>';
+            actions += '<button type="button" class="btn btn-sm btn-danger" id="deleteLeadBtn">删除线索</button>' +
+                '<button type="button" class="btn btn-sm" disabled title="已失效线索不能转商机">转商机</button>';
         } else {
             actions += '<button type="button" class="btn btn-sm" id="leadEditBtn">编辑线索</button>' +
                 '<button type="button" class="btn btn-sm btn-primary" id="leadToDealBtn">转商机</button>' +
@@ -428,6 +431,8 @@ function viewLeadDetail(root, rawId) {
         if (toDealBtn) { toDealBtn.addEventListener('click', function () { openLeadDealModal(l); }); }
         var invBtn = $('#invalidateBtn', root);
         if (invBtn) { invBtn.addEventListener('click', function () { invalidateLead(l.id); }); }
+        var deleteBtn = $('#deleteLeadBtn', root);
+        if (deleteBtn) { deleteBtn.addEventListener('click', function () { openLeadDeleteConfirm(l.id); }); }
     });
 }
 
@@ -598,6 +603,49 @@ function invalidateLead(leadId) {
     });
 }
 
+function openLeadDeleteConfirm(leadId) {
+    api('/leads/' + leadId).then(function (lead) {
+        var name = lead.name || lead.company_name || ('线索 #' + lead.id);
+        var modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML =
+            '<div class="modal-overlay"></div>' +
+            '<div class="modal-content">' +
+            '<div class="modal-header"><h3>删除线索</h3>' +
+            '<button type="button" class="btn btn-link modal-close">×</button></div>' +
+            '<div class="modal-body">' +
+            '<div class="notice danger-notice">即将删除已失效线索「' + esc(name) +
+            '」。数据会标记为已删除，不再出现在线索池，但可由管理员从数据库追溯。</div>' +
+            '<div class="form-actions">' +
+            '<button type="button" class="btn modal-cancel">取消</button>' +
+            '<button type="button" class="btn btn-danger" id="confirmLeadDelete">确认删除</button>' +
+            '</div></div></div>';
+        document.body.appendChild(modal);
+
+        function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
+        modal.querySelector('.modal-close').addEventListener('click', close);
+        modal.querySelector('.modal-cancel').addEventListener('click', close);
+        modal.querySelector('#confirmLeadDelete').addEventListener('click', function () {
+            var btn = modal.querySelector('#confirmLeadDelete');
+            btn.disabled = true;
+            api('/leads/' + lead.id, { method: 'DELETE' }).then(function () {
+                close();
+                toast('线索已删除');
+                state.filters.q = '';
+                state.filters.status = 'invalid';
+                state.filters.page = 1;
+                if (location.hash === '#/leads') { render(); }
+                else { navigate('#/leads'); }
+            }).catch(function (err) {
+                btn.disabled = false;
+                toast(err.message, true);
+            });
+        });
+    }).catch(function (err) {
+        toast(err.message, true);
+    });
+}
+
 // 显示去重提示弹层
 function showDuplicateHintModal(hint) {
     var modal = document.createElement('div');
@@ -646,43 +694,32 @@ var IMPORT_FIELDS_FALLBACK = [
     { key: 'note', label: '备注', required: false }
 ];
 
-/* 生成并下载 CSV 模板（纯前端 Blob，不请求后端）
- * 2026-10-31 用户要求：
- *   1) 模板里加「来源」列（值可填数据字典里的名称，如 微信 / 抖音 / 转介绍）
- *   2) **所有单元格都是文本**：每个值都写成 ="内容"，Excel 打开后手机号不会被当数字
- *      变成 1.38E+10，日期也不会被自动改写。后端 csvimport 解析时会剥掉 ="..." 外壳。
- */
-function leadTemplateCell(v) {
-    return '="' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
-}
-
+/* 模板必须由后端在每次点击时实时读取数据字典并生成，避免页面缓存造成来源过期。 */
 function downloadLeadTemplate() {
-    var header = ['姓名', '电话', '微信', '地区', '来源', '备注'];
-    var sourceLabels = dictItems('customer_source').map(function (item) {
-        return String(item.label || item.key || '').trim();
-    }).filter(Boolean);
-    var allowed = sourceLabels.join('、') || '请先在数据字典里添加客户来源';
-    var firstSource = sourceLabels[0] || '';
-    var thirdSource = sourceLabels[2] || firstSource;
-    var rows = [
-        ['张三', '13800000000', 'zhangsan', '济南·历下区', firstSource,
-            '示例行，填真数据前删掉。来源只能填写：' + allowed],
-        ['某某装饰公司', '0531-88888888', 'abc888', '青岛·崂山区', thirdSource,
-            '来源必须与数据字典完全一致，不能自行填写'],
-        ['', '', '', '', '', '填写说明：来源只能填写 ' + allowed + '。本行姓名为空，导入时会自动跳过。']
-    ];
-    var csv = '\ufeff' + [header].concat(rows).map(function (r) {
-        return r.map(leadTemplateCell).join(',');
-    }).join('\r\n');
-    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = '客户导入模板.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-    toast('模板已下载（全文本格式，手机号不会变成科学计数）');
+    toast('正在按最新数据字典生成模板…');
+    fetch(API_BASE + '/import/leads-template', {
+        credentials: 'include',
+        cache: 'no-store'
+    }).then(function (res) {
+        if (!res.ok) {
+            return res.json().catch(function () { return {}; }).then(function (data) {
+                throw new Error((data && data.detail) || '模板生成失败');
+            });
+        }
+        return res.blob();
+    }).then(function (blob) {
+        var a = document.createElement('a');
+        var url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = '客户导入模板.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        toast('模板已按当前数据字典生成');
+    }).catch(function (err) {
+        toast(err.message || '模板生成失败', true);
+    });
 }
 
 /* 列映射 + 前 5 行预览（字段列表用后端返回的 system_fields，缺省回退硬编码） */
@@ -743,7 +780,7 @@ function openLeadImportModal(root) {
         '<li>上传 → 核对列映射和前 5 行 → 确认导入（写进「线索池」）</li>' +
         '</ol>' +
         '<div class="notice source-guide"><b>来源只能填写：</b>' + esc(sourceText) +
-        '<br><span class="small muted">请严格使用数据字典中的名称；电话或微信相同的记录会自动去重。</span></div>' +
+        '<br><span class="small muted">电话是唯一字段；文件内或数据库中电话重复时整批导入失败。来源不一致也会失败。</span></div>' +
         '<div class="field"><label>选择 CSV 文件</label>' +
         '<input type="file" id="impFileEl" accept=".csv,text/csv"></div>' +
         '<div id="impPreview"></div>' +
@@ -835,13 +872,14 @@ function openLeadImportModal(root) {
             state.filters.status = '';
             state.filters.page = 1;
             var summary = '导入完成：成功 ' + res.imported + ' 行';
-            if (res.duplicate_count) { summary += '，重复跳过 ' + res.duplicate_count + ' 行'; }
             if (res.skipped) { summary += '，空姓名跳过 ' + res.skipped + ' 行'; }
             toast(summary);
             if (location.hash === '#/leads') { render(); }
             else { navigate('#/leads'); }
         }).catch(function (err) {
-            toast(err.message, true);
+            var message = err.message || '导入失败';
+            previewEl.innerHTML = '<div class="notice danger-notice">' + esc(message) + '</div>';
+            toast('导入失败，请按校验信息修正文件', true);
             goBtn.textContent = '导入到线索池';
             goBtn.disabled = false;
         });

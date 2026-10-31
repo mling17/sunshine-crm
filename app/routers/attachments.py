@@ -31,7 +31,8 @@ def get_attachment(
 ) -> FileResponse:
     with db_conn() as conn:
         row = conn.execute(
-            "SELECT storage_key, file_name, mime_type FROM attachments WHERE id = ?",
+            "SELECT storage_key, file_name, mime_type FROM attachments"
+            " WHERE id = ? AND is_delete = 0",
             (attachment_id,),
         ).fetchone()
 
