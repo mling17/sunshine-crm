@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import unittest
+from io import BytesIO
 from pathlib import Path
+
+from openpyxl import load_workbook
 
 from tests._util import ApiTestCase
 
@@ -19,6 +22,15 @@ class TestProducts(ApiTestCase):
             / "product_forms"
             / f"{code}.xlsx"
         ).read_bytes()
+
+    @classmethod
+    def unique_form_bytes(cls, title: str) -> bytes:
+        workbook = load_workbook(BytesIO(cls.form_bytes()), data_only=False)
+        workbook.worksheets[0]["A1"] = title
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+        return output.getvalue()
 
     def create_product(self, **overrides) -> dict:
         body = {
@@ -88,7 +100,8 @@ class TestProducts(ApiTestCase):
 
     def test_create_search_update_and_deactivate_product(self):
         product = self.create_product()
-        self.assertEqual(product["code"], "TS-TEST-001")
+        self.assertRegex(product["code"], r"^TS-\d{3,}$")
+        self.assertNotEqual(product["code"], "TS-TEST-001")
         self.assertEqual(product["config_summary"].count("电动纱窗"), 1)
         self.assertTrue(product["form_available"])
 
@@ -106,18 +119,14 @@ class TestProducts(ApiTestCase):
         active = self.client.get("/api/crm/products", params={"is_active": 1}).json()
         self.assertNotIn(product["id"], [p["id"] for p in active])
 
-    def test_duplicate_code_and_invalid_dimensions_are_rejected(self):
+    def test_payload_code_is_ignored_and_invalid_dimensions_are_rejected(self):
         product = self.create_product()
-        duplicate = self.client.post(
-            "/api/crm/products",
-            data={"payload": json.dumps(
-                {"code": product["code"], "name": "重复编码", "category": "天窗"},
-                ensure_ascii=False,
-            )},
-            files={"form_file": ("duplicate.xlsx", self.form_bytes(), "application/octet-stream")},
+        second = self.create_product(
+            code=product["code"],
+            name="仍然自动编号的产品",
         )
-        self.assertEqual(duplicate.status_code, 409)
-        self.assertEqual(duplicate.json()["code"], "product_code_exists")
+        self.assertNotEqual(second["code"], product["code"])
+        self.assertRegex(second["code"], r"^TS-\d{3,}$")
 
         invalid = self.client.post(
             "/api/crm/products",
@@ -135,6 +144,71 @@ class TestProducts(ApiTestCase):
         )
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(invalid.json()["code"], "invalid_dimension_range")
+
+    def test_import_preview_infers_product_fields_from_order_form(self):
+        form = self.unique_form_bytes(
+            "95型平起电动3扇联排天窗下单表-带电动纱窗、金刚网"
+        )
+        resp = self.client.post(
+            "/api/crm/products/import-preview",
+            files={
+                "form_file": (
+                    "95型平起电动3扇联排下单表.xlsx",
+                    form,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        preview = resp.json()
+        self.assertRegex(preview["code"], r"^TS-124$")
+        self.assertIsNone(preview["duplicate_product_code"])
+        self.assertEqual(preview["name"], "95型平起电动3扇联排天窗下单表-带电动纱窗、金刚网")
+        self.assertEqual(preview["series"], "95型")
+        self.assertEqual(preview["structure"], "平起")
+        self.assertEqual(preview["opening_mode"], "联排")
+        self.assertEqual(preview["drive_type"], "electric")
+        self.assertEqual(preview["leaf_count"], 3)
+        self.assertEqual(preview["attributes"]["screen"], "电动纱窗")
+        self.assertEqual(preview["attributes"]["mesh"], "金刚网")
+        self.assertIn("95型", preview["config_summary"])
+
+    def test_import_form_creates_product_with_generated_code_and_archive(self):
+        form = self.unique_form_bytes(
+            "140型嵌入电动4扇联排天窗下单表-带电动纱窗"
+        )
+        resp = self.client.post(
+            "/api/crm/products/import-form",
+            files={
+                "form_file": (
+                    "新品140型嵌入4扇.xlsx",
+                    form,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        product = resp.json()
+        self.assertRegex(product["code"], r"^TS-124$")
+        self.assertEqual(product["series"], "140型")
+        self.assertEqual(product["structure"], "嵌入")
+        self.assertEqual(product["leaf_count"], 4)
+        self.assertEqual(product["attributes"]["screen"], "电动纱窗")
+        self.assertTrue(product["form_available"])
+
+        duplicate = self.client.post(
+            "/api/crm/products/import-form",
+            files={
+                "form_file": (
+                    "新品140型嵌入4扇.xlsx",
+                    form,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertEqual(duplicate.json()["code"], "product_form_exists")
+        self.assertEqual(duplicate.json()["product_code"], product["code"])
 
     def test_product_cannot_be_created_without_excel(self):
         resp = self.client.post(
@@ -168,7 +242,7 @@ class TestProducts(ApiTestCase):
             amount=8800.0,
         )
         self.assertEqual(deal["product_id"], product["id"])
-        self.assertEqual(deal["product_code_snapshot"], "TS-TEST-001")
+        self.assertEqual(deal["product_code_snapshot"], product["code"])
         self.assertEqual(deal["product_name_snapshot"], "55型2扇联排测试产品")
         self.assertIn("电动纱窗", deal["product_config_snapshot"])
 
@@ -179,7 +253,7 @@ class TestProducts(ApiTestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
 
         fresh_deal = self.client.get(f"/api/crm/deals/{deal['id']}").json()
-        self.assertEqual(fresh_deal["product_code_snapshot"], "TS-TEST-001")
+        self.assertEqual(fresh_deal["product_code_snapshot"], product["code"])
         self.assertEqual(fresh_deal["product_name_snapshot"], "55型2扇联排测试产品")
 
         won = self.client.put(
@@ -193,7 +267,7 @@ class TestProducts(ApiTestCase):
         self.assertEqual(ordered.status_code, 200, ordered.text)
         order = ordered.json()["order"]
         self.assertEqual(order["product_id"], product["id"])
-        self.assertEqual(order["product_code_snapshot"], "TS-TEST-001")
+        self.assertEqual(order["product_code_snapshot"], product["code"])
         self.assertEqual(order["product_name_snapshot"], "55型2扇联排测试产品")
         self.assertIn("电动纱窗", order["product_config_snapshot"])
 
@@ -228,10 +302,10 @@ class TestProducts(ApiTestCase):
         self.assertEqual(changed.status_code, 200, changed.text)
         changed_deal = changed.json()
         self.assertEqual(changed_deal["product_id"], product_b["id"])
-        self.assertEqual(changed_deal["product_code_snapshot"], "TS-TEST-002")
+        self.assertEqual(changed_deal["product_code_snapshot"], product_b["code"])
         self.assertEqual(changed_deal["product_name_snapshot"], "沟通后更适合的天幕产品")
         self.assertEqual(changed_deal["product_type"], "天幕")
-        self.assertEqual(changed_deal["model"], "TS-TEST-002")
+        self.assertEqual(changed_deal["model"], product_b["code"])
         self.assertEqual(changed_deal["drive_type"], "manual")
         self.assertEqual(changed_deal["spec"], "1600*2600")
 
@@ -249,7 +323,7 @@ class TestProducts(ApiTestCase):
         self.assertEqual(ordered.status_code, 200, ordered.text)
         order = ordered.json()["order"]
         self.assertEqual(order["product_id"], product_b["id"])
-        self.assertEqual(order["product_code_snapshot"], "TS-TEST-002")
+        self.assertEqual(order["product_code_snapshot"], product_b["code"])
         self.assertEqual(order["product_name_snapshot"], "沟通后更适合的天幕产品")
 
     def test_inactive_product_cannot_be_linked_to_new_deal(self):

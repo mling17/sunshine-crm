@@ -187,7 +187,8 @@ class CustomerListOut(BaseModel):
 class ProductIn(BaseModel):
     """产品主档新建。产品参数由业务维护，规格范围不等于客户成交尺寸。"""
 
-    code: str = Field(min_length=1, max_length=64)
+    #: 新建时由服务端分配，兼容旧客户端仍可传 code，但不会采用传入值。
+    code: OptionalText = Field(default=None, max_length=64)
     name: CleanName = Field(min_length=1, max_length=120)
     category: str = Field(default="天窗", min_length=1, max_length=32)
     series: OptionalText = Field(default=None, max_length=32)
@@ -206,6 +207,30 @@ class ProductIn(BaseModel):
     source_template: OptionalText = Field(default=None, max_length=300)
     description: OptionalText = Field(default=None, max_length=1000)
     is_active: bool = True
+
+
+class ProductImportPreview(BaseModel):
+    """上传下单表后返回的识别结果；预览阶段不写入产品主档。"""
+
+    code: str
+    duplicate_product_code: str | None = None
+    name: str
+    category: str
+    series: str | None = None
+    structure: str | None = None
+    opening_mode: str | None = None
+    drive_type: str | None = None
+    frame_type: str | None = None
+    leaf_type: str | None = None
+    edge_type: str | None = None
+    leaf_count: int | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    source_template: str | None = None
+    description: str | None = None
+    config_summary: str = ""
+    form_file_name: str
+    form_file_size: int
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ProductUpdate(BaseModel):

@@ -164,6 +164,29 @@ class FormLayoutStructureTest(unittest.TestCase):
         mobile = self.css.split("@media (max-width: 640px)", 2)[-1]
         self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", mobile)
 
+    def test_product_creation_uses_generated_code_and_order_form_import(self):
+        products = self.views["products.js"]
+        for marker in (
+            "<label>产品编码",
+            "（自动生成）",
+            "编号由系统分配，无需手动填写",
+            "从下单表生成",
+            "openProductImport(",
+            "api('/products/import-preview'",
+            "api('/products/import-form'",
+            "productImportPreviewHtml(result)",
+            "该下单表已生成过产品",
+        ):
+            self.assertIn(marker, products)
+        for selector in (
+            ".product-actions",
+            ".product-import-modal",
+            ".product-import-preview",
+            ".product-import-title",
+            ".product-import-warnings",
+        ):
+            self.assertIn(selector, self.css)
+
 
 if __name__ == "__main__":
     unittest.main()

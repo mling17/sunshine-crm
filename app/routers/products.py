@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import uuid
 from pathlib import Path
@@ -13,8 +14,15 @@ from fastapi.responses import FileResponse
 
 from app.db import db_conn
 from app.errors import ApiError
-from app.models import ProductDetailOut, ProductIn, ProductOut, ProductUpdate
+from app.models import (
+    ProductDetailOut,
+    ProductImportPreview,
+    ProductIn,
+    ProductOut,
+    ProductUpdate,
+)
 from app.product_catalog import config_summary, parse_attributes
+from app.product_importer import ProductFormParseError, parse_order_form
 from app.routers.auth import require_auth
 from app.security import now_iso
 from app.storage import (
@@ -114,7 +122,7 @@ def _out(row, deal_counts: dict[int, int], order_counts: dict[int, int]) -> Prod
     return ProductOut(**data)
 
 
-async def _save_product_form(form_file: UploadFile) -> dict:
+async def _read_product_form(form_file: UploadFile) -> tuple[str, str, bytes]:
     filename = Path(form_file.filename or "").name
     ext = Path(filename).suffix.lower()
     if ext not in {".xlsx", ".xls"}:
@@ -131,15 +139,100 @@ async def _save_product_form(form_file: UploadFile) -> dict:
     )
     if not signature_ok:
         raise ApiError(400, "product_form_invalid", "文件内容不是有效的 Excel 工作簿")
+    return filename or f"产品下单表{ext}", ext, data
+
+
+def _store_product_form(filename: str, ext: str, data: bytes) -> dict:
     storage_key = f"product_forms/{uuid.uuid4().hex}{ext}"
     save_photo(storage_key, data)
     return {
         "form_storage_key": storage_key,
-        "form_file_name": filename or f"产品下单表{ext}",
+        "form_file_name": Path(filename).name or f"产品下单表{ext}",
         "form_file_size": len(data),
         "form_sha256": hashlib.sha256(data).hexdigest(),
         "form_uploaded_at": now_iso(),
     }
+
+
+def _next_product_code(conn: sqlite3.Connection) -> str:
+    """Allocate the next stable TS sequence, including soft-deleted records."""
+    highest = 0
+    for row in conn.execute("SELECT code FROM products"):
+        match = re.fullmatch(r"TS-(\d+)", str(row["code"] or "").upper())
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"TS-{highest + 1:03d}"
+
+
+def _duplicate_form_code(conn: sqlite3.Connection, form_sha256: str) -> str | None:
+    row = conn.execute(
+        "SELECT code FROM products"
+        " WHERE form_sha256 = ? AND is_delete = 0"
+        " ORDER BY id LIMIT 1",
+        (form_sha256,),
+    ).fetchone()
+    return str(row["code"]) if row else None
+
+
+def _prepare_product_data(data: dict) -> dict:
+    prepared = dict(data)
+    prepared["name"] = _clean(prepared.get("name")) or ""
+    prepared["category"] = _clean(prepared.get("category")) or "天窗"
+    if not prepared["name"]:
+        raise ApiError(400, "product_name_required", "产品名称不能为空")
+    _check_dimensions(prepared)
+    return prepared
+
+
+def _insert_product(
+    conn: sqlite3.Connection,
+    data: dict,
+    form_meta: dict,
+    *,
+    seed_key: str,
+) -> int:
+    now = now_iso()
+    cur = conn.execute(
+        """
+        INSERT INTO products (
+            seed_key, code, name, category, series, structure, opening_mode,
+            drive_type, frame_type, leaf_type, edge_type, leaf_count,
+            min_width, max_width, min_height, max_height, attributes,
+            source_template, form_storage_key, form_file_name, form_file_size,
+            form_sha256, form_uploaded_at, description, is_active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            seed_key,
+            data["code"],
+            data["name"],
+            data["category"],
+            _clean(data.get("series")),
+            _clean(data.get("structure")),
+            _clean(data.get("opening_mode")),
+            _clean(data.get("drive_type")),
+            _clean(data.get("frame_type")),
+            _clean(data.get("leaf_type")),
+            _clean(data.get("edge_type")),
+            data.get("leaf_count"),
+            data.get("min_width"),
+            data.get("max_width"),
+            data.get("min_height"),
+            data.get("max_height"),
+            json.dumps(_attributes(data.get("attributes")), ensure_ascii=False),
+            _clean(data.get("source_template")) or form_meta["form_file_name"],
+            form_meta["form_storage_key"],
+            form_meta["form_file_name"],
+            form_meta["form_file_size"],
+            form_meta["form_sha256"],
+            form_meta["form_uploaded_at"],
+            _clean(data.get("description")),
+            1 if data.get("is_active", True) else 0,
+            now,
+            now,
+        ),
+    )
+    return int(cur.lastrowid or 0)
 
 
 @router.get("/products", response_model=list[ProductOut])
@@ -182,6 +275,70 @@ def list_products(
     return [_out(row, deal_counts, order_counts) for row in rows]
 
 
+@router.post("/products/import-preview", response_model=ProductImportPreview)
+async def preview_product_import(
+    form_file: UploadFile = File(..., description="待识别的 Excel 下单表"),
+) -> ProductImportPreview:
+    filename, _ext, data = await _read_product_form(form_file)
+    try:
+        parsed = parse_order_form(data, filename)
+    except ProductFormParseError as exc:
+        raise ApiError(400, "product_form_parse_failed", str(exc)) from exc
+
+    form_sha256 = hashlib.sha256(data).hexdigest()
+    with db_conn() as conn:
+        code = _next_product_code(conn)
+        duplicate_code = _duplicate_form_code(conn, form_sha256)
+    parsed["code"] = code
+    parsed["duplicate_product_code"] = duplicate_code
+    parsed["config_summary"] = config_summary(parsed)
+    parsed["form_file_name"] = filename
+    parsed["form_file_size"] = len(data)
+    return ProductImportPreview(**parsed)
+
+
+@router.post("/products/import-form", response_model=ProductOut)
+async def import_product_from_form(
+    form_file: UploadFile = File(..., description="用于生成产品的 Excel 下单表"),
+) -> ProductOut:
+    filename, ext, data = await _read_product_form(form_file)
+    if ext != ".xlsx":
+        raise ApiError(
+            400,
+            "product_import_xlsx_required",
+            "自动生成产品仅支持 .xlsx；旧版 .xls 请另存为 .xlsx",
+        )
+    try:
+        parsed = parse_order_form(data, filename)
+    except ProductFormParseError as exc:
+        raise ApiError(400, "product_form_parse_failed", str(exc)) from exc
+    parsed.pop("warnings", None)
+    data_fields = _prepare_product_data(parsed)
+
+    form_sha256 = hashlib.sha256(data).hexdigest()
+    with db_conn() as conn:
+        duplicate_code = _duplicate_form_code(conn, form_sha256)
+        if duplicate_code:
+            raise ApiError(
+                409,
+                "product_form_exists",
+                f"该下单表已生成过产品「{duplicate_code}」",
+                product_code=duplicate_code,
+            )
+        form_meta = _store_product_form(filename, ext, data)
+        data_fields["code"] = _next_product_code(conn)
+        _assert_code_unique(conn, data_fields["code"])
+        product_id = _insert_product(
+            conn,
+            data_fields,
+            form_meta,
+            seed_key=f"file-import:{uuid.uuid4().hex}",
+        )
+        row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+        deal_counts, order_counts = _usage_maps(conn)
+    return _out(row, deal_counts, order_counts)
+
+
 @router.get("/products/{product_id}", response_model=ProductDetailOut)
 def get_product_detail(product_id: int) -> ProductDetailOut:
     with db_conn() as conn:
@@ -219,61 +376,18 @@ async def create_product(
     except ValueError as exc:
         raise ApiError(400, "invalid_product_payload", f"产品参数格式错误：{exc}") from exc
     data = parsed.model_dump()
-    data["code"] = (_clean(data.get("code")) or "").upper()
-    data["name"] = _clean(data.get("name")) or ""
-    data["category"] = _clean(data.get("category")) or "天窗"
-    if not data["code"]:
-        raise ApiError(400, "product_code_required", "产品编码不能为空")
-    if not data["name"]:
-        raise ApiError(400, "product_name_required", "产品名称不能为空")
-    _check_dimensions(data)
-    seed_key = f"manual:{uuid.uuid4().hex}"
+    data = _prepare_product_data(data)
+    filename, ext, form_bytes = await _read_product_form(form_file)
+    form_meta = _store_product_form(filename, ext, form_bytes)
     with db_conn() as conn:
+        data["code"] = _next_product_code(conn)
         _assert_code_unique(conn, data["code"])
-    form_meta = await _save_product_form(form_file)
-    now = now_iso()
-    with db_conn() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO products (
-                seed_key, code, name, category, series, structure, opening_mode,
-                drive_type, frame_type, leaf_type, edge_type, leaf_count,
-                min_width, max_width, min_height, max_height, attributes,
-                source_template, form_storage_key, form_file_name, form_file_size,
-                form_sha256, form_uploaded_at, description, is_active, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                seed_key,
-                data["code"],
-                data["name"],
-                data["category"],
-                _clean(data.get("series")),
-                _clean(data.get("structure")),
-                _clean(data.get("opening_mode")),
-                _clean(data.get("drive_type")),
-                _clean(data.get("frame_type")),
-                _clean(data.get("leaf_type")),
-                _clean(data.get("edge_type")),
-                data.get("leaf_count"),
-                data.get("min_width"),
-                data.get("max_width"),
-                data.get("min_height"),
-                data.get("max_height"),
-                json.dumps(_attributes(data.get("attributes")), ensure_ascii=False),
-                _clean(data.get("source_template")) or form_meta["form_file_name"],
-                form_meta["form_storage_key"],
-                form_meta["form_file_name"],
-                form_meta["form_file_size"],
-                form_meta["form_sha256"],
-                form_meta["form_uploaded_at"],
-                _clean(data.get("description")),
-                1 if data.get("is_active", True) else 0,
-                now,
-                now,
-            ),
+        product_id = _insert_product(
+            conn,
+            data,
+            form_meta,
+            seed_key=f"manual:{uuid.uuid4().hex}",
         )
-        product_id = int(cur.lastrowid or 0)
         row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
         deal_counts, order_counts = _usage_maps(conn)
     return _out(row, deal_counts, order_counts)
@@ -330,7 +444,8 @@ async def replace_product_form(
     product_id: int,
     form_file: UploadFile = File(...),
 ) -> ProductOut:
-    form_meta = await _save_product_form(form_file)
+    filename, ext, data = await _read_product_form(form_file)
+    form_meta = _store_product_form(filename, ext, data)
     with db_conn() as conn:
         row = conn.execute(
             "SELECT * FROM products WHERE id = ? AND is_delete = 0", (product_id,)

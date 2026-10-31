@@ -166,7 +166,10 @@ function viewProducts(root) {
             '<div class="card product-hero">' +
                 '<div class="card-head"><div><h2>产品 <span class="badge muted">' + all.length + '</span></h2>' +
                 '<p class="card-subtitle">一份 Excel 对应一个产品；下单表是产品的必传凭证，商机关联后自动冻结产品快照。</p></div>' +
-                '<button type="button" class="btn btn-primary" id="productNew">＋ 新增产品</button></div>' +
+                '<div class="product-actions">' +
+                    '<button type="button" class="btn btn-ghost" id="productImport">从下单表生成</button>' +
+                    '<button type="button" class="btn btn-primary" id="productNew">＋ 新增产品</button>' +
+                '</div></div>' +
                 '<div class="product-kpis"><span><b>' + activeCount + '</b> 在售</span>' +
                 '<span><b>' + all.filter(function (p) { return p.category === '天窗'; }).length + '</b> 天窗</span>' +
                 '<span><b>' + all.filter(function (p) { return p.drive_type === 'electric'; }).length + '</b> 电动款</span></div>' +
@@ -186,12 +189,149 @@ function viewProducts(root) {
         $('#productNew', root).addEventListener('click', function () {
             openProductEdit(null, function () { return render(); });
         });
+        $('#productImport', root).addEventListener('click', function () {
+            openProductImport(function () { return render(); });
+        });
         bindOps(root, {
             edit: function (id) {
                 var product = all.filter(function (p) { return p.id === id; })[0];
                 if (product) { openProductEdit(product, function () { return render(); }); }
             },
             view: function (id) { navigate('#/products/' + id); }
+        });
+    });
+}
+
+function productImportPreviewHtml(preview) {
+    var attrs = preview.attributes || {};
+    var attributeText = [
+        attrs.screen, attrs.mesh, attrs.motor_cover ? ('电机罩 ' + attrs.motor_cover) : '',
+        attrs.shade, attrs.handle
+    ].filter(Boolean).join(' / ') || '无附加配置';
+    var duplicate = preview.duplicate_product_code
+        ? '<div class="notice warn product-import-warning">该下单表已生成过产品 <b>' +
+            esc(preview.duplicate_product_code) + '</b>，不能重复生成。</div>'
+        : '';
+    var warnings = (preview.warnings || []).length
+        ? '<div class="product-import-warnings"><b>请核对</b><ul>' +
+            preview.warnings.map(function (item) { return '<li>' + esc(item) + '</li>'; }).join('') +
+          '</ul></div>'
+        : '';
+    return duplicate +
+        '<div class="product-import-title"><span class="product-code">' + esc(preview.code) + '</span>' +
+            '<b>' + esc(preview.name) + '</b></div>' +
+        '<p class="product-config-line">' + esc(preview.config_summary || '按下单表识别') + '</p>' +
+        infoGrid([
+            ['分类', preview.category || '—'],
+            ['系列', preview.series || '通用'],
+            ['结构', preview.structure || '—'],
+            ['开启', preview.opening_mode || '—'],
+            ['驱动', productDriveLabel(preview.drive_type)],
+            ['扇数', preview.leaf_count ? preview.leaf_count + ' 扇' : '按图'],
+            ['边框', preview.frame_type || '—'],
+            ['扇型', preview.leaf_type || '—'],
+            ['附加配置', attributeText],
+            ['原文件', preview.form_file_name]
+        ]) + warnings;
+}
+
+function openProductImport(done) {
+    var modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML =
+        '<div class="modal-overlay"></div>' +
+        '<div class="modal-content wide product-import-modal">' +
+            '<div class="modal-header"><h3>从下单表生成产品</h3>' +
+                '<button type="button" class="btn btn-link modal-close">×</button></div>' +
+            '<form id="productImportForm" class="modal-body form-grid">' +
+                '<div class="product-import-intro">' +
+                    '<b>上传一份 Excel 下单表</b>' +
+                    '<p>系统会识别产品名称、系列、结构、驱动、扇数和常用配置，并自动分配产品编号。原始文件会随产品归档。</p>' +
+                '</div>' +
+                '<div class="field field-wide"><label>Excel 下单表 *</label>' +
+                    '<input name="form_file" type="file" accept=".xlsx" required>' +
+                    '<span class="hint">目前自动识别支持 .xlsx，最大 20MB；手工新增仍可归档 .xls。</span></div>' +
+                '<div id="productImportPreview" class="product-import-preview">' +
+                    '<p class="small muted">选择文件后会自动读取模板信息。</p></div>' +
+                '<div class="form-actions">' +
+                    '<button type="button" class="btn modal-cancel">取消</button>' +
+                    '<button type="button" class="btn" id="productImportScan" disabled>重新识别</button>' +
+                    '<button type="submit" class="btn btn-primary" id="productImportSubmit" disabled>生成产品</button>' +
+                '</div>' +
+            '</form>' +
+        '</div>';
+    document.body.appendChild(modal);
+
+    var form = modal.querySelector('#productImportForm');
+    var fileInput = form.querySelector('[name="form_file"]');
+    var previewBox = modal.querySelector('#productImportPreview');
+    var scanBtn = modal.querySelector('#productImportScan');
+    var submitBtn = modal.querySelector('#productImportSubmit');
+    var preview = null;
+
+    function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
+    function file() { return fileInput.files && fileInput.files[0] ? fileInput.files[0] : null; }
+    function setBusy(busy, text) {
+        scanBtn.disabled = busy || !file();
+        submitBtn.disabled = busy || !preview || !!preview.duplicate_product_code;
+        if (text) { scanBtn.textContent = text; }
+    }
+    function scan() {
+        var selected = file();
+        if (!selected) {
+            preview = null;
+            previewBox.innerHTML = '<p class="small muted">选择文件后会自动读取模板信息。</p>';
+            setBusy(false);
+            return;
+        }
+        if (!/\.xlsx$/i.test(selected.name)) {
+            preview = null;
+            previewBox.innerHTML = '<div class="notice warn">自动识别仅支持 .xlsx，请先另存为 Excel 工作簿。</div>';
+            setBusy(false);
+            return;
+        }
+        if (selected.size > 20 * 1024 * 1024) {
+            preview = null;
+            previewBox.innerHTML = '<div class="notice warn">下单表不能超过 20MB。</div>';
+            setBusy(false);
+            return;
+        }
+        preview = null;
+        setBusy(true, '识别中…');
+        previewBox.innerHTML = '<p class="loading">正在读取下单表…</p>';
+        var data = new FormData();
+        data.append('form_file', selected);
+        api('/products/import-preview', { method: 'POST', body: data }).then(function (result) {
+            preview = result;
+            previewBox.innerHTML = productImportPreviewHtml(result);
+            setBusy(false, '重新识别');
+        }).catch(function (err) {
+            previewBox.innerHTML = '<div class="notice warn">' + esc(err.message) + '</div>';
+            setBusy(false, '重新识别');
+        });
+    }
+
+    modal.querySelector('.modal-close').addEventListener('click', close);
+    modal.querySelector('.modal-cancel').addEventListener('click', close);
+    fileInput.addEventListener('change', scan);
+    scanBtn.addEventListener('click', scan);
+    form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var selected = file();
+        if (!selected || !preview || preview.duplicate_product_code) { return; }
+        submitBtn.disabled = true;
+        submitBtn.textContent = '生成中…';
+        var data = new FormData();
+        data.append('form_file', selected);
+        api('/products/import-form', { method: 'POST', body: data }).then(function (product) {
+            toast('已生成产品 ' + product.code);
+            PRODUCT_CATALOG_CACHE = null;
+            close();
+            if (done) { done(); }
+        }).catch(function (err) {
+            toast(err.message, true);
+            submitBtn.disabled = false;
+            submitBtn.textContent = '生成产品';
         });
     });
 }
@@ -280,8 +420,10 @@ function openProductEdit(product, done) {
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body"><form id="productForm" class="form-grid" autocomplete="off">' +
             '<div class="row-2">' +
-                '<div class="field"><label>产品编码 *</label><input name="code" maxlength="64" required value="' +
-                    esc(p.code || '') + '" placeholder="如 TS-124"></div>' +
+                '<div class="field"><label>产品编码' + (product ? ' *' : '（自动生成）') + '</label><input name="code" maxlength="64"' +
+                    (product ? ' required' : ' readonly') + ' value="' + esc(p.code || '') +
+                    '" placeholder="保存后自动分配，如 TS-124">' +
+                    (product ? '' : '<span class="hint">编号由系统分配，无需手动填写。</span>') + '</div>' +
                 '<div class="field"><label>产品名称 *</label><input name="name" maxlength="120" required value="' +
                     esc(p.name || '') + '" placeholder="客户能看懂的产品名称"></div>' +
             '</div>' +
@@ -373,7 +515,6 @@ function openProductEdit(product, done) {
             return raw === '' ? null : Number(raw);
         }
         var payload = {
-            code: val('code'),
             name: val('name'),
             category: val('category'),
             series: val('series') || null,
@@ -400,7 +541,8 @@ function openProductEdit(product, done) {
             description: val('description') || null,
             is_active: form.querySelector('[name="is_active"]').checked
         };
-        if (!payload.code || !payload.name) { toast('产品编码和名称必填', true); return; }
+        if (product) { payload.code = val('code'); }
+        if (!payload.name || (product && !payload.code)) { toast('产品名称必填', true); return; }
         var fileInput = form.querySelector('[name="form_file"]');
         var formFile = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
         if (!product && !formFile) { toast('请上传该产品对应的 Excel 下单表', true); return; }

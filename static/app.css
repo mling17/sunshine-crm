@@ -2249,6 +2249,13 @@ table.data-table a:hover { text-decoration: underline; }
   align-items: flex-start;
 }
 
+.product-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .product-kpis {
   display: flex;
   flex-wrap: wrap;
@@ -2356,6 +2363,64 @@ table.data-table a:hover { text-decoration: underline; }
   color: var(--muted);
 }
 
+.product-import-modal {
+  max-width: 780px;
+}
+
+.product-import-intro {
+  padding: 12px 14px;
+  border: 1px solid #dce6f2;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.product-import-intro p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.product-import-preview {
+  min-height: 112px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+
+.product-import-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.product-import-title > b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.product-import-warning {
+  margin-bottom: 12px;
+}
+
+.product-import-warnings {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  color: #8a5d00;
+  font-size: 12px;
+}
+
+.product-import-warnings ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.product-import-modal .form-actions {
+  justify-content: flex-end;
+}
+
 @media (max-width: 900px) {
   .product-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2375,8 +2440,18 @@ table.data-table a:hover { text-decoration: underline; }
   .product-hero .card-head {
     display: grid;
   }
+  .product-actions {
+    justify-content: stretch;
+  }
+  .product-actions .btn {
+    flex: 1 1 auto;
+  }
   .product-detail-head {
     flex-wrap: wrap;
+  }
+  .product-import-title {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
