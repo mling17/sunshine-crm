@@ -67,9 +67,16 @@ class DealsTest(ApiTestCase):
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=1000.0)
 
-        # V2（N6）：won 只能走 /win 动作端点，PUT 不允许直接置 won
+        # 定稿（§7.6）：阶段可在编辑里推进到「成交」，之后再生成订单
         bad = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
-        self.assertEqual(bad.status_code, 400, bad.text)
+        self.assertEqual(bad.status_code, 200, bad.text)
+        self.assertEqual(bad.json()["stage"], "won")
+        self.assertTrue(bad.json()["closed_at"], "进成交必须写 closed_at")
+
+        # 退回报价：closed_at 要清空，避免统计虚高
+        back = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "quote"})
+        self.assertEqual(back.status_code, 200, back.text)
+        self.assertIsNone(back.json()["closed_at"])
 
         won = self.client.post(f"/api/crm/deals/{deal['id']}/win")
         self.assertEqual(won.status_code, 200, won.text)
@@ -225,16 +232,16 @@ class DealsTest(ApiTestCase):
         self.assertEqual(len(order_data["status_log"]), 1)
         self.assertEqual(order_data["status_log"][0]["to_status"], "pending_payment")
 
-    def test_win_deal_already_won_fails(self):
-        """已赢单（无订单的异常态）再次赢单 → deal_frozen"""
+    def test_win_deal_already_won_creates_order(self):
+        """已成交但没有订单（异常态）→ /win 补生成订单（不再报错）"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=1000.0)
         # 直接落库置 won（模拟历史异常态：赢了但没有订单）
         with self.db_conn() as conn:
             conn.execute("UPDATE deals SET stage='won' WHERE id=?", (deal["id"],))
         resp = self.client.post(f"/api/crm/deals/{deal['id']}/win")
-        self.assertEqual(resp.status_code, 409)
-        self.assertEqual(resp.json()["code"], "deal_frozen")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertIsNotNone(resp.json()["deal"]["order_id"])
 
     def test_win_deal_already_has_order_fails(self):
         """测试已有订单的商机赢单失败"""
@@ -304,7 +311,7 @@ class DealsTest(ApiTestCase):
         # 更新商机应该失败
         resp = self.client.put(f"/api/crm/deals/{deal['id']}", json={"amount": 2000.0})
         self.assertEqual(resp.status_code, 409)
-        self.assertEqual(resp.json()["code"], "deal_frozen")
+        self.assertEqual(resp.json()["code"], "deal_locked")
 
     def test_update_deal_after_lose_fails(self):
         """测试流失后更新商机失败"""
@@ -322,49 +329,30 @@ class DealsTest(ApiTestCase):
         self.assertEqual(resp.json()["code"], "deal_frozen")
 
     def test_freeze_matrix_assertions(self):
-        """测试冻结矩阵 6 条断言"""
+        """冻结矩阵：① 出单后锁定 ② 锁定后仍可改备注 ③ 流失后冻结 ④ 流失后仍可改备注"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=1000.0)
-        
-        # 测试 1: 赢单后，PUT 操作被冻结
+
+        # ① 生成订单后 → 金额不可改
         self.client.post(f"/api/crm/deals/{deal['id']}/win")
         resp = self.client.put(f"/api/crm/deals/{deal['id']}", json={"amount": 2000.0})
         self.assertEqual(resp.status_code, 409)
-        
-        # 测试 2: 流失后，PUT 操作被冻结
-        # 先重置商机状态
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
-        self.client.post(f"/api/crm/deals/{deal['id']}/lose", json={"lost_reason": "price"})
-        resp = self.client.put(f"/api/crm/deals/{deal['id']}", json={"amount": 2000.0})
+        self.assertEqual(resp.json()["code"], "deal_locked")
+
+        # ② 锁定只挡基本信息，备注照常能改
+        note = self.client.put(f"/api/crm/deals/{deal['id']}", json={"note": "锁定后补备注"})
+        self.assertEqual(note.status_code, 200, note.text)
+        self.assertEqual(note.json()["note"], "锁定后补备注")
+
+        # ③ 另一单走流失 → 冻结
+        d2 = self.create_deal(c["id"], amount=500.0)
+        self.client.post(f"/api/crm/deals/{d2['id']}/lose", json={"lost_reason": "price"})
+        resp = self.client.put(f"/api/crm/deals/{d2['id']}", json={"amount": 2000.0})
         self.assertEqual(resp.status_code, 409)
-        
-        # 测试 3: 赢单后，跟进操作被冻结
-        # 先重置商机状态
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
-        self.client.post(f"/api/crm/deals/{deal['id']}/win")
-        # 跟进操作应该失败（虽然这个测试在当前实现中不直接调用，但可以验证冻结机制）
-        # 这里我们只测试PUT冻结
-        
-        # 测试 4: 流失后，跟进操作被冻结
-        # 先重置商机状态
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
-        self.client.post(f"/api/crm/deals/{deal['id']}/lose", json={"lost_reason": "price"})
-        # 跟进操作应该失败（虽然这个测试在当前实现中不直接调用，但可以验证冻结机制）
-        # 这里我们只测试PUT冻结
-        
-        # 测试 5: 赢单后，生成订单操作被冻结
-        # 先重置商机状态
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
-        self.client.post(f"/api/crm/deals/{deal['id']}/win")
-        resp = self.client.post(f"/api/crm/deals/{deal['id']}/win")
-        self.assertEqual(resp.status_code, 409)
-        
-        # 测试 6: 流失后，生成订单操作被冻结
-        # 先重置商机状态
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
-        self.client.post(f"/api/crm/deals/{deal['id']}/lose", json={"lost_reason": "price"})
-        resp = self.client.post(f"/api/crm/deals/{deal['id']}/win")
-        self.assertEqual(resp.status_code, 409)
+
+        # ④ 流失后备注仍可改
+        note2 = self.client.put(f"/api/crm/deals/{d2['id']}", json={"note": "流失原因跟进"})
+        self.assertEqual(note2.status_code, 200, note2.text)
 
 
 if __name__ == "__main__":

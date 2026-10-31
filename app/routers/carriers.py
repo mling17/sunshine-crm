@@ -43,6 +43,10 @@ def get_carrier(carrier_id: int):
 def create_carrier(payload: CarrierIn):
     """创建物流公司"""
     with db_conn() as conn:
+        if conn.execute("SELECT 1 FROM carriers WHERE name = ?", (payload.name,)).fetchone():
+            raise ApiError(
+                status_code=409, code="carrier_exists", message=f"物流公司「{payload.name}」已存在"
+            )
         now = now_iso()
         cur = conn.execute(
             """

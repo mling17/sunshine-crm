@@ -451,10 +451,19 @@ def list_follow_ups(
     deal_id: int | None = Query(default=None, gt=0),
     object_type: str | None = Query(default=None),
     object_id: int | None = Query(default=None, gt=0),
+    include_system: bool = Query(
+        default=False, description="true = 连系统履历一起返回（创建/编辑/阶段变更/生成订单等）"
+    ),
 ) -> list[FollowUpItemOut]:
-    """按客户/商机/对象类型/对象ID过滤；不带过滤=全量（新的在前），每条带照片数与照片列表。"""
+    """按客户/商机/对象类型/对象ID过滤；不带过滤=全量（新的在前），每条带照片数与照片列表。
+
+    默认只返回用户记的**真实跟进**（kind='follow'）——与 V1 语义一致；
+    跟进页要看完整履历（含系统事件）时传 ``include_system=true``。
+    """
     where_parts: list[str] = []
     params: list[object] = []
+    if not include_system:
+        where_parts.append("(fu.kind IS NULL OR fu.kind = 'follow')")
     
     if customer_id is not None:
         where_parts.append("fu.customer_id = ?")

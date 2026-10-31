@@ -159,7 +159,6 @@ class CustomerListOut(BaseModel):
 class DealOut(BaseModel):
     id: int
     customer_id: int
-    title: str | None = None
     product_type: str | None = None
     model: str | None = None
     spec: str | None = None
@@ -176,6 +175,12 @@ class DealOut(BaseModel):
     closed_at: str | None = None
     created_at: str
     updated_at: str
+    drive_type: str | None = None
+    drive_type_label: str | None = None
+    note: str | None = None
+    #: 已生成订单 → 基本信息冻结（PLANNER-V3 §6.2）
+    locked: bool = False
+    locked_at: str | None = None
 
     @model_validator(mode="after")
     def _fill_stage_label(self) -> "DealOut":
@@ -183,12 +188,26 @@ class DealOut(BaseModel):
             self.stage_label = STAGE_LABELS.get(self.stage)
         return self
 
+    @model_validator(mode="after")
+    def _fill_drive_type_label(self) -> "DealOut":
+        if self.drive_type_label is None and self.drive_type:
+            if self.drive_type == "manual":
+                self.drive_type_label = "手动"
+            elif self.drive_type == "electric":
+                self.drive_type_label = "电动"
+        return self
+
 
 class DealDetailOut(DealOut):
-    """商机详情，包含客户名称和订单信息"""
+    """商机详情：+ 客户名 / 订单 / 履历 / 资料汇总（PLANNER-V3 §5.5）。"""
+
     customer_name: str | None = None
-    order_id: int | None = None
     order_no: str | None = None
+    #: 履历（跟进 + 编辑 + 阶段变更 + 生成订单 + 订单事件），倒序
+    timeline: list[dict] = Field(default_factory=list)
+    #: 资料汇总卡：所有跟进附件
+    materials: list[dict] = Field(default_factory=list)
+    order: dict | None = None
 
 
 # ---------------- 跟进 ----------------
@@ -254,6 +273,9 @@ class DealIn(BaseModel):
     deposit: float = Field(default=0, ge=0)
     balance: float = Field(default=0, ge=0)
     stage: str = Field(default=DEFAULT_STAGE, max_length=32)
+    #: 手动/电动 —— 必填由路由层给业务错误码（drive_type_required），不在 pydantic 层拦
+    drive_type: OptionalText = Field(default=None, max_length=32)
+    note: OptionalText = Field(default=None, max_length=500)
 
 
 class DealUpdate(BaseModel):
@@ -266,6 +288,8 @@ class DealUpdate(BaseModel):
     deposit: float | None = Field(default=None, ge=0)
     balance: float | None = Field(default=None, ge=0)
     stage: str | None = Field(default=None, max_length=32)
+    drive_type: str | None = Field(default=None, max_length=32)
+    note: OptionalText = Field(default=None, max_length=500)
 
 
 # ---------------- 看板 / 统计 ----------------

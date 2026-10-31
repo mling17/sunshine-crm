@@ -190,8 +190,21 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         return resp.json()
 
+    def create_carrier(self, name: str = "顺丰快运", **payload) -> dict:
+        """建物流公司；同名已存在时直接复用（测试用例常多次调用）。"""
+        body = {"name": name}
+        body.update(payload)
+        resp = self.client.post("/api/crm/carriers", json=body)
+        if resp.status_code == 409:
+            for row in self.client.get("/api/crm/carriers").json():
+                if row.get("name") == name:
+                    return row
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
+
     def create_deal(self, customer_id: int, **payload) -> dict:
-        body = {"customer_id": customer_id, "amount": 1000.0}
+        # PLANNER-V3 §1.1：drive_type 是必填项，测试默认给「手动」
+        body = {"customer_id": customer_id, "amount": 1000.0, "drive_type": "manual"}
         body.update(payload)
         resp = self.client.post("/api/crm/deals", json=body)
         self.assertEqual(resp.status_code, 200, resp.text)

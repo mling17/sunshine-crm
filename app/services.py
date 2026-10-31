@@ -47,16 +47,24 @@ if TYPE_CHECKING:
 
 
 def next_no(conn: Connection, table: str, column: str, prefix: str, day: str) -> str:
-    """SO-20261030-001 / AS-20261030-001。单用户单 worker，事务内 MAX+1 足够；
-    UNIQUE 约束是最后一道保险（并发撞号 → IntegrityError → 重试一次再报 409）。
+    """SO-20261031-001 / AS-20261031-001（PLANNER-V3 §5.6：日期段不带横线）。
+
+    调用方常传 ``now_local_iso()[:8]``（形如 ``2026-10-31``），这里统一把非数字剔掉，
+    否则会生成 ``SO-2026-10--001`` 这种双横线单号（V2 遗留 bug G-05）。
+    单用户单 worker，事务内 MAX+1 足够；UNIQUE 约束是最后一道保险。
     """
-    like = f"{prefix}-{day}-%"
+    digits = re.sub(r"\D", "", str(day or ""))
+    if len(digits) != 8:
+        from datetime import datetime as _dt
+
+        digits = _dt.now().strftime("%Y%m%d")
+    like = f"{prefix}-{digits}-%"
     row = conn.execute(
         f"SELECT COALESCE(MAX(CAST(substr({column}, -3) AS INTEGER)), 0) AS n "
         f"FROM {table} WHERE {column} LIKE ?",
         (like,),
     ).fetchone()
-    return f"{prefix}-{day}-{int(row['n']) + 1:03d}"
+    return f"{prefix}-{digits}-{int(row['n']) + 1:03d}"
 
 
 def read_images(photos: list) -> list[tuple[str, str, str, bytes]]:

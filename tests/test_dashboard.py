@@ -106,7 +106,8 @@ class DashboardTest(ApiTestCase):
         from tests._util import insert_deal
 
         insert_deal(c["id"], stage="won", amount=9000.0, closed_at=f"{last_month_day()}T10:00:00")
-        self.create_deal(c["id"], amount=3000.0, stage="confirm")
+        d_stage = self.create_deal(c["id"], amount=3000.0)
+        self.client.put(f"/api/crm/deals/{d_stage['id']}", json={"stage": "confirm"})
 
         board = self.dashboard()
         self.assertEqual(board["month_won"]["count"], 1)

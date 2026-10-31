@@ -89,21 +89,21 @@ class LeadsTest(ApiTestCase):
         self,
         customer_id: int,
         *,
-        title: str = "测试商机",
         product_type: str = "天窗",
-        model: str = "平移",
-        spec: str = "1200*1400",
+        model: str = "XW-120",
+        spec: str = "1200*2400",
         amount: float = 12800.0,
-        stage: str = "confirm",
+        stage: str = "quote",
+        drive_type: str = "manual",
     ):
         data = {
             "customer_id": customer_id,
-            "title": title,
             "product_type": product_type,
             "model": model,
             "spec": spec,
             "amount": amount,
             "stage": stage,
+            "drive_type": drive_type,
         }
         return self.client.post("/api/crm/deals", json=data).json()
 
