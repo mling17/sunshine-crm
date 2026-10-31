@@ -187,25 +187,31 @@ function viewDealDetail(root, rawId) {
     });
 }
 
-/* ---------------- 编辑商机（弹层；产品类型/型号/阶段取字典） ---------------- */
+/* ---------------- 编辑商机（产品可随沟通调整；类型/型号随产品自动同步） ---------------- */
 function openDealEdit(deal, products, done) {
     var modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML =
         '<div class="modal-overlay"></div>' +
-        '<div class="modal-content wide">' +
-        '<div class="modal-header"><h3>编辑商机</h3>' +
-        '<button type="button" class="btn btn-link modal-close">×</button></div>' +
+        '<div class="modal-content wide deal-edit-modal">' +
+        '<div class="modal-header deal-convert-modal-head">' +
+        '<div><span class="deal-convert-kicker">商机跟进 · 参数调整</span>' +
+        '<h3>编辑商机</h3><p>客户需求变化时，可直接搜索并更换关联产品</p></div>' +
+        '<button type="button" class="btn btn-link modal-close" aria-label="关闭">×</button></div>' +
         '<div class="modal-body">' +
         '<form id="dealEditForm" class="form-grid" autocomplete="off">' +
-        '<div class="field"><label>关联产品</label>' +
-        productSelectHtml(products || [], deal.product_id, '不关联产品（旧商机）') +
+        '<div class="field field-wide"><label>关联产品 <span class="deal-inline-badge">可更换</span></label>' +
+        '<div class="deal-product-switch-note">' +
+        '<b>产品可随沟通阶段调整</b>' +
+        '<span>直接搜索新的产品；保存后会记录变更，并将后续商机与订单切换到新产品快照。</span></div>' +
+        productPickerHtml(products || [], deal.product_id, '不关联产品（旧商机）') +
         '<div class="small muted" data-product-hint>' +
         esc(deal.product_config_snapshot || '选择产品后会自动带出类型、型号和驱动方式') + '</div></div>' +
         '<div class="row-2">' +
-        '<div class="field"><label>产品类型</label>' +
+        '<div class="field"><label>产品类型 <span class="deal-inline-badge">自动</span></label>' +
         '<select name="product_type">' + dictOptions('product_type', deal.product_type, '不指定') + '</select></div>' +
-        '<div class="field"><label>型号</label>' + modelComboHtml(deal.model || '') + '</div>' +
+        '<div class="field"><label>型号 <span class="deal-inline-badge">自动</span></label>' +
+        modelComboHtml(deal.model || '') + '</div>' +
         '</div>' +
         '<div class="row-2">' +
         '<div class="field"><label>手动 / 电动</label>' +
@@ -231,7 +237,7 @@ function openDealEdit(deal, products, done) {
         '<textarea name="note" maxlength="500">' + esc(deal.note || '') + '</textarea></div>' +
         '<div class="form-actions">' +
         '<button type="button" class="btn modal-cancel">取消</button>' +
-        '<button type="submit" class="btn btn-primary">保存</button>' +
+        '<button type="submit" class="btn btn-primary">保存修改</button>' +
         '</div>' +
         '</form>' +
         '</div></div>';
@@ -242,29 +248,40 @@ function openDealEdit(deal, products, done) {
     modal.querySelector('.modal-cancel').addEventListener('click', close);
 
     var form = modal.querySelector('form');
+    var productTypeSelect = form.querySelector('[name="product_type"]');
+    var modelInput = form.querySelector('[data-model-combo] .combo-input');
 
-    var productSelect = form.querySelector('[name="product_id"]');
     var modelCombo = bindModelCombo(form.querySelector('[data-model-combo]'), dictItems('product_model'), function (hit) {
         if (hit && hit.meta) {
             if (hit.meta.drive) { form.querySelector('[name="drive_type"]').value = hit.meta.drive; }
             if (hit.meta.product) { form.querySelector('[name="product_type"]').value = hit.meta.product; }
         }
     });
-    productSelect.addEventListener('change', function () {
-        var product = findProduct(products, productSelect.value);
-        var hint = form.querySelector('[data-product-hint]');
-        if (!product) {
-            if (hint) { hint.textContent = '保留旧商机产品字段，不关联产品主档。'; }
-            return;
-        }
-        form.querySelector('[name="product_type"]').value = product.category || '';
-        if (product.drive_type) { form.querySelector('[name="drive_type"]').value = product.drive_type; }
-        modelCombo.set(product.code);
-        if (hint) {
-            hint.textContent = product.config_summary ||
-                [product.series, product.structure].filter(Boolean).join(' · ');
+
+    function syncProductFields(product) {
+        var linked = !!product;
+        productTypeSelect.disabled = linked;
+        if (modelInput) { modelInput.disabled = linked; modelInput.title = linked ? '型号随关联产品自动同步' : ''; }
+    }
+
+    var productPicker = bindProductPicker(form.querySelector('[data-product-picker]'), products, {
+        onChange: function (product) {
+            var hint = form.querySelector('[data-product-hint]');
+            syncProductFields(product);
+            if (!product) {
+                if (hint) { hint.textContent = '已取消主档关联，保留当前产品字段；可继续手工编辑。'; }
+                return;
+            }
+            productTypeSelect.value = product.category || '';
+            form.querySelector('[name="drive_type"]').value = product.drive_type || '';
+            modelCombo.set(product.code);
+            if (hint) {
+                hint.textContent = product.config_summary ||
+                    [product.series, product.structure].filter(Boolean).join(' · ');
+            }
         }
     });
+    syncProductFields(productPicker.getProduct());
 
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
@@ -287,8 +304,8 @@ function openDealEdit(deal, products, done) {
             stage: val('stage'),
             note: val('note') || null
         };
-        if (String(deal.product_id || '') !== String(productSelect.value || '')) {
-            payload.product_id = productSelect.value ? Number(productSelect.value) : null;
+        if (String(deal.product_id || '') !== String(productPicker.getValue() || '')) {
+            payload.product_id = productPicker.getValue() ? Number(productPicker.getValue()) : null;
         }
         btn.disabled = true;
         api('/deals/' + deal.id, { method: 'PUT', body: payload }).then(function () {
@@ -370,104 +387,29 @@ function viewDealNew(root, route) {
         var src = all[0];
         var products = all[1] || [];
         var fromName = leadId
-            ? ((src.name || src.company_name || '线索 #' + leadId) + '（线索）')
-            : ((src.name || '客户 #' + custId) + '（客户）');
+            ? (src.name || src.company_name || '线索 #' + leadId)
+            : (src.name || '客户 #' + custId);
         var backHash = leadId ? '#/leads' : '#/customers';
         var backLabel = leadId ? '线索池' : '客户档案';
 
         root.innerHTML =
-            '<div class="card">' +
-            '<div class="card-head"><h2><a href="' + backHash + '">‹ ' + backLabel + '</a> / 转商机</h2>' +
-            '<span class="badge muted">来源：' + esc(fromName) + '</span></div>' +
-            '<form id="dealNewForm" class="form-grid" autocomplete="off">' +
-            '<div class="field"><label>关联产品 *</label>' + productSelectHtml(products, '', '请选择产品') +
-            '<div class="small muted" data-product-hint>从产品主档选择后，类型、型号和驱动方式会自动带出。</div></div>' +
-            '<div class="row-2">' +
-            '<div class="field"><label>产品类型</label>' +
-            '<select name="product_type">' + dictOptions('product_type', '天窗', '请选择') + '</select></div>' +
-            '<div class="field"><label>手动 / 电动 *</label>' +
-            '<select name="drive_type">' +
-            '<option value="manual">手动</option>' +
-            '<option value="electric">电动</option>' +
-            '</select></div>' +
+            '<div class="card deal-convert-page">' +
+            '<div class="deal-convert-page-head">' +
+              '<div><a class="crumb" href="' + backHash + '">‹ ' + backLabel + '</a>' +
+              '<span class="deal-convert-kicker">销售流程 · 新建商机</span>' +
+              '<h2>转商机</h2><p>先锁定产品，再补充现场参数与报价</p></div>' +
             '</div>' +
-            '<div class="row-2">' +
-            '<div class="field"><label>产品型号 *</label>' + modelComboHtml('') + '</div>' +
-            '<div class="field"><label>尺寸/洞口尺寸 *</label>' +
-            '<input name="spec" maxlength="32" required placeholder="1200*2400"></div>' +
+            '<div class="deal-convert-page-body">' +
+              dealConvertFormHtml('dealNewForm', products, fromName,
+                leadId ? 'lead' : 'customer') +
             '</div>' +
-            '<div class="row-2">' +
-            '<div class="field"><label>金额（报价）*</label>' +
-            '<input name="amount" type="number" min="0" step="0.01" inputmode="decimal" required placeholder="12000"></div>' +
-            '<div class="field"><label>阶段</label>' +
-            '<input value="报价" disabled title="新建商机固定为报价"></div>' +
-            '</div>' +
-            '<div class="field"><label>备注</label>' +
-            '<textarea name="note" maxlength="300" placeholder="客户需求、现场情况、特殊要求…"></textarea></div>' +
-            '<p class="small muted">新建商机固定从「报价」开始；定金 / 尾款在生成订单时才填。' +
-            (leadId ? '线索转化会同时新建客户档案。' : '') + '</p>' +
-            '<div class="form-actions">' +
-            '<button type="button" class="btn" id="dealNewCancel">取消</button>' +
-            '<button type="submit" class="btn btn-primary">创建商机</button>' +
-            '</div>' +
-            '</form>' +
             '</div>';
 
         var form = $('#dealNewForm', root);
-
-        var productSelect = form.querySelector('[name="product_id"]');
-        var modelCombo = bindModelCombo(form.querySelector('[data-model-combo]'), dictItems('product_model'), function (hit) {
-            if (hit && hit.meta) {
-                if (hit.meta.drive) { form.querySelector('[name="drive_type"]').value = hit.meta.drive; }
-                if (hit.meta.product) { form.querySelector('[name="product_type"]').value = hit.meta.product; }
-            }
+        form.querySelector('.modal-cancel').addEventListener('click', function () {
+            navigate(backHash);
         });
-        productSelect.addEventListener('change', function () {
-            var product = findProduct(products, productSelect.value);
-            var hint = form.querySelector('[data-product-hint]');
-            if (!product) {
-                if (hint) { hint.textContent = '必须选择产品主档中的产品。'; }
-                return;
-            }
-            form.querySelector('[name="product_type"]').value = product.category || '';
-            if (product.drive_type) { form.querySelector('[name="drive_type"]').value = product.drive_type; }
-            modelCombo.set(product.code);
-            if (hint) {
-                hint.textContent = product.config_summary ||
-                    [product.series, product.structure].filter(Boolean).join(' · ');
-            }
-        });
-
-        $('#dealNewCancel', root).addEventListener('click', function () { navigate(backHash); });
-
-        form.addEventListener('submit', function (ev) {
-            ev.preventDefault();
-            var btn = form.querySelector('button[type="submit"]');
-            var amount = numOrNull(form.querySelector('[name="amount"]').value);
-            var model = String(form.querySelector('[name="model"]').value || '');
-            var spec = String(form.querySelector('[name="spec"]').value || '').trim();
-            var product = findProduct(products, productSelect.value);
-            if (!product) { toast('请从产品主档选择产品', true); return; }
-            if (!model) { toast('请选择产品型号', true); return; }
-            if (!spec) { toast('尺寸必填', true); return; }
-            if (amount === null || !(amount > 0)) { toast('金额必须大于 0', true); return; }
-
-            function val(name) {
-                var el = form.querySelector('[name="' + name + '"]');
-                return el ? String(el.value || '').trim() : '';
-            }
-            var deal = {
-                title: [val('product_type'), model].filter(Boolean).join(' ').slice(0, 100) || null,
-                product_id: product.id,
-                product_type: val('product_type') || null,
-                model: model,
-                spec: spec,
-                amount: amount,
-                drive_type: val('drive_type') || null,
-                note: val('note') || null
-            };
-
-            btn.disabled = true;
+        bindDealConvertForm(form, products, function (deal) {
             var req = leadId
                 ? api('/leads/' + leadId + '/convert', { method: 'POST', body: { mode: 'new', deal: deal } })
                 : api('/deals', {
@@ -484,7 +426,7 @@ function viewDealNew(root, route) {
                         note: deal.note
                     }
                 });
-            req.then(function (res) {
+            return req.then(function (res) {
                 var created = leadId ? (res && res.deal) : res;
                 toast('商机已创建');
                 invalidateCustomerIndex();
@@ -493,9 +435,7 @@ function viewDealNew(root, route) {
                 } else {
                     navigate('#/deals');
                 }
-            }).catch(function (err) {
-                toast(err.message, true);
-                btn.disabled = false;
+                return res;
             });
         });
     }).catch(function (err) {

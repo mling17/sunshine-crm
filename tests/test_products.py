@@ -197,6 +197,61 @@ class TestProducts(ApiTestCase):
         self.assertEqual(order["product_name_snapshot"], "55型2扇联排测试产品")
         self.assertIn("电动纱窗", order["product_config_snapshot"])
 
+    def test_deal_product_can_be_replaced_before_order(self):
+        product_a = self.create_product()
+        product_b = self.create_product(
+            code="TS-TEST-002",
+            name="沟通后更适合的天幕产品",
+            category="天幕",
+            drive_type="manual",
+            config_summary="天幕 / 沟通后选定",
+        )
+        customer = self.create_customer(name="换产品客户", phone="13900003333")
+        deal = self.create_deal(
+            customer["id"],
+            product_id=product_a["id"],
+            spec="1480*2350",
+            amount=8800.0,
+        )
+        self.assertEqual(deal["product_id"], product_a["id"])
+
+        changed = self.client.put(
+            f"/api/crm/deals/{deal['id']}",
+            json={
+                "product_id": product_b["id"],
+                "drive_type": "manual",
+                "spec": "1600*2600",
+                "amount": 9600.0,
+                "note": "几轮沟通后改为 B 产品",
+            },
+        )
+        self.assertEqual(changed.status_code, 200, changed.text)
+        changed_deal = changed.json()
+        self.assertEqual(changed_deal["product_id"], product_b["id"])
+        self.assertEqual(changed_deal["product_code_snapshot"], "TS-TEST-002")
+        self.assertEqual(changed_deal["product_name_snapshot"], "沟通后更适合的天幕产品")
+        self.assertEqual(changed_deal["product_type"], "天幕")
+        self.assertEqual(changed_deal["model"], "TS-TEST-002")
+        self.assertEqual(changed_deal["drive_type"], "manual")
+        self.assertEqual(changed_deal["spec"], "1600*2600")
+
+        timeline = self.client.get(f"/api/crm/deals/{deal['id']}").json()["timeline"]
+        self.assertTrue(any(item["type"] == "change" for item in timeline))
+
+        won = self.client.put(
+            f"/api/crm/deals/{deal['id']}", json={"stage": "won"}
+        )
+        self.assertEqual(won.status_code, 200, won.text)
+        ordered = self.client.post(
+            f"/api/crm/deals/{deal['id']}/orders",
+            json={"amount": 9600.0, "deposit": 2000.0, "logistics_mode": "self"},
+        )
+        self.assertEqual(ordered.status_code, 200, ordered.text)
+        order = ordered.json()["order"]
+        self.assertEqual(order["product_id"], product_b["id"])
+        self.assertEqual(order["product_code_snapshot"], "TS-TEST-002")
+        self.assertEqual(order["product_name_snapshot"], "沟通后更适合的天幕产品")
+
     def test_inactive_product_cannot_be_linked_to_new_deal(self):
         product = self.create_product(is_active=False)
         customer = self.create_customer(name="停用产品客户", phone="13900002222")

@@ -29,7 +29,6 @@ class FormLayoutStructureTest(unittest.TestCase):
             "deals.js": [
                 '<form id="dealEditForm" class="form-grid"',
                 '<form id="dealLoseForm" class="form-grid"',
-                '<form id="dealNewForm" class="form-grid"',
                 '<form id="dealOrderForm" class="form-grid"',
             ],
             "orders.js": [
@@ -41,8 +40,6 @@ class FormLayoutStructureTest(unittest.TestCase):
             "logistics.js": '<form id="carrierFormEl" class="form-grid"',
             "followups.js": '<form id="fuForm" class="form-grid"',
             "shared.js": [
-                '<form id="dealConvertForm" class="form-grid"',
-                '<form id="newDealForm" class="form-grid"',
                 '<form id="fuModalForm" class="form-grid"',
             ],
             "dashboard.js": '<form id="quickFuForm" class="form-grid"',
@@ -67,6 +64,86 @@ class FormLayoutStructureTest(unittest.TestCase):
         self.assertIn("openDealConvertModal(customer, 'customer')", self.views["customers.js"])
         self.assertIn("openCustomerDealModal(c)", self.views["customers.js"])
         self.assertNotIn("/deals/new?customer=", self.views["customers.js"])
+
+    def test_deal_convert_forms_share_searchable_product_picker(self):
+        shared = self.views["shared.js"]
+        deals = self.views["deals.js"]
+
+        self.assertIn("function dealConvertFormHtml(formId", shared)
+        self.assertIn("function bindDealConvertForm(form, products, onSubmit)", shared)
+        self.assertIn("dealConvertFormHtml('dealConvertForm'", shared)
+        self.assertIn("dealConvertFormHtml('dealNewForm'", deals)
+        self.assertIn("bindDealConvertForm(form, products", shared)
+        self.assertIn("bindDealConvertForm(form, products", deals)
+
+        form_builder = shared[
+            shared.index("function dealConvertFormHtml"):
+            shared.index("function bindDealConvertForm")
+        ]
+        self.assertIn("productPickerHtml(products", form_builder)
+        self.assertNotIn('name="product_type"', form_builder)
+        self.assertNotIn("modelComboHtml", form_builder)
+        self.assertIn("关联产品", form_builder)
+        self.assertIn("项目参数", form_builder)
+        self.assertIn("尺寸/洞口尺寸", form_builder)
+
+    def test_product_picker_searches_catalog_fields_and_supports_keyboard(self):
+        shared = self.views["shared.js"]
+        picker = shared[
+            shared.index("function productSearchText"):
+            shared.index("function dealConvertSourceHtml")
+        ]
+
+        for field in (
+            "product.code",
+            "product.name",
+            "product.category",
+            "product.series",
+            "product.structure",
+            "product.opening_mode",
+            "product.config_summary",
+        ):
+            self.assertIn(field, picker)
+        for marker in (
+            'role="combobox"',
+            'role="listbox"',
+            "ArrowDown",
+            "ArrowUp",
+            "aria-activedescendant",
+        ):
+            self.assertIn(marker, picker)
+
+    def test_deal_convert_search_ui_has_desktop_and_mobile_styles(self):
+        for selector in (
+            ".modal-content.deal-convert-modal",
+            ".modal-content.deal-edit-modal",
+            ".deal-convert-source",
+            ".deal-convert-section",
+            ".deal-product-switch-note",
+            ".product-picker",
+            ".product-picker-list",
+            ".product-picker-option",
+            ".product-picker-card",
+        ):
+            self.assertIn(selector, self.css)
+        self.assertIn("@media (max-width: 420px)", self.css)
+
+    def test_existing_deal_can_replace_product_from_searchable_edit_form(self):
+        deals = self.views["deals.js"]
+        edit = deals[
+            deals.index("function openDealEdit"):
+            deals.index("function openDealLose")
+        ]
+        for marker in (
+            "关联产品 <span class=\"deal-inline-badge\">可更换</span>",
+            "产品可随沟通阶段调整",
+            "productPickerHtml(products || [], deal.product_id",
+            "syncProductFields(product)",
+            "form.querySelector('[name=\"drive_type\"]').value = product.drive_type || ''",
+            "payload.product_id = productPicker.getValue()",
+        ):
+            self.assertIn(marker, edit)
+        self.assertNotIn("productSelectHtml(", edit)
 
     def test_spec_labels_are_unified(self):
         for filename in ("shared.js", "deals.js"):
