@@ -1,3 +1,10 @@
+/* ================= 全局：hidden 必须真的隐藏 =================
+   UA 的 [hidden]{display:none} 会被 .login-wrap{display:flex} 这类作者样式盖掉，
+   导致登录后登录框仍留在页面上。这里用 !important 兜住所有带 hidden 的元素。 */
+[hidden] {
+  display: none !important;
+}
+
 /* ================= 响应式布局 ================= */
 @media (max-width: 375px) {
   body {

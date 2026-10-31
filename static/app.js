@@ -199,11 +199,19 @@
 
   /* ================= 登录 / 会话 ================= */
 
+  function setShown(id, shown) {
+    var el = document.getElementById(id);
+    if (!el) { return; }
+    el.hidden = !shown;
+    // 双保险：万一 CSS 里 .login-wrap{display:flex} 之类盖掉了 [hidden]，行内样式也压住
+    el.style.display = shown ? '' : 'none';
+  }
+
   function showLogin(reason) {
     state.me = null;
-    document.getElementById('loginView').hidden = false;
-    document.getElementById('app').hidden = true;
-    document.getElementById('topbar').hidden = true;
+    setShown('loginView', true);
+    setShown('app', false);
+    setShown('topbar', false);
     var errEl = document.getElementById('loginErr');
     if (reason) { errEl.textContent = reason; errEl.hidden = false; } else { errEl.hidden = true; }
     var userEl = document.getElementById('loginUser');
@@ -211,9 +219,9 @@
   }
 
   function showApp() {
-    document.getElementById('loginView').hidden = true;
-    document.getElementById('app').hidden = false;
-    document.getElementById('topbar').hidden = false;
+    setShown('loginView', false);
+    setShown('app', true);
+    setShown('topbar', true);
     document.getElementById('whoami').textContent = state.me || '';
   }
 
