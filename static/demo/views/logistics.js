@@ -21,15 +21,24 @@ function viewLogistics(root, route) {
         '</div>' +
       '</div>' +
       '<p class="small muted" style="margin-top:0">共被订单关联 <b>' + totalUsed + '</b> 次；' +
-        '被关联过的公司<b>只能停用不能删除</b>（历史订单要显示原名）。</p>' +
+        '被关联过公司<b>只能停用不能删除</b>。一个公司可维护多个联系人（业务 / 调度 / 结算）。</p>' +
     '</div>' +
     '<div class="card">' +
       dataTable([
         { title: '公司名称', render: function (c) {
             return esc(c.name) + (c.is_active ? '' : ' <span class="badge muted">已停用</span>');
           } },
-        { title: '联系人', render: function (c) { return esc(c.contact || '—'); } },
-        { title: '电话', render: function (c) { return esc(c.phone || '—'); }, nowrap: true },
+        { title: '联系人', render: function (c) {
+            var cs = c.contacts || [];
+            if (!cs.length) { return '<span class="muted">—</span>'; }
+            var f0 = cs[0];
+            return esc(f0.name) + (f0.role ? '<div class="small muted">' + esc(f0.role) + '</div>' : '') +
+              (cs.length > 1 ? ' <span class="badge muted">+' + (cs.length - 1) + '</span>' : '');
+          } },
+        { title: '电话', nowrap: true, render: function (c) {
+            var cs = c.contacts || [];
+            return cs.length ? esc(cs[0].phone) : '<span class="muted">—</span>';
+          } },
         { title: '备注', render: function (c) { return esc(c.note || '—'); } },
         { title: '被订单关联', align: 'center', nowrap: true, render: function (c) {
             return (c.used || 0) > 0
@@ -76,7 +85,11 @@ function viewLogistics(root, route) {
 function openCarrierForm(id) {
   var c = id ? (window.DEMO.carriers || []).filter(function (x) { return x.id === Number(id); })[0] : null;
   var isEdit = !!c;
-  var d = c || { is_active: true };
+  var d = c || { is_active: true, contacts: [] };
+  var contacts = (d.contacts || []).map(function (x) {
+    return { name: x.name || '', phone: x.phone || '', role: x.role || '' };
+  });
+  if (!contacts.length) { contacts = [{ name: '', phone: '', role: '' }]; }
 
   var modal = document.createElement('div');
   modal.className = 'modal';
@@ -87,11 +100,12 @@ function openCarrierForm(id) {
       '<form id="carrierFormEl" autocomplete="off">' +
         '<div class="field"><label>公司名称 *</label>' +
           '<input name="name" required maxlength="64" value="' + esc(d.name || '') + '"></div>' +
-        '<div class="row-2">' +
-          '<div class="field"><label>联系人</label><input name="contact" maxlength="32" value="' + esc(d.contact || '') + '"></div>' +
-          '<div class="field"><label>电话</label><input name="phone" maxlength="32" value="' + esc(d.phone || '') + '"></div>' +
+        '<div class="field">' +
+          '<label>联系人（可多个：业务 / 调度 / 结算）</label>' +
+          '<div id="contactRows"></div>' +
+          '<button type="button" class="btn btn-sm" id="btnAddContact" style="margin-top:8px">＋ 添加联系人</button>' +
         '</div>' +
-        '<div class="field"><label>备注</label><textarea name="note" rows="2" maxlength="200">' + esc(d.note || '') + '</textarea></div>' +
+        '<div class="field"><label>备注</label><input name="note" maxlength="200" value="' + esc(d.note || '') + '"></div>' +
         '<div class="form-actions">' +
           '<button type="button" class="btn modal-cancel">取消</button>' +
           '<button type="submit" class="btn btn-primary">保存</button>' +
@@ -103,6 +117,43 @@ function openCarrierForm(id) {
   $('.modal-close', modal).addEventListener('click', close);
   $('.modal-cancel', modal).addEventListener('click', close);
 
+  /* 联系人行（可增删） */
+  function renderRows() {
+    $('#contactRows', modal).innerHTML = contacts.map(function (p, i) {
+      return '<div class="row-3 contact-row" data-idx="' + i + '">' +
+        '<div class="field"><label>姓名</label>' +
+          '<input data-f="name" value="' + esc(p.name) + '" maxlength="32" placeholder="李经理"></div>' +
+        '<div class="field"><label>电话</label>' +
+          '<input data-f="phone" value="' + esc(p.phone) + '" maxlength="32" placeholder="138…"></div>' +
+        '<div class="field"><label>职务</label>' +
+          '<div style="display:flex;gap:6px;align-items:center">' +
+            '<input data-f="role" value="' + esc(p.role) + '" maxlength="24" placeholder="业务/调度">' +
+            '<button type="button" class="btn-link danger" data-del-contact="' + i + '">删</button>' +
+          '</div></div>' +
+      '</div>';
+    }).join('');
+
+    $$('.contact-row input', modal).forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var idx = Number(inp.closest('.contact-row').getAttribute('data-idx'));
+        contacts[idx][inp.getAttribute('data-f')] = inp.value;
+      });
+    });
+    $$('[data-del-contact]', modal).forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (contacts.length === 1) { toast('至少留一个联系人', true); return; }
+        contacts.splice(Number(b.getAttribute('data-del-contact')), 1);
+        renderRows();
+      });
+    });
+  }
+  renderRows();
+
+  $('#btnAddContact', modal).addEventListener('click', function () {
+    contacts.push({ name: '', phone: '', role: '' });
+    renderRows();
+  });
+
   $('#carrierFormEl', modal).addEventListener('submit', function (ev) {
     ev.preventDefault();
     var f = ev.target;
@@ -110,15 +161,14 @@ function openCarrierForm(id) {
     if (!name) { toast('公司名称必填', true); return; }
     var payload = {
       name: name,
-      contact: String(f.contact.value || '').trim() || null,
-      phone: String(f.phone.value || '').trim() || null,
-      note: String(f.note.value || '').trim() || null
+      note: String(f.note.value || '').trim() || null,
+      contacts: contacts.filter(function (p) { return p.name || p.phone; })
     };
     if (isEdit) {
       Object.keys(payload).forEach(function (k) { c[k] = payload[k]; });
       toast('已保存（演示）');
     } else {
-      payload.id = Math.max.apply(null, window.DEMO.carriers.map(function (x) { return x.id; })) + 1;
+      payload.id = Math.max.apply(null, (window.DEMO.carriers || []).map(function (x) { return x.id; }).concat([0])) + 1;
       payload.is_active = true;
       payload.used = 0;
       window.DEMO.carriers.push(payload);

@@ -44,6 +44,12 @@
 
   var AFTERSALE_TYPE_LABEL = { return: '退货', exchange: '换货', repair: '维修', complaint: '投诉', other: '其他' };
   var AFTERSALE_STATUS_LABEL = { pending: '待处理', processing: '处理中', done: '已完成', rejected: '已拒绝' };
+  /* 2026-10-31 定稿：跟进方式只有微信和电话，默认微信 */
+  var FOLLOW_METHODS = [['wechat', '微信'], ['phone', '电话']];
+  var FOLLOW_METHOD_LABEL = { wechat: '微信', phone: '电话' };
+  /* 物流方式（2026-10-31 定稿）：包邮 / 代办 / 自提，均带物流费用 */
+  var LOGISTICS_MODES = [['free', '包邮'], ['agent', '代办'], ['self', '自提']];
+  var LOGISTICS_MODE_LABEL = { free: '包邮', agent: '代办', self: '自提' };
   var SOURCE_LABELS = { wechat: '微信', phone: '电话', referral: '转介绍', existing: '老客户', stock: '存量', other: '其他' };
   var INTENT_LABELS = { high: '高', medium: '中', low: '低', none: '无意向' };
 
@@ -102,6 +108,18 @@
    * ==========================================================================*/
 
   function d(n, hm) { return dayOff(n) + 'T' + (hm || '10:00') + ':00'; }
+
+  /* 演示用假照片（data URI SVG），让跟进履历能显示缩略图 */
+  function demoPhoto(label, color) {
+    var c = color || '#4a90d9';
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180">' +
+      '<rect width="240" height="180" fill="' + c + '"/>' +
+      '<rect x="18" y="18" width="204" height="144" fill="none" stroke="rgba(255,255,255,.65)" stroke-width="3"/>' +
+      '<circle cx="120" cy="78" r="22" fill="rgba(255,255,255,.28)"/>' +
+      '<text x="120" y="140" font-size="18" fill="#fff" text-anchor="middle" font-family="sans-serif">' +
+      label + '</text></svg>';
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  }
 
   var TAG_NAMES = ['重点', '转介绍', '工程商', '老客户', '价格敏感', '沉睡'];
 
@@ -162,7 +180,7 @@
     { id: 1, object_type: 'customer', object_id: 4, customer_id: 4, deal_id: 12, method: 'phone', content: '又压价，说隔壁报 620/平；我强调型材厚度不一样', next_date: dayOff(8), created_at: d(8, '14:00') },
     { id: 2, object_type: 'customer', object_id: 1, customer_id: 1, deal_id: null, method: 'wechat', content: '尾款已收到，约下周三上门安装（安装提醒）', next_date: dayOff(2), created_at: d(2, '16:20') },
     { id: 3, object_type: 'customer', object_id: 3, customer_id: 3, deal_id: 11, method: 'wechat', content: '阳台天窗尺寸已确认 900×1800，等她老公周末回来定颜色', next_date: todayISO(), created_at: d(1, '18:05') },
-    { id: 4, object_type: 'customer', object_id: 5, customer_id: 5, deal_id: null, method: 'visit', content: '上门量尺，客户关注隔音，推荐双层中空玻璃', next_date: todayISO(), created_at: d(2, '10:30') },
+    { id: 4, object_type: 'customer', object_id: 5, customer_id: 5, deal_id: null, method: 'visit', content: '上门量尺，客户关注隔音，推荐双层中空玻璃', next_date: todayISO(), created_at: d(2, '10:30'), files: [{ name: '量尺照片.jpg', url: demoPhoto('量尺 1200×2400', '#9b51e0') }] },
     { id: 5, object_type: 'customer', object_id: 6, customer_id: 6, deal_id: 6, method: 'phone', content: '货已发出，运单号发她微信了', next_date: dayOff(-4), created_at: d(1, '16:10') },
     { id: 6, object_type: 'customer', object_id: 9, customer_id: 9, deal_id: 8, method: 'wechat', content: '抖音来的新客，发了 3 个案例视频，约周日上午到店', next_date: dayOff(-2), created_at: d(1, '12:00') },
     { id: 7, object_type: 'customer', object_id: 10, customer_id: 10, deal_id: 9, method: 'phone', content: '批量 6 套，要求开票，报了 16500 含安装', next_date: dayOff(-6), created_at: d(3, '16:00') },
@@ -215,11 +233,9 @@
       { key: 'complaint', label: '投诉', sort: 4, enabled: true, used: 1 },
       { key: 'other', label: '其他', sort: 5, enabled: true, used: 0 }
     ] },
-    { code: 'follow_method', name: '跟进方式', level: 'A', desc: '记跟进时的方式', items: [
-      { key: 'phone', label: '电话', sort: 1, enabled: true, used: 4 },
-      { key: 'wechat', label: '微信', sort: 2, enabled: true, used: 3 },
-      { key: 'visit', label: '到面/上门', sort: 3, enabled: true, used: 1 },
-      { key: 'online', label: '线上', sort: 4, enabled: true, used: 0 }
+    { code: 'follow_method', name: '跟进方式', level: 'A', desc: '记跟进时的方式（只有微信/电话，默认微信）', items: [
+      { key: 'wechat', label: '微信', sort: 1, enabled: true, used: 8 },
+      { key: 'phone', label: '电话', sort: 2, enabled: true, used: 5 }
     ] },
     { code: 'deal_stage', name: '商机阶段', level: 'B', desc: '状态机，只能改名/排序，不能增删', items: [
       { key: 'confirm', label: '需求确认', sort: 1, enabled: true, used: 3 },
@@ -319,19 +335,51 @@
     6: { receiver_name: '李秀娟', receiver_phone: '186 5388 9012', receiver_address: '泰安市泰山区泰山公馆 6-1-901', carrier_id: 2, logistics_mode: 'carrier', tracking_number: null },
     7: { receiver_name: '赵明辉', receiver_phone: '135 5311 4408', receiver_address: '济南市历下区绿城百合 3-2-1202', carrier_id: 3, logistics_mode: 'carrier', tracking_number: 'SF1234567890' }
   };
+  /* 订单金额：押金 + 尾款 = 总额；物流方式 包邮/代办/自提 + 物流费用 */
+  var ORDER_EXTRA = {
+    1: { deposit: 20000, logistics_mode: 'agent', logistics_fee: 800, address_id: 3 },
+    2: { deposit: 15000, logistics_mode: 'free', logistics_fee: 0, address_id: 7 },
+    3: { deposit: 3600, logistics_mode: 'free', logistics_fee: 0, address_id: 1 },
+    4: { deposit: 13500, logistics_mode: 'agent', logistics_fee: 1200, address_id: 2 },
+    5: { deposit: 2600, logistics_mode: 'self', logistics_fee: 0, address_id: 4 },
+    6: { deposit: 4000, logistics_mode: 'free', logistics_fee: 0, address_id: 5 },
+    7: { deposit: 3000, logistics_mode: 'agent', logistics_fee: 300, address_id: 6 }
+  };
   ORDERS.forEach(function (o) {
     var r = RECEIVERS[o.id] || {};
     Object.keys(r).forEach(function (k) { o[k] = r[k]; });
-    o.logistics_mode_label = o.logistics_mode === 'self' ? '自送' : '物流公司';
+    var ex = ORDER_EXTRA[o.id] || {};
+    Object.keys(ex).forEach(function (k) { o[k] = ex[k]; });
+    o.balance = Math.max(0, Number(o.amount) - Number(o.deposit || 0));
+    o.logistics_mode_label = LOGISTICS_MODE_LABEL[o.logistics_mode] || o.logistics_mode;
     o.carrier_name = o.carrier_id ? ((CARRIERS.filter(function (c) { return c.id === o.carrier_id; })[0] || {}).name || '') : '';
   });
 
+  /* 客户收货地址簿（复购可直接选历史地址） */
+  var ADDRESSES = [
+    { id: 1, customer_id: 1, label: '家', receiver_name: '王志远', phone: '138 5312 7745', address: '济南市历下区万科城 12-3-1801', is_default: true },
+    { id: 2, customer_id: 2, label: '海尔路工地', receiver_name: '刘俊峰', phone: '139 0532 8811', address: '青岛市崂山区海尔路 12 号工地', is_default: true },
+    { id: 3, customer_id: 4, label: '建材市场库房', receiver_name: '陈国强', phone: '137 0636 5566', address: '潍坊市奎文区建材市场 3 号库', is_default: true },
+    { id: 4, customer_id: 3, label: '家', receiver_name: '孙丽华', phone: '150 5337 2210', address: '淄博市张店区齐悦花园 8-2-601', is_default: true },
+    { id: 5, customer_id: 5, label: '泰山公馆', receiver_name: '李秀娟', phone: '186 5388 9012', address: '泰安市泰山区泰山公馆 6-1-901', is_default: true },
+    { id: 6, customer_id: 6, label: '家', receiver_name: '赵明辉', phone: '135 5311 4408', address: '济南市历下区绿城百合 3-2-1202', is_default: true },
+    { id: 7, customer_id: 7, label: '幸福路工地', receiver_name: '周建军', phone: '133 0535 7788', address: '烟台市芝罘区幸福路 88 号工地', is_default: true }
+  ];
+  CUSTOMERS.forEach(function (c) { c.addresses = ADDRESSES.filter(function (a) { return a.customer_id === c.id; }); });
+
+  /* 售后跟进履历（2026-10-31：售后单也要跟进） */
+  var AFTERSALE_FOLLOWS = [
+    { aftersale_id: 1, method: 'phone', content: '已联系客户，明天上午派师傅上门看渗水点', next_date: dayOff(-1), created_at: d(4, '10:20'), files: [{ name: '渗水点.jpg', url: demoPhoto('渗水点', '#e2725b') }] },
+    { aftersale_id: 2, method: 'wechat', content: '客户发来电机噪音视频，已报给厂家换新', next_date: dayOff(-2), created_at: d(2, '15:30'), files: [] },
+    { aftersale_id: 3, method: 'phone', content: '已道歉并赠送一次免费保养，客户接受', next_date: null, created_at: d(4, '17:00'), files: [] }
+  ];
+
   /* 线索跟进履历（和客户跟进分开存，转客户后一次性带过去） */
   var LEAD_FOLLOWS = [
-    { lead_id: 1, method: 'wechat', content: '抖音私信，发了 3 个顶楼案例，问能不能做 90 平露台', next_date: dayOff(-1), created_at: d(0, '08:40'), files: [] },
+    { lead_id: 1, method: 'wechat', content: '抖音私信，发了 3 个顶楼案例，问能不能做 90 平露台', next_date: dayOff(-1), created_at: d(0, '08:40'), files: [{ name: '露台现场.jpg', url: demoPhoto('露台现场') }] },
     { lead_id: 1, method: 'phone', content: '电话沟通 10 分钟，预算 2 万左右，约周末到店', next_date: dayOff(-3), created_at: d(0, '10:20'), files: ['户型图.jpg'] },
     { lead_id: 2, method: 'phone', content: '同行介绍的装饰公司，说手上有 5 套要装', next_date: dayOff(2), created_at: d(3, '10:20'), files: [] },
-    { lead_id: 2, method: 'visit', content: '去了他们工地，甲方要求电动开合', next_date: dayOff(-1), created_at: d(1, '15:00'), files: ['现场1.jpg', '现场2.jpg'] },
+    { lead_id: 2, method: 'visit', content: '去了他们工地，甲方要求电动开合', next_date: dayOff(-1), created_at: d(1, '15:00'), files: [{ name: '现场1.jpg', url: demoPhoto('工地现场') }, { name: '现场2.jpg', url: demoPhoto('洞口尺寸', '#2f855a') }] },
     { lead_id: 3, method: 'wechat', content: '微信咨询天幕，预算 3 万内，发了 TM-180 报价', next_date: todayISO(), created_at: d(2, '19:50'), files: [] },
     { lead_id: 5, method: 'wechat', content: '已成交，天窗 900×2000，转入客户档案', next_date: null, created_at: d(40, '09:10'), files: [] }
   ];
@@ -359,6 +407,15 @@
     10: { house_type: '工地/工程', floor: '—', install_at: '批量 6 套', stage: '水电', budget: '1.5 万/套', decider: '老板', care: ['价格', '交期'] }
   };
   CUSTOMERS.forEach(function (c) { c.profile = PROFILES[c.id] || {}; c.source_lead_id = c.id <= 8 ? c.id : null; });
+
+  /* 物流公司：一个公司多个联系人 */
+  var CARRIER_CONTACTS = {
+    1: [{ name: '李经理', phone: '138 0531 9001', role: '大件业务' }, { name: '王调度', phone: '138 0531 9002', role: '派车' }],
+    2: [{ name: '王师傅', phone: '138 0000 1234', role: '德州/潍坊线' }, { name: '刘会计', phone: '138 0000 5678', role: '结算' }],
+    3: [{ name: '老张', phone: '139 5311 0001', role: '济南市区' }],
+    4: [{ name: '—', phone: '—', role: '已停用' }]
+  };
+  CARRIERS.forEach(function (c) { c.contacts = CARRIER_CONTACTS[c.id] || []; });
 
   /* 物流公司被订单关联次数 */
   function carrierUsed(id) {
@@ -559,6 +616,7 @@
       detail.deals = DEALS.filter(function (d) { return d.customer_id === c.id; }).map(dealRow);
       detail.follow_ups = FOLLOWUPS.filter(function (f) { return f.customer_id === c.id; });
       detail.orders = ORDERS.filter(function (o) { return o.customer_id === c.id; }).map(orderRow);
+      detail.addresses = ADDRESSES.filter(function (a) { return a.customer_id === c.id; });
       detail.aftersales = AFTERSALES.filter(function (a) { return a.customer_id === c.id; }).map(aftersaleRow);
       return detail;
     }
@@ -592,6 +650,8 @@
       var oo = orderById(m[1]);
       if (!oo) { throw apiError('订单不存在', 404); }
       var orow = orderRow(oo);
+      orow.deal = dealById(oo.deal_id) ? dealRow(dealById(oo.deal_id)) : null;
+      orow.aftersales = AFTERSALES.filter(function (a) { return a.order_id === oo.id; }).map(aftersaleRow);
       orow.status_log = [
         { to_status: oo.status, to_status_label: ORDER_STATUS_LABEL[oo.status], note: '演示数据：状态变更记录', created_at: oo.updated_at }
       ];
@@ -824,7 +884,9 @@
     ensureCustomerIndex: ensureCustomerIndex, invalidateCustomerIndex: invalidateCustomerIndex,
     customerOptions: customerOptions,
     DRIVE_TYPE: DRIVE_TYPE, DRIVE_LABEL: DRIVE_LABEL,
-    DEMO: { customers: CUSTOMERS, deals: DEALS, orders: ORDERS, aftersales: AFTERSALES, followups: FOLLOWUPS, leads: LEADS, dicts: DICTS, tags: TAG_NAMES, models: PRODUCT_MODELS, leadFollows: LEAD_FOLLOWS, dealLogs: DEAL_LOGS, carriers: CARRIERS, receivers: RECEIVERS }
+    FOLLOW_METHODS: FOLLOW_METHODS, FOLLOW_METHOD_LABEL: FOLLOW_METHOD_LABEL,
+    LOGISTICS_MODES: LOGISTICS_MODES, LOGISTICS_MODE_LABEL: LOGISTICS_MODE_LABEL,
+    DEMO: { customers: CUSTOMERS, deals: DEALS, orders: ORDERS, aftersales: AFTERSALES, followups: FOLLOWUPS, leads: LEADS, dicts: DICTS, tags: TAG_NAMES, models: PRODUCT_MODELS, leadFollows: LEAD_FOLLOWS, dealLogs: DEAL_LOGS, carriers: CARRIERS, receivers: RECEIVERS, addresses: ADDRESSES, aftersaleFollows: AFTERSALE_FOLLOWS }
   });
 
   if (document.readyState === 'loading') {

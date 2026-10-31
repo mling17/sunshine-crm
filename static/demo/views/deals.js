@@ -56,12 +56,8 @@ function viewDeals(root, route) {
           } },
         { title: '更新时间', render: function (d) { return fmtDateTime(d.updated_at || d.created_at).slice(0, 10); }, nowrap: true },
         { title: '操作', nowrap: true, render: function (d) {
-            return opButtons([
-              { op: 'follow', arg: d.id, label: '跟进' },
-              d.locked
-                ? { op: 'order', arg: d.id, label: '已下单', disabled: true, tip: '已生成订单，不能重复生成' }
-                : { op: 'order', arg: d.id, label: '生成订单' }
-            ]);
+            /* 2026-10-31 定稿：列表只留「跟进」，生成订单在跟进页里做 */
+            return opButtons([{ op: 'follow', arg: d.id, label: '跟进' }]);
           } }
       ], filtered, '还没有商机：请到线索或客户里点「转商机」') +
     '</div>';
@@ -178,22 +174,13 @@ function viewDealNew(root, route) {
                 esc(m.label) + '</option>';
             }).join('') +
           '</select></div>' +
-        '<div class="row-3">' +
+        '<div class="row-2">' +
           '<div class="field"><label>尺寸（宽×高 mm）*</label>' +
             '<input name="size" id="dpSize" required maxlength="32" placeholder="1200×2400"></div>' +
-          '<div class="field"><label>金额 *</label>' +
+          '<div class="field"><label>金额（报价）*</label>' +
             '<input name="amount" type="number" min="0" step="0.01" required placeholder="12000"></div>' +
-          '<div class="field"><label>阶段</label>' +
-            '<select name="stage">' +
-              STAGES.filter(function (p) { return p[0] !== 'lost'; })
-                .map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === 'quote' ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
-            '</select></div>' +
         '</div>' +
-        '<div class="row-2">' +
-          '<div class="field"><label>定金</label><input name="deposit" type="number" min="0" step="0.01" placeholder="0"></div>' +
-          '<div class="field"><label>尾款</label><input name="balance" type="number" min="0" step="0.01" placeholder="0"></div>' +
-        '</div>' +
-        '<p class="small muted">定金 + 尾款 = 金额（不等时系统只提示不拦截）</p>' +
+        '<p class="small muted">新建商机的初始阶段固定为「报价」，定金/尾款在生成订单时才填。</p>' +
         '<div class="form-actions">' +
           '<button type="button" class="btn" id="dpCancel">取消</button>' +
           '<button type="submit" class="btn btn-primary">创建商机</button>' +
@@ -250,8 +237,8 @@ function viewDealNew(root, route) {
       size: f.size.value.trim(), spec: f.size.value.trim(),
       drive_type: f.drive_type.value,
       amount: amount,
-      deposit: Number(f.deposit.value || 0), balance: Number(f.balance.value || 0),
-      stage: f.stage.value, closed_at: f.stage.value === 'won' ? nowIso2 : null,
+      deposit: 0, balance: 0,
+      stage: 'quote', closed_at: null,
       created_at: nowIso2, updated_at: nowIso2, order_id: null, locked: false
     };
     window.DEMO.deals.push(deal);
@@ -352,9 +339,12 @@ function openDealForm(id) {
     d.updated_at = nowIso;
 
     var logs = window.DEMO.dealLogs[d.id] = window.DEMO.dealLogs[d.id] || [];
-    if (changes.length) {
-      logs.push({ at: nowIso, type: 'change', text: changes.join('；') });
-    }
+    /* 2026-10-31：编辑一定生成一条「编辑」履历（不是「创建」） */
+    logs.push({
+      at: nowIso,
+      type: 'change',
+      text: changes.length ? changes.join('；') : '编辑了商机信息（本次无字段变化）'
+    });
     if (nStage !== d.stage) {
       logs.push({ at: nowIso, type: 'stage', text: '阶段推进：' + (STAGE_LABEL[d.stage] || d.stage) + ' → ' + (STAGE_LABEL[nStage] || nStage) });
       d.stage = nStage;
@@ -370,13 +360,26 @@ function openDealForm(id) {
   });
 }
 
-/* ---------------- 生成订单（模态框，继承商机信息） ---------------- */
+/* ---------------- 生成订单（模态框）
+ * 2026-10-31 定稿：
+ *   · 总额继承商机金额（只读）；填押金金额，尾款自动 = 总额 - 押金
+ *   · 物流方式：包邮 / 代办 / 自提，另填物流费用
+ *   · 收货地址从该客户的历史地址里选，也可新增一条（保存到客户名下，复购可复用）
+ * ---------------- */
 function openOrderModal(dealId) {
   var d = (window.DEMO.deals || []).filter(function (x) { return x.id === Number(dealId); })[0];
   if (!d) { return; }
   if (d.locked) { toast('该商机已生成订单', true); return; }
-  var carriers = (window.DEMO.carriers || []).filter(function (c) { return c.is_active; });
+
   var cust = (window.DEMO.customers || []).filter(function (x) { return x.id === d.customer_id; })[0] || {};
+  var addrs = (window.DEMO.addresses || []).filter(function (a) { return a.customer_id === d.customer_id; });
+  var carriers = (window.DEMO.carriers || []).filter(function (c) { return c.is_active; });
+  var total = Number(d.amount) || 0;
+
+  var addrOptions = addrs.map(function (a) {
+    return '<option value="' + a.id + '">' + esc(a.label) + ' · ' + esc(a.receiver_name) + ' · ' +
+      esc(a.phone) + ' · ' + esc(a.address) + '</option>';
+  }).join('') + '<option value="new">＋ 新增一条收货地址</option>';
 
   var modal = document.createElement('div');
   modal.className = 'modal';
@@ -385,32 +388,72 @@ function openOrderModal(dealId) {
       '<div class="modal-header"><h3>生成订单</h3>' +
         '<button type="button" class="btn-link modal-close">×</button></div>' +
       '<form id="orderFormEl" autocomplete="off">' +
-        '<p class="small muted" style="margin-top:0">以下信息继承自商机最新信息，可在此确认</p>' +
-        '<div class="row-2">' +
-          '<div class="field"><label>客户</label><input value="' + esc(cust.name || '') + '" disabled></div>' +
-          '<div class="field"><label>产品 / 型号</label><input value="' + esc([d.product_type, d.model].filter(Boolean).join(' ')) + '" disabled></div>' +
+
+        '<p class="small muted" style="margin-top:0">以下信息继承自商机，不能在这里改</p>' +
+        '<div class="info-grid">' +
+          '<div class="info-cell"><div class="info-k small muted">客户</div><div class="info-v">' + esc(cust.name || '') + '</div></div>' +
+          '<div class="info-cell"><div class="info-k small muted">产品 / 型号</div><div class="info-v">' +
+            esc([d.product_type, d.model].filter(Boolean).join(' ')) + '</div></div>' +
+          '<div class="info-cell"><div class="info-k small muted">尺寸</div><div class="info-v">' + esc(d.size || '—') + '</div></div>' +
+          '<div class="info-cell"><div class="info-k small muted">手动 / 电动</div><div class="info-v">' +
+            esc(DRIVE_LABEL[d.drive_type] || '—') + '</div></div>' +
+          '<div class="info-cell"><div class="info-k small muted">订单总额</div><div class="info-v"><b>' +
+            moneyRaw(total) + '</b></div></div>' +
         '</div>' +
+
+        '<p class="small muted">收款</p>' +
         '<div class="row-3">' +
-          '<div class="field"><label>尺寸</label><input value="' + esc(d.size || '') + '" disabled></div>' +
-          '<div class="field"><label>手动 / 电动</label><input value="' + esc(DRIVE_LABEL[d.drive_type] || '') + '" disabled></div>' +
-          '<div class="field"><label>订单金额 *</label><input name="amount" type="number" min="0" step="0.01" value="' + (d.amount || 0) + '"></div>' +
+          '<div class="field"><label>押金金额 *</label>' +
+            '<input name="deposit" id="ofDeposit" type="number" min="0" step="0.01" required placeholder="' +
+              Math.round(total * 0.3) + '"></div>' +
+          '<div class="field"><label>尾款（自动计算）</label>' +
+            '<input name="balance" id="ofBalance" type="number" readonly value="' + total + '"></div>' +
+          '<div class="field"><label>押金 + 尾款</label>' +
+            '<input id="ofSum" type="number" readonly value="0"></div>' +
         '</div>' +
-        '<p class="small muted">配送信息（新填）</p>' +
+        '<div id="ofWarn" class="notice small" hidden></div>' +
+
+        '<p class="small muted">配送</p>' +
+        '<div class="row-3">' +
+          '<div class="field"><label>物流方式 *</label>' +
+            '<select name="logistics_mode" id="ofMode">' +
+              LOGISTICS_MODES.map(function (m) { return '<option value="' + m[0] + '">' + m[1] + '</option>'; }).join('') +
+            '</select></div>' +
+          '<div class="field"><label>承运公司（选填）</label>' +
+            '<select name="carrier_id" id="ofCarrier">' +
+              '<option value="">不指定</option>' +
+              carriers.map(function (c) { return '<option value="' + c.id + '">' + esc(c.name) + '</option>'; }).join('') +
+            '</select></div>' +
+          '<div class="field"><label>物流费用（元）</label>' +
+            '<input name="logistics_fee" id="ofFee" type="number" min="0" step="0.01" value="0"></div>' +
+        '</div>' +
+
+        '<div class="field"><label>收货地址 *</label>' +
+          '<select id="ofAddr">' + addrOptions + '</select></div>' +
+
+        '<div id="ofNewAddr" hidden>' +
+          '<div class="row-2">' +
+            '<div class="field"><label>地址备注（如：家 / 工地）</label>' +
+              '<input id="ofAddrLabel" maxlength="32" value="家"></div>' +
+            '<div class="field"><label>收件人 *</label>' +
+              '<input id="ofRecvName" maxlength="32" value="' + esc(cust.name || '') + '"></div>' +
+          '</div>' +
+          '<div class="row-2">' +
+            '<div class="field"><label>收件电话 *</label>' +
+              '<input id="ofRecvPhone" maxlength="32" value="' + esc(cust.phone || '') + '"></div>' +
+            '<div class="field"><label>详细地址 *</label>' +
+              '<input id="ofRecvAddr" maxlength="200" value="' + esc(cust.location || '') + '"></div>' +
+          '</div>' +
+        '</div>' +
+
         '<div class="row-2">' +
-          '<div class="field"><label>物流方式 *</label><select name="logistics_mode" id="ofMode">' +
-            '<option value="carrier" selected>物流公司</option><option value="self">自送</option></select></div>' +
-          '<div class="field" id="ofCarrierWrap"><label>承运公司 *</label><select name="carrier_id">' +
-            carriers.map(function (c) { return '<option value="' + c.id + '">' + esc(c.name) + '</option>'; }).join('') +
-          '</select></div>' +
+          '<div class="field"><label>运单号（可后补）</label>' +
+            '<input name="tracking_number" maxlength="64" placeholder="可留空"></div>' +
+          '<div class="field"><label>备注</label>' +
+            '<input name="note" maxlength="200"></div>' +
         '</div>' +
-        '<div class="row-2">' +
-          '<div class="field"><label>收件人 *</label><input name="receiver_name" required maxlength="32" value="' + esc(cust.name || '') + '"></div>' +
-          '<div class="field"><label>收件电话 *</label><input name="receiver_phone" required maxlength="32" value="' + esc(cust.phone || '') + '"></div>' +
-        '</div>' +
-        '<div class="field"><label>收件地址 *</label><input name="receiver_address" required maxlength="200" value="' + esc(cust.location || '') + '"></div>' +
-        '<div class="field"><label>运单号（可后补）</label><input name="tracking_number" maxlength="64" placeholder="可留空"></div>' +
-        '<div class="field"><label>备注</label><textarea name="note" rows="2" maxlength="300"></textarea></div>' +
-        '<div class="notice small">生成订单后，该商机将锁定，不能再修改。</div>' +
+
+        '<div class="notice small">生成订单后，该商机会被锁定，不能再修改。</div>' +
         '<div class="form-actions">' +
           '<button type="button" class="btn modal-cancel">取消</button>' +
           '<button type="submit" class="btn btn-primary">确认生成订单</button>' +
@@ -418,44 +461,106 @@ function openOrderModal(dealId) {
       '</form>' +
     '</div>';
   document.body.appendChild(modal);
+
   function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
   $('.modal-close', modal).addEventListener('click', close);
   $('.modal-cancel', modal).addEventListener('click', close);
 
+  /* 押金 → 自动算尾款 / 合计校验 */
+  var depEl = $('#ofDeposit', modal);
+  function recalc() {
+    var dep = Number(depEl.value || 0);
+    var bal = Math.max(0, total - dep);
+    $('#ofBalance', modal).value = bal;
+    $('#ofSum', modal).value = dep + bal;
+    var warn = $('#ofWarn', modal);
+    if (dep > total) {
+      warn.hidden = false;
+      warn.textContent = '押金不能大于订单总额 ' + moneyRaw(total);
+    } else {
+      warn.hidden = true;
+    }
+  }
+  depEl.addEventListener('input', recalc);
+
+  /* 自提时物流费用默认 0 */
   $('#ofMode', modal).addEventListener('change', function (ev) {
-    $('#ofCarrierWrap', modal).style.display = ev.target.value === 'self' ? 'none' : '';
+    if (ev.target.value === 'self') { $('#ofFee', modal).value = 0; }
   });
+
+  /* 选「新增地址」才展开输入框 */
+  $('#ofAddr', modal).addEventListener('change', function (ev) {
+    $('#ofNewAddr', modal).hidden = ev.target.value !== 'new';
+  });
+  if (!addrs.length) {
+    $('#ofAddr', modal).value = 'new';
+    $('#ofNewAddr', modal).hidden = false;
+  }
 
   $('#orderFormEl', modal).addEventListener('submit', function (ev) {
     ev.preventDefault();
     var f = ev.target;
+    var dep = Number(f.deposit.value || 0);
+    if (!(dep > 0)) { toast('押金金额必填且大于 0', true); return; }
+    if (dep > total) { toast('押金不能大于订单总额', true); return; }
+
+    /* 收货地址：选历史 or 新增（新增的存进客户地址簿，复购可复用） */
+    var addrPick = $('#ofAddr', modal).value;
+    var addrObj;
+    if (addrPick === 'new') {
+      var nName = String($('#ofRecvName', modal).value || '').trim();
+      var nPhone = String($('#ofRecvPhone', modal).value || '').trim();
+      var nAddr = String($('#ofRecvAddr', modal).value || '').trim();
+      if (!nName || !nPhone || !nAddr) { toast('收件人、电话、详细地址都要填', true); return; }
+      addrObj = {
+        id: Math.max.apply(null, (window.DEMO.addresses || []).map(function (a) { return a.id; }).concat([0])) + 1,
+        customer_id: d.customer_id,
+        label: String($('#ofAddrLabel', modal).value || '').trim() || '新地址',
+        receiver_name: nName, phone: nPhone, address: nAddr, is_default: false
+      };
+      window.DEMO.addresses.push(addrObj);
+      var cObj = (window.DEMO.customers || []).filter(function (x) { return x.id === d.customer_id; })[0];
+      if (cObj) { cObj.addresses = window.DEMO.addresses.filter(function (a) { return a.customer_id === cObj.id; }); }
+    } else {
+      addrObj = (window.DEMO.addresses || []).filter(function (a) { return String(a.id) === String(addrPick); })[0];
+    }
+    if (!addrObj) { toast('请选择收货地址', true); return; }
+
     var mode = f.logistics_mode.value;
+    var carrierId = f.carrier_id.value ? Number(f.carrier_id.value) : null;
+    var carrierName = f.carrier_id.value
+      ? f.carrier_id.options[f.carrier_id.selectedIndex].text : '';
+    var nowIso = new Date().toISOString().slice(0, 19);
     var now = new Date();
     var ym = now.getFullYear() + '-' + ((now.getMonth() + 1) < 10 ? '0' : '') + (now.getMonth() + 1);
     var seq = String((window.DEMO.orders || []).length + 1).padStart(3, '0');
-    var nowIso = new Date().toISOString().slice(0, 19);
 
     var order = {
       id: Math.max.apply(null, (window.DEMO.orders || []).map(function (x) { return x.id; })) + 1,
       order_no: 'SO-' + ym + '-' + seq,
       customer_id: d.customer_id, deal_id: d.id,
       product_type: d.product_type, model: d.model, spec: d.size,
-      amount: Number(f.amount.value || 0), paid_amount: 0,
+      amount: total,
+      deposit: dep,
+      balance: Math.max(0, total - dep),
+      paid_amount: 0,
       status: 'pending_payment',
       logistics_mode: mode,
-      logistics_mode_label: mode === 'self' ? '自送' : '物流公司',
-      carrier_id: mode === 'carrier' ? Number(f.carrier_id.value) : null,
-      carrier_name: mode === 'carrier' ? f.carrier_id.options[f.carrier_id.selectedIndex].text : '',
+      logistics_mode_label: LOGISTICS_MODE_LABEL[mode] || mode,
+      logistics_fee: Number(f.logistics_fee.value || 0),
+      carrier_id: carrierId,
+      carrier_name: carrierName,
       tracking_number: String(f.tracking_number.value || '').trim() || null,
-      receiver_name: String(f.receiver_name.value || '').trim(),
-      receiver_phone: String(f.receiver_phone.value || '').trim(),
-      receiver_address: String(f.receiver_address.value || '').trim(),
+      address_id: addrObj.id,
+      receiver_name: addrObj.receiver_name,
+      receiver_phone: addrObj.phone,
+      receiver_address: addrObj.address,
       note: String(f.note.value || '').trim() || null,
       created_at: nowIso, updated_at: nowIso
     };
     window.DEMO.orders.push(order);
 
-    /* 商机锁定 + 记为赢单 + 自动生成履历 */
+    /* 商机锁定 + 赢单 + 履历记一条「生成订单」 */
     d.locked = true;
     d.order_id = order.id;
     d.stage = 'won';
@@ -463,12 +568,13 @@ function openOrderModal(dealId) {
     d.updated_at = nowIso;
     (window.DEMO.dealLogs[d.id] = window.DEMO.dealLogs[d.id] || []).push({
       at: nowIso, type: 'order',
-      text: '生成订单 ' + order.order_no + '，金额 ' + moneyRaw(order.amount) +
+      text: '生成订单 ' + order.order_no + '：总额 ' + moneyRaw(order.amount) +
+        '，押金 ' + moneyRaw(order.deposit) + '，尾款 ' + moneyRaw(order.balance) +
         '，' + order.logistics_mode_label + (order.carrier_name ? '（' + order.carrier_name + '）' : '') +
-        '，收件人 ' + order.receiver_name
+        (order.logistics_fee ? '，物流费 ' + moneyRaw(order.logistics_fee) : '') +
+        '，收货：' + order.receiver_name + ' ' + order.receiver_address
     });
 
-    /* 物流公司关联次数 +1 */
     if (order.carrier_id) {
       var car = (window.DEMO.carriers || []).filter(function (c) { return c.id === order.carrier_id; })[0];
       if (car) { car.used = (car.used || 0) + 1; }

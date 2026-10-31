@@ -291,3 +291,98 @@ a.kpi-link:active { transform: scale(0.98); }
   box-shadow: -8px 0 8px -8px rgba(0, 0, 0, .18);
 }
 .data-table th:last-child { background: #fafafa; }
+
+/* ============================================================
+ * v2.2 新增：图片缩略图 / 统计图表 / 多联系人
+ * ============================================================ */
+
+/* 跟进图片缩略图 */
+.thumb-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.thumb {
+  display: block;
+  width: 64px; height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line, #e6e8ec);
+  background: #f3f5f8;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tl-files { margin-top: 6px; }
+
+/* 统计：柱状图 */
+.vbar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 4px 0;
+  height: 190px;
+}
+.vbar-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
+.vbar-val { font-size: 11px; color: var(--muted, #8a909c); margin-bottom: 4px; white-space: nowrap; }
+.vbar-track {
+  flex: 1; width: 100%; display: flex; align-items: flex-end;
+  background: linear-gradient(#f7f8fa, #f2f4f7);
+  border-radius: 6px; overflow: hidden;
+}
+.vbar-fill { width: 100%; background: #bfd3f7; border-radius: 6px 6px 0 0; transition: height .3s ease; }
+.vbar-fill.hot { background: linear-gradient(180deg, #4a8bf5, #1f6feb); }
+.vbar-label { font-size: 11px; color: var(--muted, #8a909c); margin-top: 6px; }
+
+/* 统计：横向条 */
+.hbar-chart { display: flex; flex-direction: column; gap: 9px; padding-top: 4px; }
+.hbar-row { display: grid; grid-template-columns: 76px 1fr 44px; align-items: center; gap: 8px; }
+.hbar-label { font-size: 12px; color: #5c6270; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hbar-track { height: 14px; background: #f2f4f7; border-radius: 7px; overflow: hidden; }
+.hbar-fill { height: 100%; background: #7aa9f0; border-radius: 7px; transition: width .3s ease; }
+.hbar-fill.ok { background: #34b37e; }
+.hbar-fill.danger { background: #ef6b6b; }
+.hbar-val { font-size: 12px; color: #5c6270; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* 统计：环形图 */
+.donut-wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-top: 4px; }
+.donut {
+  width: 132px; height: 132px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex: none;
+}
+.donut-hole {
+  width: 84px; height: 84px; border-radius: 50%; background: #fff;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 0 1px var(--line, #e6e8ec);
+}
+.donut-hole b { font-size: 20px; line-height: 1.1; }
+.donut-hole span { font-size: 11px; color: var(--muted, #8a909c); }
+.donut-legend { flex: 1; min-width: 150px; display: flex; flex-direction: column; gap: 6px; }
+.donut-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #5c6270; }
+.donut-item i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.donut-item b { margin-left: auto; color: var(--text, #1f2329); }
+
+/* 统计：漏斗 */
+.funnel { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.funnel-row { display: grid; grid-template-columns: 84px 1fr 62px; align-items: center; gap: 8px; }
+.funnel-name { font-size: 12px; color: #5c6270; white-space: nowrap; }
+.funnel-track { background: #f2f4f7; border-radius: 7px; overflow: hidden; height: 24px; }
+.funnel-fill {
+  height: 100%; border-radius: 7px;
+  background: linear-gradient(90deg, #4a8bf5, #1f6feb);
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 8px; box-sizing: border-box;
+  color: #fff; font-size: 11px; min-width: 34px;
+  transition: width .3s ease;
+}
+.funnel-rate { text-align: right; }
+
+/* 统计：两栏 */
+.chart-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.chart-2col > .card { margin: 0; }
+@media (max-width: 760px) {
+  .chart-2col { grid-template-columns: 1fr; }
+  .vbar-chart { height: 160px; }
+  .hbar-row, .funnel-row { grid-template-columns: 64px 1fr 40px; }
+  .donut { width: 112px; height: 112px; }
+  .donut-hole { width: 70px; height: 70px; }
+}
+
+/* 多联系人行 */
+.contact-row { align-items: flex-end; padding-bottom: 6px; border-bottom: 1px dashed #f0f1f4; }
+.contact-row:last-child { border-bottom: none; }
