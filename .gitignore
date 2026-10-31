@@ -6,6 +6,7 @@ crm.db-shm
 uploads/
 backups/
 logs/
+.local/
 
 # ---- 密钥 / 环境 ----
 .env
