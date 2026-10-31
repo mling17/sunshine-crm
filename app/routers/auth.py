@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 
 from app.config.settings import settings
 from app.db import db_conn
+from app.errors import ApiError
 from app.security import (
+    hash_password,
     new_session_token,
     now_iso,
     session_expires_at,
@@ -31,6 +33,18 @@ COOKIE_MAX_AGE = settings.SESSION_TTL_HOURS * 3600
 class LoginIn(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
+
+
+class ProfileIn(BaseModel):
+    """修改个人信息：用户名（登录名）与显示名都可改，留空表示不动。"""
+
+    username: str | None = Field(default=None, min_length=1, max_length=64)
+    display_name: str | None = Field(default=None, max_length=32)
+
+
+class PasswordIn(BaseModel):
+    old_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=6, max_length=256)
 
 
 def _unauthorized(detail: str = "未登录或会话已过期") -> HTTPException:
@@ -104,6 +118,79 @@ def logout(request: Request, response: Response) -> dict:
     return {"ok": True}
 
 
+def _profile(conn, username: str) -> dict:
+    row = conn.execute(
+        "SELECT username, display_name FROM users WHERE username = ?", (username,)
+    ).fetchone()
+    if row is None:
+        raise _unauthorized()
+    return {
+        "username": row["username"],
+        "display_name": row["display_name"] or row["username"],
+    }
+
+
 @router.get("/me")
 def me(username: str = Depends(require_auth)) -> dict:
-    return {"username": username}
+    with db_conn() as conn:
+        return _profile(conn, username)
+
+
+@router.put("/me/profile")
+def update_profile(payload: ProfileIn, request: Request, username: str = Depends(require_auth)) -> dict:
+    """改登录名 / 显示名。改登录名要同步 sessions，否则当前会话立刻失效。"""
+    new_username = (payload.username or "").strip() or None
+    display_name = (payload.display_name or "").strip() or None
+
+    with db_conn() as conn:
+        if new_username and new_username != username:
+            taken = conn.execute(
+                "SELECT 1 FROM users WHERE username = ?", (new_username,)
+            ).fetchone()
+            if taken:
+                raise ApiError(
+                    status_code=409, code="username_taken", message=f"用户名「{new_username}」已被占用"
+                )
+            conn.execute(
+                "UPDATE users SET username = ? WHERE username = ?", (new_username, username)
+            )
+            # 会话里存的是用户名，必须一起改，否则下一次请求 401
+            conn.execute(
+                "UPDATE sessions SET username = ? WHERE username = ?", (new_username, username)
+            )
+            username = new_username
+
+        if display_name is not None:
+            conn.execute(
+                "UPDATE users SET display_name = ? WHERE username = ?", (display_name, username)
+            )
+
+        return _profile(conn, username)
+
+
+@router.put("/me/password")
+def update_password(payload: PasswordIn, request: Request, username: str = Depends(require_auth)) -> dict:
+    """改密码：校验旧密码 → 写新哈希 → 踢掉其它会话（当前这条保留）。"""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT password_hash FROM users WHERE username = ?", (username,)
+        ).fetchone()
+        if row is None:
+            raise _unauthorized()
+        if not verify_password(payload.old_password, row["password_hash"]):
+            raise ApiError(
+                status_code=400, code="old_password_invalid", message="原密码不正确"
+            )
+        if payload.old_password == payload.new_password:
+            raise ApiError(
+                status_code=400, code="password_unchanged", message="新密码不能和原密码相同"
+            )
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE username = ?",
+            (hash_password(payload.new_password), username),
+        )
+        token = request.cookies.get(COOKIE_NAME)
+        conn.execute(
+            "DELETE FROM sessions WHERE username = ? AND token <> ?", (username, token or "")
+        )
+    return {"ok": True}

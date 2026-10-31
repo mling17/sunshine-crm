@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="天幕CRM">
 
-  <link rel="stylesheet" href="/crm/app.css?v=20261031e2">
+  <link rel="stylesheet" href="/crm/app.css?v=20261031e3">
 </head>
 <body>
 
@@ -34,9 +34,15 @@
     <a href="#/stats" data-view="stats">统计</a>
     <a href="#/import" data-view="import">导入</a>
   </nav>
-  <div class="who">
-    <span id="whoami"></span>
-    <button type="button" id="logoutBtn" class="btn-link">退出</button>
+  <div class="who" id="userMenu">
+    <button type="button" id="userBtn" class="user-btn" aria-haspopup="menu" aria-expanded="false">
+      <span id="whoami"></span><span class="user-caret" aria-hidden="true">▾</span>
+    </button>
+    <div class="user-dropdown" id="userDropdown" role="menu" hidden>
+      <button type="button" role="menuitem" data-user-action="profile">修改个人信息</button>
+      <button type="button" role="menuitem" data-user-action="password">修改密码</button>
+      <button type="button" role="menuitem" data-user-action="logout" class="danger">退出登录</button>
+    </div>
   </div>
 </header>
 
@@ -71,6 +77,63 @@
 <!-- ===== 单页壳：所有视图渲染到这里 ===== -->
 <main id="app" hidden></main>
 
+<!-- ===== 修改个人信息 ===== -->
+<div class="modal" id="profileModal" hidden>
+  <div class="modal-overlay" data-close-modal="profileModal"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>修改个人信息</h3>
+      <button type="button" class="modal-close" data-close-modal="profileModal" aria-label="关闭">×</button>
+    </div>
+    <form id="profileForm" class="modal-body" autocomplete="off">
+      <div class="field">
+        <label for="profUser">登录账号</label>
+        <input id="profUser" name="username" maxlength="64" required>
+      </div>
+      <div class="field">
+        <label for="profName">显示名称</label>
+        <input id="profName" name="display_name" maxlength="32" placeholder="右上角显示的名字，留空则用登录账号">
+      </div>
+      <p class="err" id="profErr" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal="profileModal">取消</button>
+        <button type="submit" class="btn btn-primary" id="profSubmit">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== 修改密码 ===== -->
+<div class="modal" id="passwordModal" hidden>
+  <div class="modal-overlay" data-close-modal="passwordModal"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>修改密码</h3>
+      <button type="button" class="modal-close" data-close-modal="passwordModal" aria-label="关闭">×</button>
+    </div>
+    <form id="passwordForm" class="modal-body" autocomplete="off">
+      <div class="field">
+        <label for="pwdOld">原密码</label>
+        <input id="pwdOld" name="old_password" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="field">
+        <label for="pwdNew">新密码</label>
+        <input id="pwdNew" name="new_password" type="password" autocomplete="new-password" minlength="6" required>
+        <span class="hint">至少 6 位</span>
+      </div>
+      <div class="field">
+        <label for="pwdNew2">确认新密码</label>
+        <input id="pwdNew2" name="new_password2" type="password" autocomplete="new-password" minlength="6" required>
+      </div>
+      <p class="err" id="pwdErr" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal="passwordModal">取消</button>
+        <button type="submit" class="btn btn-primary" id="pwdSubmit">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="toast" class="toast" hidden></div>
 
 <noscript>
@@ -88,6 +151,6 @@
 <script src="/crm/views/followups.js"></script>
 <script src="/crm/views/stats.js"></script>
 <script src="/crm/views/import.js"></script>
-<script src="/crm/app.js?v=20261031e2"></script>
+<script src="/crm/app.js?v=20261031e3"></script>
 </body>
 </html>

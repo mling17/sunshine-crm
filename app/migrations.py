@@ -30,7 +30,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-MIGRATION_VERSION = "v2_002"
+MIGRATION_VERSION = "v2_003"
 SCHEMA_USER_VERSION = 3
 
 
@@ -601,6 +601,12 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_002', datetime('now'), 'CRM V2 定稿对齐：地址簿/物流联系人/数据字典 + 21 列')"),
     ("user_version v2_002", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 20. v2_003：用户显示名（右上角下拉「修改个人信息」用）----------
+    ("users.display_name", _col_guard("users", "display_name"),
+     "ALTER TABLE users ADD COLUMN display_name TEXT"),
+    ("schema_migrations v2_003", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_003', datetime('now'), '用户显示名 display_name')"),
 ]
 
 

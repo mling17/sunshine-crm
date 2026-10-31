@@ -86,6 +86,7 @@
 
   var state = {
     me: null,
+    displayName: null,
     customers: { index: null, builtAt: 0 },
     filters: { q: '', tag: '', page: 1 },
     import: { preview: null, result: null }
@@ -148,10 +149,11 @@
     toastTimer = setTimeout(function () { el.hidden = true; }, isError ? 4200 : 2200);
   }
 
-  function ApiError(message, status) {
+  function ApiError(message, status, code) {
     this.name = 'ApiError';
     this.message = message;
     this.status = status || 0;
+    this.code = code || null;   // 后端 {"detail","code"} 里的业务码，前端按码分支
   }
   ApiError.prototype = Object.create(Error.prototype);
 
@@ -188,9 +190,9 @@
             showLogin('登录已过期，请重新登录');
             throw new ApiError('登录已过期', 401);
           }
-          throw new ApiError(msg === 'HTTP 401' ? '账号或密码错误' : msg, 401);
+          throw new ApiError(msg === 'HTTP 401' ? '账号或密码错误' : msg, 401, (data && data.code) || null);
         }
-        throw new ApiError(msg, res.status);
+        throw new ApiError(msg, res.status, (data && data.code) || null);
       });
     }, function () {
       throw new ApiError('网络异常：连不上服务，请确认连着内网', 0);
@@ -222,7 +224,7 @@
     setShown('loginView', false);
     setShown('app', true);
     setShown('topbar', true);
-    document.getElementById('whoami').textContent = state.me || '';
+    document.getElementById('whoami').textContent = state.displayName || state.me || '';
   }
 
   function doLogin(ev) {
@@ -247,7 +249,15 @@
       .then(function (res) {
         passEl.value = '';          // 密码不留在 DOM，更不落任何存储
         state.me = (res && res.username) || username;
+        state.displayName = state.me;
         showApp();
+        // 登录响应只有账号名，再拉一次 /me 取显示名（失败不影响使用）
+        api('/me').then(function (me) {
+          if (me && me.display_name) {
+            state.displayName = me.display_name;
+            document.getElementById('whoami').textContent = state.displayName;
+          }
+        }).catch(function () { /* 忽略 */ });
         return render();
       })
       .catch(function (err) {
@@ -422,9 +432,169 @@
 
   /* ================= 启动 ================= */
 
+  /* ================= 右上角用户菜单（个人信息 / 改密码 / 退出）================= */
+
+  function closeUserMenu() {
+    setShown('userDropdown', false);
+    var btn = document.getElementById('userBtn');
+    if (btn) { btn.setAttribute('aria-expanded', 'false'); }
+  }
+
+  function toggleUserMenu() {
+    var dd = document.getElementById('userDropdown');
+    if (!dd) { return; }
+    var willOpen = dd.hidden;
+    setShown('userDropdown', willOpen);
+    var btn = document.getElementById('userBtn');
+    if (btn) { btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false'); }
+  }
+
+  function openModal(id) { setShown(id, true); }
+  function closeModal(id) { setShown(id, false); }
+
+  function openProfileModal() {
+    var userEl = document.getElementById('profUser');
+    var nameEl = document.getElementById('profName');
+    var errEl = document.getElementById('profErr');
+    if (errEl) { errEl.hidden = true; }
+    if (userEl) { userEl.value = state.me || ''; }
+    if (nameEl) {
+      nameEl.value = (state.displayName && state.displayName !== state.me) ? state.displayName : '';
+    }
+    api('/me').then(function (me) {
+      if (userEl) { userEl.value = me.username || ''; }
+      if (nameEl) {
+        nameEl.value = (me.display_name && me.display_name !== me.username) ? me.display_name : '';
+      }
+    }).catch(function () { /* 拿不到就沿用当前值 */ });
+    openModal('profileModal');
+    setTimeout(function () { if (userEl) { userEl.focus(); } }, 30);
+  }
+
+  function submitProfile(ev) {
+    ev.preventDefault();
+    var errEl = document.getElementById('profErr');
+    var userEl = document.getElementById('profUser');
+    var nameEl = document.getElementById('profName');
+    var btn = document.getElementById('profSubmit');
+    var username = (userEl.value || '').trim();
+    var displayName = (nameEl.value || '').trim();
+    errEl.hidden = true;
+    if (!username) {
+      errEl.textContent = '登录账号不能为空';
+      errEl.hidden = false;
+      return;
+    }
+    btn.disabled = true;
+    api('/me/profile', { method: 'PUT', body: { username: username, display_name: displayName } })
+      .then(function (me) {
+        state.me = (me && me.username) || username;
+        state.displayName = (me && me.display_name) || state.me;
+        document.getElementById('whoami').textContent = state.displayName;
+        closeModal('profileModal');
+        toast('个人信息已保存');
+      })
+      .catch(function (err) {
+        errEl.textContent = err.status === 409
+          ? '这个登录账号已被占用，换一个'
+          : (err.message || '保存失败');
+        errEl.hidden = false;
+      })
+      .then(function () { btn.disabled = false; });
+  }
+
+  function openPasswordModal() {
+    document.getElementById('pwdOld').value = '';
+    document.getElementById('pwdNew').value = '';
+    document.getElementById('pwdNew2').value = '';
+    var errEl = document.getElementById('pwdErr');
+    errEl.hidden = true;
+    openModal('passwordModal');
+    setTimeout(function () { document.getElementById('pwdOld').focus(); }, 30);
+  }
+
+  function submitPassword(ev) {
+    ev.preventDefault();
+    var errEl = document.getElementById('pwdErr');
+    var btn = document.getElementById('pwdSubmit');
+    var oldPwd = document.getElementById('pwdOld').value;
+    var newPwd = document.getElementById('pwdNew').value;
+    var newPwd2 = document.getElementById('pwdNew2').value;
+    errEl.hidden = true;
+    if (!oldPwd || !newPwd) {
+      errEl.textContent = '请填写原密码和新密码';
+      errEl.hidden = false;
+      return;
+    }
+    if (newPwd.length < 6) {
+      errEl.textContent = '新密码至少 6 位';
+      errEl.hidden = false;
+      return;
+    }
+    if (newPwd !== newPwd2) {
+      errEl.textContent = '两次输入的新密码不一致';
+      errEl.hidden = false;
+      return;
+    }
+    btn.disabled = true;
+    api('/me/password', { method: 'PUT', body: { old_password: oldPwd, new_password: newPwd } })
+      .then(function () {
+        closeModal('passwordModal');
+        toast('密码已修改，其它设备需重新登录');
+      })
+      .catch(function (err) {
+        errEl.textContent = err.status === 400 && err.code === 'old_password_invalid'
+          ? '原密码不正确'
+          : (err.message || '修改失败');
+        errEl.hidden = false;
+      })
+      .then(function () { btn.disabled = false; });
+  }
+
   function boot() {
     document.getElementById('loginForm').addEventListener('submit', doLogin);
-    document.getElementById('logoutBtn').addEventListener('click', doLogout);
+    var userBtn = document.getElementById('userBtn');
+    if (userBtn) {
+      userBtn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        toggleUserMenu();
+      });
+    }
+    var dropdown = document.getElementById('userDropdown');
+    if (dropdown) {
+      dropdown.addEventListener('click', function (ev) {
+        var target = ev.target && ev.target.closest ? ev.target.closest('[data-user-action]') : null;
+        if (!target) { return; }
+        closeUserMenu();
+        var action = target.getAttribute('data-user-action');
+        if (action === 'profile') { openProfileModal(); }
+        else if (action === 'password') { openPasswordModal(); }
+        else if (action === 'logout') { doLogout(); }
+      });
+    }
+    document.addEventListener('click', function (ev) {
+      if (ev.target && ev.target.closest && ev.target.closest('#userMenu')) { return; }
+      closeUserMenu();
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') {
+        closeUserMenu();
+        closeModal('profileModal');
+        closeModal('passwordModal');
+      }
+    });
+    Array.prototype.forEach.call(
+      document.querySelectorAll('[data-close-modal]'),
+      function (el) {
+        el.addEventListener('click', function () {
+          closeModal(el.getAttribute('data-close-modal'));
+        });
+      }
+    );
+    var profileForm = document.getElementById('profileForm');
+    if (profileForm) { profileForm.addEventListener('submit', submitProfile); }
+    var passwordForm = document.getElementById('passwordForm');
+    if (passwordForm) { passwordForm.addEventListener('submit', submitPassword); }
     window.addEventListener('hashchange', function () {
       if (state.me) { render(); }
     });
@@ -438,6 +608,7 @@
 
     api('/me').then(function (me) {
       state.me = (me && me.username) || '';
+      state.displayName = (me && me.display_name) || state.me;
       showApp();
       return render();
     }).catch(function (err) {
