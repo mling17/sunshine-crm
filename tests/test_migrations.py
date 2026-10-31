@@ -86,3 +86,62 @@ class TestMigrations(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestMigrationsIdempotent(unittest.TestCase):
+    """R1 Blocker B1：值域迁移必须只跑一次，二次启动不得改写业务数据。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self._tmp.name) / "idem.db"
+        ensure_schema(self.db)
+        run_migrations(self.db, backup=False, verbose=False)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _stage(self) -> str:
+        conn = sqlite3.connect(str(self.db))
+        try:
+            return conn.execute("SELECT stage FROM deals WHERE id = ?", (self._deal_id,)).fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_domain_migration_runs_once(self):
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-10-31T10:00:00Z"
+        conn.execute(
+            "INSERT INTO customers (name, customer_type, created_at, updated_at)"
+            " VALUES ('张三','personal',?,?)", (now, now)
+        )
+        cur = conn.execute(
+            "INSERT INTO deals (customer_id, amount, stage, created_at, updated_at)"
+            " VALUES (1, 12000, 'confirm', ?, ?)", (now, now)
+        )
+        self._deal_id = int(cur.lastrowid)
+        conn.commit()
+        conn.close()
+
+        # 二次启动（lifespan 每次都会跑迁移）
+        run_migrations(self.db, backup=False, verbose=False)
+        self.assertEqual(self._stage(), "confirm", "「待客户确认」不能被二次迁移改写成「报价」")
+
+        run_migrations(self.db, backup=False, verbose=False)
+        self.assertEqual(self._stage(), "confirm")
+
+    def test_seed_not_duplicated(self):
+        conn = sqlite3.connect(str(self.db))
+        try:
+            first = conn.execute("SELECT COUNT(*) FROM dict_items").fetchone()[0]
+        finally:
+            conn.close()
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            second = conn.execute("SELECT COUNT(*) FROM dict_items").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(first, second, "字典种子不能重复插入")
+
+
+if __name__ == '__main__':
+    unittest.main()

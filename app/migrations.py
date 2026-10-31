@@ -103,6 +103,24 @@ def _col_guard(table: str, column: str):
     return guard
 
 
+def _once(version: str, *tables: str):
+    """一次性数据迁移 guard：表缺失 → 跳过；该版本已落账 → 跳过（绝不重复改写数据）。"""
+
+    def guard(conn: sqlite3.Connection) -> bool:
+        if any(not table_exists(conn, t) for t in tables):
+            return True
+        if not table_exists(conn, "schema_migrations"):
+            return False
+        return (
+            conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
+            ).fetchone()
+            is not None
+        )
+
+    return guard
+
+
 def _tbl_guard(*tables: str):
     """任一表不存在 → 跳过（全新库上索引/UPDATE 不会炸）。"""
 
@@ -554,28 +572,25 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("order_status_log.event_type", _col_guard("order_status_log", "event_type"), "ALTER TABLE order_status_log ADD COLUMN event_type TEXT NOT NULL DEFAULT 'stage'"),
     ("order_status_log.detail",     _col_guard("order_status_log", "detail"),     "ALTER TABLE order_status_log ADD COLUMN detail TEXT"),
 
-    # ---------- 16. 索引 9 个（表不存在则跳过）----------
+    # ---------- 16. 新增索引 6 个（表不存在则跳过；同列的旧索引 schema.py 已有，不重复建）----------
     ("idx_addr_customer",    _tbl_guard("customer_addresses"), "CREATE INDEX IF NOT EXISTS idx_addr_customer ON customer_addresses(customer_id)"),
     ("idx_carrier_contacts", _tbl_guard("carrier_contacts"),   "CREATE INDEX IF NOT EXISTS idx_carrier_contacts ON carrier_contacts(carrier_id)"),
     ("idx_dict_code",        _tbl_guard("dict_items"),         "CREATE INDEX IF NOT EXISTS idx_dict_code ON dict_items(dict_code, sort)"),
     ("idx_deals_stage",      _tbl_guard("deals"),              "CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage)"),
-    ("idx_deals_cust",       _tbl_guard("deals"),              "CREATE INDEX IF NOT EXISTS idx_deals_cust ON deals(customer_id)"),
     ("idx_orders_status",    _tbl_guard("orders"),             "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"),
-    ("idx_orders_cust",      _tbl_guard("orders"),             "CREATE INDEX IF NOT EXISTS idx_orders_cust ON orders(customer_id)"),
-    ("idx_fu_obj",           _tbl_guard("follow_ups"),         "CREATE INDEX IF NOT EXISTS idx_fu_obj ON follow_ups(object_type, object_id, created_at)"),
     ("idx_fu_kind",          _tbl_guard("follow_ups"),         "CREATE INDEX IF NOT EXISTS idx_fu_kind ON follow_ups(kind)"),
 
     # ---------- 17. 值域迁移（单条语句，顺序不可反）----------
     # 旧 confirm=需求确认 → 新第一段 quote；旧 negotiate → 新第二段 confirm
-    ("deals.stage_confirm_to_quote", _tbl_guard("deals"),
+    ("deals.stage_confirm_to_quote", _once("v2_002", "deals"),
      "UPDATE deals SET stage='quote' WHERE stage IN ('confirm','quote')"),
-    ("deals.stage_negotiate_to_confirm", _tbl_guard("deals"),
+    ("deals.stage_negotiate_to_confirm", _once("v2_002", "deals"),
      "UPDATE deals SET stage='confirm' WHERE stage='negotiate'"),
-    ("deals.stage_v1_to_quote", _tbl_guard("deals"),
+    ("deals.stage_v1_to_quote", _once("v2_002", "deals"),
      "UPDATE deals SET stage='quote' WHERE stage IN ('lead','quoted')"),
-    ("deals.stage_v1_to_confirm", _tbl_guard("deals"),
+    ("deals.stage_v1_to_confirm", _once("v2_002", "deals"),
      "UPDATE deals SET stage='confirm' WHERE stage IN ('confirmed','deposit','producing','balance','shipped')"),
-    ("orders.logistics_mode_migrate", _tbl_guard("orders"),
+    ("orders.logistics_mode_migrate", _once("v2_002", "orders"),
      "UPDATE orders SET logistics_mode='agent' WHERE logistics_mode='carrier'"),
 
     # ---------- 18. 字典种子（幂等，只补缺，不覆盖用户改过的 label）----------

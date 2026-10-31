@@ -13,7 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db import db_conn
-from app.enums import INTENT_LEVEL_LABELS
+from app import labels
 from app.models import (
     LeadConvertCheckOut,
     LeadConvertIn,
@@ -57,7 +57,7 @@ def _fetch_lead(conn, lead_id: int) -> LeadOut:
         (lead_id,),
     ).fetchall()
     data = dict(row)
-    data["intent_level_label"] = INTENT_LEVEL_LABELS.get(data.get("intent_level") or "")
+    data["intent_level_label"] = labels.intent_level(data.get("intent_level"))
     return LeadOut(**data, tags=[r[0] for r in tag_rows])
 
 
@@ -161,13 +161,13 @@ def list_leads(
             params + [size, offset],
         ).fetchall()
         
-        from app.enums import INTENT_LEVEL_LABELS
+        from app import labels
         from app.timeline import load_overdue_days
 
         items = []
         for row in rows:
             data = dict(row)
-            data["intent_level_label"] = INTENT_LEVEL_LABELS.get(data.get("intent_level") or "", None)
+            data["intent_level_label"] = labels.intent_level(data.get("intent_level"))
             data["days_overdue"] = load_overdue_days(data.get("next_date"))
             items.append(LeadOut(**data))
     

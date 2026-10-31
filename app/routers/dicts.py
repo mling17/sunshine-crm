@@ -108,14 +108,38 @@ def create_item(code: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+#: 各分级允许修改的字段（PLANNER-V3 §1.3 / §4.2）
+_LEVEL_FIELDS = {
+    "A": {"label", "sort", "enabled", "meta"},
+    "B": {"label", "sort"},
+    "C": {"label"},
+    "D": set(),
+}
+
+
 @router.put("/{code}/items/{key}", response_model=Dict[str, Any])
 def update_item(code: str, key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     info = _dict_or_404(code)
-    if info["level"] == "D":
+    lv = info["level"]
+    allowed = _LEVEL_FIELDS.get(lv, set())
+    if lv == "D":
         raise ApiError(
             status_code=403,
             code="dict_level_forbidden",
             message=f"「{info['name']}」是系统只读字典，不能修改",
+        )
+    # 字段级权限：B 只能改名/排序，C 只能改名（越权一律 403，不静默忽略）
+    illegal = [f for f in ("label", "sort", "enabled", "meta") if f in payload and f not in allowed]
+    if illegal:
+        names = {"label": "显示名", "sort": "排序", "enabled": "启用/停用", "meta": "元数据"}
+        raise ApiError(
+            status_code=403,
+            code="dict_field_forbidden",
+            message=(
+                f"「{info['name']}」是 {lv} 类字典，只能改"
+                + "、".join(names[f] for f in sorted(allowed, key=lambda x: list(names).index(x)))
+                + f"；不允许改 " + "、".join(names[f] for f in illegal)
+            ),
         )
     if "key" in payload and str(payload["key"]) != key:
         raise ApiError(

@@ -9,7 +9,7 @@ CUSTOMER_LIFECYCLE_SQL = """
     CASE
         WHEN NOT EXISTS (SELECT 1 FROM deals d WHERE d.customer_id = customers.id)
             THEN 'potential'
-        WHEN EXISTS (SELECT 1 FROM deals d WHERE d.customer_id = customers.id AND d.stage IN ('confirm','quote','negotiate'))
+        WHEN EXISTS (SELECT 1 FROM deals d WHERE d.customer_id = customers.id AND d.stage IN ('quote','confirm'))
             THEN 'dealing'
         WHEN EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = customers.id AND o.status = 'completed')
             THEN 'won'

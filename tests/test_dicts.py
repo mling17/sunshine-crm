@@ -5,6 +5,8 @@ import os
 import tempfile
 import unittest
 
+from tests._util import ApiTestCase
+
 from app.dicts import (
     DICT_REGISTRY,
     DICT_SEEDS,
@@ -136,6 +138,98 @@ class TestDicts(unittest.TestCase):
         self.assertIn("product", first_model["meta"])
         self.assertIn("size", first_model["meta"])
         self.assertIn("drive", first_model["meta"])
+
+
+class DictHttpTest(ApiTestCase):
+    """字典的 HTTP 行为（R1 断言表 A17–A20 的可执行版本）。"""
+
+    def test_add_source_immediately_usable(self):
+        created = self.client.post(
+            "/api/crm/dicts/customer_source/items",
+            json={"key": "douyin", "label": "抖音", "sort": 7},
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        items = self.client.get("/api/crm/dicts/customer_source").json()["items"]
+        self.assertIn("douyin", [i["key"] for i in items])
+        # 新建客户可以直接用这个来源（字典校验放行）
+        cust = self.client.post("/api/crm/customers", json={"name": "抖音客户", "source": "douyin"})
+        self.assertEqual(cust.status_code, 200, cust.text)
+
+    def test_rename_propagates_to_output_labels(self):
+        """A18 后半：改字典显示名，出参 *_label 必须跟着变（R1 M1）"""
+        c = self.create_customer(name="改名客户")
+        deal = self.create_deal(c["id"], amount=500.0, drive_type="manual")
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.assertEqual(
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage_label"], "成交"
+        )
+
+        renamed = self.client.put("/api/crm/dicts/deal_stage/items/won", json={"label": "已成交"})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+
+        detail = self.client.get(f"/api/crm/deals/{deal['id']}").json()
+        self.assertEqual(detail["stage_label"], "已成交", "字典改名必须作用到出参")
+        rows = self.client.get("/api/crm/deals").json()
+        self.assertEqual([r["stage_label"] for r in rows if r["id"] == deal["id"]], ["已成交"])
+
+    def test_status_and_type_labels_follow_dict(self):
+        created = self.client.post(
+            "/api/crm/dicts/aftersale_type/items", json={"key": "install", "label": "安装返工", "sort": 9}
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        items = self.client.get("/api/crm/dicts/aftersale_type").json()["items"]
+        self.assertIn("install", [i["key"] for i in items])
+
+    def test_delete_referenced_item_conflict(self):
+        self.client.post(
+            "/api/crm/dicts/customer_source/items", json={"key": "douyin2", "label": "抖音", "sort": 8}
+        )
+        for i in range(3):
+            self.client.post(
+                "/api/crm/customers", json={"name": f"抖音客户{i}", "source": "douyin2"}
+            )
+        resp = self.client.delete("/api/crm/dicts/customer_source/items/douyin2")
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertEqual(resp.json()["code"], "dict_item_in_use")
+        self.assertIn("3", resp.json()["detail"], "提示里要带被引用条数")
+
+    def test_level_field_permissions(self):
+        """R1 M2：C 只能改名；B 只能改名+排序；越权 403"""
+        c_type = self.client.put("/api/crm/dicts/customer_type/items/personal", json={"sort": 9})
+        self.assertEqual(c_type.status_code, 403, c_type.text)
+        self.assertEqual(c_type.json()["code"], "dict_field_forbidden")
+
+        c_disable = self.client.put("/api/crm/dicts/customer_type/items/personal", json={"enabled": False})
+        self.assertEqual(c_disable.status_code, 403, c_disable.text)
+
+        b_disable = self.client.put("/api/crm/dicts/order_status/items/pending_payment", json={"enabled": False})
+        self.assertEqual(b_disable.status_code, 403, b_disable.text)
+
+        # 允许的：C 改名、B 改名/排序
+        self.assertEqual(
+            self.client.put("/api/crm/dicts/customer_type/items/personal", json={"label": "个人客户"}).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.put("/api/crm/dicts/order_status/items/pending_payment", json={"label": "待收款", "sort": 5}).status_code,
+            200,
+        )
+
+    def test_b_class_cannot_add_or_delete(self):
+        add = self.client.post("/api/crm/dicts/order_status/items", json={"key": "x", "label": "X"})
+        self.assertEqual(add.status_code, 403, add.text)
+        rm = self.client.delete("/api/crm/dicts/order_status/items/completed")
+        self.assertEqual(rm.status_code, 403, rm.text)
+
+    def test_key_immutable_and_invalid(self):
+        rename = self.client.put(
+            "/api/crm/dicts/customer_source/items/wechat", json={"key": "wx"}
+        )
+        self.assertEqual(rename.status_code, 400, rename.text)
+        bad_key = self.client.post(
+            "/api/crm/dicts/customer_source/items", json={"key": "a b/c", "label": "坏 key"}
+        )
+        self.assertEqual(bad_key.status_code, 400, bad_key.text)
 
 
 if __name__ == '__main__':

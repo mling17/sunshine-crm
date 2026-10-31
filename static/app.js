@@ -26,10 +26,9 @@
   /* 与后端 app/enums.py::DEAL_STAGE_LABELS 一致（V2 阶段：需求确认→报价→成交洽谈→赢单/流失）
      唯一来源在后端，这里只做展示映射；改名务必同步 enums.py */
   var STAGES = [
-    ['confirm', '需求确认'],
     ['quote', '报价'],
-    ['negotiate', '成交洽谈'],
-    ['won', '赢单'],
+    ['confirm', '待客户确认'],
+    ['won', '成交'],
     ['lost', '流失']
   ];
   var STAGE_LABEL = {};

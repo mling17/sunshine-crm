@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from app import labels
 from app.db import db_conn
 from app.models import (
     STAGES,
@@ -222,7 +223,7 @@ def get_dashboard() -> DashboardOut:
             customer_name=row["customer_name"],
             deal_id=row["deal_id"],
             deal_stage=row["deal_stage"],
-            deal_stage_label=STAGE_LABELS.get(row["deal_stage"]),
+            deal_stage_label=labels.deal_stage(row["deal_stage"]),
             content=row["content"],
             next_date=row["next_date"],
             days_overdue=int(row["days_overdue"] or 0),

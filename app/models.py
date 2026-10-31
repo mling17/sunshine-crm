@@ -9,6 +9,7 @@ from typing import Annotated, Optional, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
+from app import labels
 from app.enums import (
     DEAL_STAGE,
     DEAL_STAGE_LABELS,
@@ -185,16 +186,13 @@ class DealOut(BaseModel):
     @model_validator(mode="after")
     def _fill_stage_label(self) -> "DealOut":
         if self.stage_label is None:
-            self.stage_label = STAGE_LABELS.get(self.stage)
+            self.stage_label = labels.deal_stage(self.stage)
         return self
 
     @model_validator(mode="after")
     def _fill_drive_type_label(self) -> "DealOut":
         if self.drive_type_label is None and self.drive_type:
-            if self.drive_type == "manual":
-                self.drive_type_label = "手动"
-            elif self.drive_type == "electric":
-                self.drive_type_label = "电动"
+            self.drive_type_label = labels.drive_type(self.drive_type)
         return self
 
 
@@ -585,7 +583,7 @@ class OrderOut(BaseModel):
     @model_validator(mode="after")
     def _fill_status_label(self) -> "OrderOut":
         if self.status_label is None:
-            self.status_label = ORDER_STATUS_LABELS.get(self.status)
+            self.status_label = labels.order_status(self.status)
         return self
 
 
@@ -643,7 +641,7 @@ class OrderDetailOut(BaseModel):
     @model_validator(mode="after")
     def _fill_status_label(self) -> "OrderDetailOut":
         if self.status_label is None:
-            self.status_label = ORDER_STATUS_LABELS.get(self.status)
+            self.status_label = labels.order_status(self.status)
         return self
 
 
@@ -724,14 +722,16 @@ class AftersaleUpdate(BaseModel):
 
 
 class AftersaleOut(BaseModel):
-    """售后单列表项。"""
+    """售后单列表项（type/status 的中文由数据字典决定）。"""
 
     id: int
     no: str
     type: str
+    type_label: str | None = None
     type_other: str | None = None
     description: str
     status: str
+    status_label: str | None = None
     reject_reason: str | None = None
     result: str | None = None
     closed_at: str | None = None
@@ -739,6 +739,14 @@ class AftersaleOut(BaseModel):
     updated_at: str
     order_no: str | None = None
     customer_name: str | None = None
+
+    @model_validator(mode="after")
+    def _fill_labels(self) -> "AftersaleOut":
+        if self.type_label is None:
+            self.type_label = labels.aftersale_type(self.type)
+        if self.status_label is None:
+            self.status_label = labels.aftersale_status(self.status)
+        return self
 
 
 class AftersaleStatusLogOut(BaseModel):
