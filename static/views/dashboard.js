@@ -146,7 +146,7 @@ function openQuickFollowup(customerId, dealId) {
         '<div class="modal-header"><h3>记一条跟进</h3>' +
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
-        '<form id="quickFuForm" autocomplete="off">' +
+        '<form id="quickFuForm" class="form-grid" autocomplete="off">' +
         '<div class="field"><label>跟进内容 *</label>' +
         '<textarea name="content" rows="4" maxlength="2000" required ' +
         'placeholder="聊了什么、客户什么态度、下一步做什么"></textarea></div>' +

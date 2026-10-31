@@ -27,7 +27,7 @@ function orderStatusLabel(status, statusLabel) {
 
 /* 新增商机表单（不含客户选择：客户由调用页面的 select 提供） */
 function dealFormHtml() {
-  return '<form id="newDealForm" autocomplete="off">' +
+  return '<form id="newDealForm" class="form-grid" autocomplete="off">' +
     '<div class="row-2">' +
       '<div class="field"><label>产品类型</label>' +
         '<input name="product_type" type="text" maxlength="32" placeholder="天窗 / 天幕"></div>' +
@@ -334,7 +334,7 @@ function openFollowModal(opts) {
     '<div class="modal-header"><h3>' + esc(opts.title || '记一条跟进') + '</h3>' +
     '<button type="button" class="btn btn-link modal-close">×</button></div>' +
     '<div class="modal-body">' +
-    '<form id="fuModalForm" autocomplete="off">' +
+    '<form id="fuModalForm" class="form-grid" autocomplete="off">' +
     '<div class="field"><label>跟进内容 *</label>' +
     '<textarea name="content" rows="4" maxlength="2000" required placeholder="' +
     esc(opts.placeholder || '聊了什么？对方什么态度？下一步做什么？') + '"></textarea></div>' +

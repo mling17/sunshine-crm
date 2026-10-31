@@ -185,7 +185,7 @@ function loadLeads(root) {
 
 function leadFormHtml(lead) {
     var l = lead || {};
-    return '<form class=\"lead-form\" autocomplete=\"off\">' +
+    return '<form class=\"lead-form form-grid\" autocomplete=\"off\">' +
         '<div class=\"row-2\">' +
         '<div class=\"field\"><label>姓名 *</label>' +
         '<input name=\"name\" type=\"text\" maxlength=\"64\" required value=\"' + esc(l.name || '') + '\"></div>' +
@@ -463,7 +463,7 @@ function openLeadDealModal(lead) {
         '<div class="modal-header"><h3>转商机</h3>' +
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
-        '<form id="leadDealForm" autocomplete="off">' +
+        '<form id="leadDealForm" class="form-grid" autocomplete="off">' +
         '<p class="small muted" style="margin-top:0">来源：' +
         esc(lead.name || lead.company_name || ('线索 #' + lead.id)) + '（线索）　转化会同时建立客户档案。</p>' +
         '<div class="row-2">' +
@@ -563,7 +563,7 @@ function invalidateLead(leadId) {
         '<button type=\"button\" class=\"btn btn-link modal-close\">×</button>' +
         '</div>' +
         '<div class=\"modal-body\">' +
-        '<form id=\"invalidateForm\" class=\"invalidate-form\">' +
+        '<form id=\"invalidateForm\" class=\"invalidate-form form-grid\">' +
         '<div class=\"field\"><label>失效原因 *</label>' +
         '<select name=\"invalid_reason\" required>' +
         '<option value=\"\">请选择失效原因</option>' +

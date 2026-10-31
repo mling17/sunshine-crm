@@ -139,7 +139,7 @@ function viewAftersaleDetail(root, rawId) {
         }
 
         var followForm = finished ? '' :
-            '<form id="asFollowForm" class="card" autocomplete="off" style="margin-top:10px">' +
+            '<form id="asFollowForm" class="card form-grid" autocomplete="off" style="margin-top:10px">' +
             '<div class="field"><label>跟进内容 *（≤2000 字）</label>' +
             '<textarea name="content" maxlength="2000" required ' +
             'placeholder="和客户沟通了什么？处理到哪一步了？"></textarea></div>' +
@@ -225,7 +225,7 @@ function openAftersaleFinish(a) {
         '<div class="modal-header"><h3>标记完成 · ' + esc(a.no) + '</h3>' +
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
-        '<form id="asFinishForm" autocomplete="off">' +
+        '<form id="asFinishForm" class="form-grid" autocomplete="off">' +
         '<div class="field"><label>处理结果 *</label>' +
         '<textarea name="result" maxlength="1000" rows="3" required ' +
         'placeholder="换了什么件、怎么处理的、客户是否满意"></textarea></div>' +

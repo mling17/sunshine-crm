@@ -162,7 +162,7 @@ function openCustomerEdit(id, root) {
 
 function customerFormHtml(customer) {
     var c = customer || {};
-    return '<form class=\"customer-form\" autocomplete=\"off\">' +
+    return '<form class=\"customer-form form-grid\" autocomplete=\"off\">' +
         '<div class=\"row-2\">' +
         '<div class=\"field\"><label>姓名 *</label>' +
         '<input name=\"name\" type=\"text\" maxlength=\"64\" required value=\"' + esc(c.name || '') + '\"></div>' +

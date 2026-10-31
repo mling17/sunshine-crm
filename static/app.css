@@ -2181,3 +2181,53 @@ table.data-table a:hover { text-decoration: underline; }
     gap: 8px 10px;
   }
 }
+
+/* ================= 新增 / 编辑表单统一紧凑布局 =================
+ * 短字段默认双列；长控件与说明类节点占满整行。
+ * 手机端继续保留双列，避免日期、金额、下拉框等短字段再次独占一行。 */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+  align-items: start;
+}
+
+.form-grid > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.form-grid > .field {
+  grid-column: auto;
+  margin-bottom: 12px;
+}
+
+.form-grid > .field.field-wide,
+.form-grid > .field:has(> textarea),
+.form-grid > .field:has(> input[type="file"]),
+.form-grid > .field:has(#contactRows) {
+  grid-column: 1 / -1;
+}
+
+.form-grid > .row-2,
+.form-grid > .row-3 {
+  display: grid;
+}
+
+.form-grid > .row-2 > .field,
+.form-grid > .row-3 > .field {
+  margin-bottom: 0;
+}
+
+.form-grid > .form-actions {
+  margin-top: 4px;
+}
+
+@media (max-width: 640px) {
+  .form-grid,
+  .form-grid > .row-2,
+  .form-grid > .row-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 10px;
+  }
+}

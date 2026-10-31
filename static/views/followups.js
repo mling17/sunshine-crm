@@ -32,7 +32,7 @@ function followupItemHtml(item, opts) {
 
 function followupFormHtml(index, preCustomer, preDeal) {
   var hasCustomers = Object.keys(index).length > 0;
-  return '<form id="fuForm" autocomplete="off">' +
+  return '<form id="fuForm" class="form-grid" autocomplete="off">' +
     '<div class="row-2">' +
       '<div class="field"><label>客户 *</label>' +
         (hasCustomers

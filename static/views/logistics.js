@@ -134,14 +134,14 @@ function openCarrierForm(id, root) {
             '<div class="modal-header"><h3>' + (isEdit ? '编辑物流公司' : '新增物流公司') + '</h3>' +
             '<button type="button" class="btn btn-link modal-close">×</button></div>' +
             '<div class="modal-body">' +
-            '<form id="carrierFormEl" autocomplete="off">' +
+            '<form id="carrierFormEl" class="form-grid" autocomplete="off">' +
             '<div class="row-2">' +
             '<div class="field"><label>公司名称 *</label>' +
             '<input name="name" required maxlength="64" value="' + esc(d.name || '') + '"></div>' +
             '<div class="field"><label>公司编号（可选）</label>' +
             '<input name="code" maxlength="32" value="' + esc(d.code || '') + '"></div>' +
             '</div>' +
-            '<div class="field"><label>地址（可选）</label>' +
+            '<div class="field field-wide"><label>地址（可选）</label>' +
             '<input name="address" maxlength="200" value="' + esc(d.address || '') + '"></div>' +
             '<div class="field"><label>联系人（可多个：业务 / 调度 / 结算）</label>' +
             '<div id="contactRows"></div>' +

@@ -285,7 +285,7 @@ function viewOrderDetail(root, rawId) {
 function openAftersaleModal(order) {
     var modal = createOrderModal('添加售后');
     modal.querySelector('.modal-body').innerHTML =
-        '<form id="asNewForm" class="form-modal" autocomplete="off">' +
+        '<form id="asNewForm" class="form-modal form-grid" autocomplete="off">' +
         '<p class="small muted">订单 ' + esc(order.order_no) + ' · 客户 ' +
         esc(order.customer_name || ('#' + order.customer_id)) + '</p>' +
         '<div class="field"><label>售后类型 *</label>' +
@@ -332,7 +332,7 @@ function transitionOrder(order, toStatus, extra, confirmText) {
 /* 发货：填物流方式 / 承运 / 运单号 */
 function showShipModal(order) {
     var modal = createOrderModal('发货');
-    modal.querySelector('.modal-body').innerHTML = '<form id="shipForm" class="form-modal">' +
+    modal.querySelector('.modal-body').innerHTML = '<form id="shipForm" class="form-modal form-grid">' +
         '<div class="row-2">' +
         '<div class="field"><label>物流方式</label>' +
         '<select name="logistics_mode">' +
@@ -373,7 +373,7 @@ function showShipModal(order) {
 /* ---------------- 押金 / 尾款（要传截图） ---------------- */
 function showDepositPayment(order) {
     var modal = createOrderModal('支付押金');
-    modal.querySelector('.modal-body').innerHTML = '<form id="depositForm" class="form-modal">' +
+    modal.querySelector('.modal-body').innerHTML = '<form id="depositForm" class="form-modal form-grid">' +
         '<div class="field"><label>押金金额 *</label>' +
         '<input type="number" id="depositAmount" name="amount" min="0" step="0.01" required ' +
         'placeholder="应收押金 ' + money(order.deposit_amount || order.amount) + '"></div>' +
@@ -407,7 +407,7 @@ function showDepositPayment(order) {
 function showBalancePayment(order) {
     var modal = createOrderModal('支付尾款');
     var remaining = Math.max(0, Number(order.balance_amount || 0) - (Number(order.balance_paid) || 0));
-    modal.querySelector('.modal-body').innerHTML = '<form id="balanceForm" class="form-modal">' +
+    modal.querySelector('.modal-body').innerHTML = '<form id="balanceForm" class="form-modal form-grid">' +
         '<div class="field"><label>尾款金额 *</label>' +
         '<input type="number" name="amount" min="0" step="0.01" required ' +
         'placeholder="应付尾款 ' + money(remaining) + '"></div>' +

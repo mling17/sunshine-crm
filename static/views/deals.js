@@ -189,7 +189,7 @@ function openDealEdit(deal, done) {
         '<div class="modal-header"><h3>编辑商机</h3>' +
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
-        '<form id="dealEditForm" autocomplete="off">' +
+        '<form id="dealEditForm" class="form-grid" autocomplete="off">' +
         '<div class="row-2">' +
         '<div class="field"><label>产品类型</label>' +
         '<select name="product_type">' + dictOptions('product_type', deal.product_type, '不指定') + '</select></div>' +
@@ -282,7 +282,7 @@ function openDealLose(deal, done) {
         '<div class="modal-header"><h3>判流失</h3>' +
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
-        '<form id="dealLoseForm" autocomplete="off">' +
+        '<form id="dealLoseForm" class="form-grid" autocomplete="off">' +
         '<div class="field"><label>流失原因 *</label>' +
         '<select name="lost_reason" required>' + dictOptions('lost_reason', '', '请选择') + '</select></div>' +
         '<div class="field"><label>补充说明（选「其他」时填）</label>' +
@@ -347,7 +347,7 @@ function viewDealNew(root, route) {
             '<div class="card">' +
             '<div class="card-head"><h2><a href="' + backHash + '">‹ ' + backLabel + '</a> / 转商机</h2>' +
             '<span class="badge muted">来源：' + esc(fromName) + '</span></div>' +
-            '<form id="dealNewForm" autocomplete="off">' +
+            '<form id="dealNewForm" class="form-grid" autocomplete="off">' +
             '<div class="row-2">' +
             '<div class="field"><label>产品类型</label>' +
             '<select name="product_type">' + dictOptions('product_type', '天窗', '请选择') + '</select></div>' +
@@ -466,7 +466,7 @@ function openDealOrderModal(deal, customerName) {
         '<div class="modal-header"><h3>生成订单</h3>' +
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
-        '<form id="dealOrderForm" autocomplete="off">' +
+        '<form id="dealOrderForm" class="form-grid" autocomplete="off">' +
         '<p class="small muted" style="margin-top:0">' +
         esc(customerName) + ' · ' + esc(dealProductText(deal)) + '　成交后商机会锁定。</p>' +
         '<div class="row-3">' +
@@ -493,7 +493,7 @@ function openDealOrderModal(deal, customerName) {
         '<div class="row-3" data-ship hidden>' +
         '<div class="field"><label>收货人 *</label><input name="receiver_name" maxlength="32"></div>' +
         '<div class="field"><label>收货电话 *</label><input name="receiver_phone" maxlength="32" inputmode="tel"></div>' +
-        '<div class="field"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
+        '<div class="field field-wide"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
         '</div>' +
         '<p class="small muted">收款只走两笔：先「收押金」，生产阶段再「收尾款」。押金 + 尾款 = 订单金额。</p>' +
         '<div class="form-actions">' +
