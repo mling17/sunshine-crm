@@ -455,25 +455,199 @@
 }
 .btn-outline-danger:hover { background: #fff3f5; border-color: #9b2030; }
 
-.quote-stack { margin-top: 16px; }
-.quote-card {
-  margin: 12px 0;
-  padding: 16px;
-  border: 1px solid var(--line, #dfe6ef);
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 6px 20px rgba(30, 50, 80, .06);
+.deal-overview {
+  margin-bottom: 16px;
+  padding: 20px;
+  border: 1px solid rgba(214, 224, 238, .9);
+  border-radius: var(--radius, 14px);
+  background: var(--card, #fff);
+  box-shadow: var(--shadow, 0 8px 24px rgba(30, 50, 80, .06));
 }
-.deal-note-under-quotes {
+.deal-overview-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+.deal-overview-identity {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.deal-overview-crumb { color: #7a8799; font-size: 12px; white-space: nowrap; }
+.deal-overview-crumb a { color: #4d6482; }
+.deal-overview-name {
+  color: #10233e;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  text-decoration: none;
+}
+.deal-overview-name:hover { color: #1f5fbf; }
+.deal-overview-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid #dbe6f3;
+  border-radius: 999px;
+  background: #f5f9fe;
+  color: #4f6380;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.deal-overview-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid #e3eaf3;
+  border-radius: 999px;
+  background: #fbfcfe;
+}
+.deal-overview-status > span {
+  color: #7a8799;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.deal-overview-note {
   display: flex;
   gap: 10px;
+  max-width: 760px;
   margin-top: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid #96b7df;
+  border-radius: 0 8px 8px 0;
   background: #f5f8fc;
   color: #536174;
+  line-height: 1.6;
 }
-.deal-note-under-quotes b { color: #1d2939; white-space: nowrap; }
+.deal-overview-note b { flex: none; color: #1d2939; white-space: nowrap; }
+.deal-quote-list {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 2px 2px 6px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+}
+.deal-quote-card {
+  flex: 0 0 min(286px, 82vw);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #dce5f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(30, 50, 80, .05);
+  scroll-snap-align: start;
+  transition: flex-basis .18s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.deal-quote-card:hover { border-color: #b6c9df; }
+.deal-quote-card[open] {
+  flex-basis: min(500px, 92vw);
+  border-color: #a9c2df;
+  box-shadow: 0 8px 24px rgba(30, 70, 120, .1);
+}
+.deal-quote-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px 12px;
+  padding: 15px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.deal-quote-card-head::-webkit-details-marker { display: none; }
+.deal-quote-card-head::after {
+  content: "查看明细";
+  grid-column: 1 / -1;
+  color: #4c6c92;
+  font-size: 11px;
+  font-weight: 600;
+}
+.deal-quote-card[open] .deal-quote-card-head::after { content: "收起明细"; }
+.deal-quote-card-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #172a43;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deal-quote-card-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  white-space: nowrap;
+}
+.deal-quote-card-side b { color: #173b67; font-size: 15px; }
+.deal-quote-card-meta {
+  grid-column: 1 / -1;
+  color: #7a8799;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.deal-quote-card-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid #edf1f6;
+}
+.deal-quote-items { margin: 10px 0; }
+.deal-quote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #edf1f6;
+}
+.deal-quote-empty {
+  display: flex;
+  flex: 0 0 min(320px, 84vw);
+  min-height: 112px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px dashed #b9c9dc;
+  border-radius: 12px;
+  background: #fbfdff;
+  color: #5c6f86;
+  text-align: center;
+}
+.deal-quote-empty b {
+  padding: 5px 18px;
+  border: 1px solid #cbd8e7;
+  border-radius: 999px;
+  background: #fff;
+  color: #334a66;
+  font-size: 14px;
+}
+.deal-quote-empty span { font-size: 12px; color: #8795a7; }
+.deal-overview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #edf1f6;
+}
+
+@media (max-width: 640px) {
+  .deal-overview { padding: 16px; }
+  .deal-overview-head { align-items: start; gap: 8px; }
+  .deal-overview-status { padding-left: 8px; }
+  .deal-overview-status > span { display: none; }
+  .deal-overview-name { font-size: 19px; }
+  .deal-overview-actions .btn { flex: 1 1 calc(50% - 8px); }
+}
 
 /* 报价单 Excel 预览：保留表格密度，内容在卡片内滚动 */
 .quote-form-sheet {
@@ -2024,6 +2198,13 @@ body {
 .btn:not(.btn-primary):not(.btn-danger):not(.btn-success):not(.btn-warning):not(.btn-outline-danger):hover {
   border-color: #b8c8dd;
   background: #f8faff;
+}
+.btn:disabled {
+  border-color: #dfe5ed;
+  background: #f2f5f9;
+  color: #96a1b0;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 .btn-sm { min-height: 30px; padding: 5px 10px; font-size: 12px; border-radius: 8px; }
 .btn-link { color: var(--accent); font-weight: 600; }

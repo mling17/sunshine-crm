@@ -100,7 +100,8 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             "data-quote-delete",
             "data-quote-order",
             "quote-card",
-            "deal-note-under-quotes",
+            "deal-quote-list",
+            "deal-quote-empty",
             "/quotes/items/",
         ):
             self.assertIn(marker, self.deals)
@@ -119,9 +120,37 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             self.deals.index("function openDealNoteEdit")
         ]
         self.assertNotIn("infoHtml: infoGrid([", detail)
-        self.assertIn("beforeTimelineHtml: quoteCardsHtml", detail)
-        self.assertLess(detail.index("headerCreateQuote"), detail.index("id=\"dealEdit\""))
+        self.assertIn("hideEntityCard: true", detail)
+        self.assertIn("beforeTimelineHtml: dealOverviewHtml", detail)
         self.assertIn("报价单名称 *", self.deals)
+
+    def test_deal_layout_matches_quote_wireframe(self):
+        overview = self.deals[
+            self.deals.index("function dealOverviewHtml"):
+            self.deals.index("function bindQuoteActions")
+        ]
+        self.assertIn('class="deal-overview-head"', overview)
+        self.assertIn('class="deal-overview-name"', overview)
+        self.assertIn('class="deal-overview-count"', overview)
+        self.assertIn('class="deal-overview-status"', overview)
+        self.assertIn("(noteText ?", overview)
+        self.assertIn('class="deal-overview-actions"', overview)
+        self.assertIn("＋ 添加报价单", overview)
+        self.assertIn(">编辑备注</button>", overview)
+        self.assertIn(">生成订单</button>", overview)
+        self.assertIn(">标记流失</button>", overview)
+        self.assertIn("addQuoteAction + editNoteAction +", overview)
+        self.assertIn("orderAction + loseAction", overview)
+
+        for marker in (
+            ".deal-overview {",
+            ".deal-overview-note {",
+            ".deal-quote-list {",
+            "display: flex;",
+            ".deal-quote-empty {",
+            ".deal-overview-actions {",
+        ):
+            self.assertIn(marker, self.css)
 
     def test_quote_action_colors_are_not_overridden_by_neutral_buttons(self):
         neutral = (

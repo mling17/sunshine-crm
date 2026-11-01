@@ -440,14 +440,15 @@ function renderEntityFollowPage(root, opts) {
     esc(opts.backLabel) + '</a> / ' + esc(opts.title) + '</h2></div>'
   );
   root.innerHTML =
-    '<div class="card">' +
-    '<div class="card-head entity-title-head">' +
-    titleHtml +
-    (opts.badgesHtml ? '<div class="entity-title-badges">' + opts.badgesHtml + '</div>' : '') +
-    '</div>' +
-    (opts.infoHtml || '') +
-    (opts.actionsHtml ? '<div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">' + opts.actionsHtml + '</div>' : '') +
-    '</div>' +
+    (opts.hideEntityCard ? '' :
+      '<div class="card">' +
+      '<div class="card-head entity-title-head">' +
+      titleHtml +
+      (opts.badgesHtml ? '<div class="entity-title-badges">' + opts.badgesHtml + '</div>' : '') +
+      '</div>' +
+      (opts.infoHtml || '') +
+      (opts.actionsHtml ? '<div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">' + opts.actionsHtml + '</div>' : '') +
+      '</div>') +
     (opts.beforeTimelineHtml || '') +
     '<div class="card">' +
     '<div class="card-head"><h2>跟进履历 <span class="badge muted">' + (opts.records || []).length + '</span></h2>' +

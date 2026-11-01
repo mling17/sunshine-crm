@@ -142,7 +142,7 @@ function quoteItemHtml(item, editable) {
 }
 
 function quoteCardsHtml(deal, quotes) {
-    var body = (quotes || []).map(function (quote) {
+    var cards = (quotes || []).map(function (quote) {
         var editable = !deal.order_id && quote.status === 'draft';
         var itemHtml = quote.items && quote.items.length
             ? quote.items.map(function (item) { return quoteItemHtml(item, editable); }).join('')
@@ -161,10 +161,6 @@ function quoteCardsHtml(deal, quotes) {
             actions += '<button type="button" class="btn btn-sm btn-success" data-quote-confirm="' +
                 quote.id + '">客户已确认</button> ';
         }
-        if (quote.status === 'confirmed' && !quote.order_id && !deal.order_id) {
-            actions += '<button type="button" class="btn btn-sm btn-primary" data-quote-order="' +
-                quote.id + '">生成订单</button> ';
-        }
         if (quote.order_id) {
             actions += '<a class="btn btn-sm btn-primary" href="#/orders/' + quote.order_id + '">查看订单</a> ';
         }
@@ -176,36 +172,89 @@ function quoteCardsHtml(deal, quotes) {
             actions += '<button type="button" class="btn btn-sm btn-danger" data-quote-delete="' +
                 quote.id + '">删除报价单</button>';
         }
-        return '<div class="quote-card">' +
-            '<div class="item-main" style="width:100%">' +
-            '<div class="item-title"><b>' + esc(quote.quote_no) + '</b> ' + quoteStatusBadge(quote) +
-                '<span style="margin-left:auto"><b>' + money(quote.amount) + '</b></span></div>' +
-            '<div class="item-sub small muted">' + esc(quote.title) +
-                ' · 创建 ' + fmtDateTime(quote.created_at) +
-                (quote.confirmed_at ? ' · 确认 ' + fmtDateTime(quote.confirmed_at) : '') + '</div>' +
-            (quote.note ? '<div class="item-sub">' + esc(quote.note) + '</div>' : '') +
-            (quote.confirmation_note
-                ? '<div class="item-sub small">确认说明：' + esc(quote.confirmation_note) + '</div>'
-                : '') +
-            ((quote.confirmation_files || []).length
-                ? '<div class="photos">' + quote.confirmation_files.map(function (file) {
-                    var url = '/crm' + file.url;
-                    return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' +
-                        '<img src="' + esc(url) + '" alt="客户确认截图" loading="lazy"></a>';
-                }).join('') + '</div>'
-                : '') +
-            '<div style="margin:10px 0">' + itemHtml + '</div>' +
-            (actions ? '<div class="form-actions" style="justify-content:flex-start;margin-top:8px">' +
-                actions + '</div>' : '') +
-            '</div></div>';
+        var quoteTitle = quote.title || quote.quote_no;
+        var itemCount = (quote.items || []).length;
+        return '<details class="deal-quote-card">' +
+            '<summary class="deal-quote-card-head">' +
+                '<span class="deal-quote-card-title">' + esc(quoteTitle) + '</span>' +
+                '<span class="deal-quote-card-side">' + quoteStatusBadge(quote) +
+                    '<b>' + money(quote.amount) + '</b></span>' +
+                '<span class="deal-quote-card-meta">' + esc(quote.quote_no) +
+                    ' · ' + itemCount + ' 项产品</span>' +
+            '</summary>' +
+            '<div class="deal-quote-card-body">' +
+                '<div class="small muted">创建 ' + fmtDateTime(quote.created_at) +
+                    (quote.confirmed_at ? ' · 确认 ' + fmtDateTime(quote.confirmed_at) : '') + '</div>' +
+                (quote.note ? '<div class="item-sub">' + esc(quote.note) + '</div>' : '') +
+                (quote.confirmation_note
+                    ? '<div class="item-sub small">确认说明：' + esc(quote.confirmation_note) + '</div>'
+                    : '') +
+                ((quote.confirmation_files || []).length
+                    ? '<div class="photos">' + quote.confirmation_files.map(function (file) {
+                        var url = '/crm' + file.url;
+                        return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' +
+                            '<img src="' + esc(url) + '" alt="客户确认截图" loading="lazy"></a>';
+                    }).join('') + '</div>'
+                    : '') +
+                '<div class="deal-quote-items">' + itemHtml + '</div>' +
+                (actions ? '<div class="deal-quote-actions">' + actions + '</div>' : '') +
+            '</div>' +
+        '</details>';
     }).join('');
-    return '<div id="dealQuotesCard" class="quote-stack">' +
-        '<div class="card-head"><h2>报价单 <span class="badge muted">' +
-        (quotes || []).length + '</span></h2></div>' +
-        (body || '<p class="empty">还没有报价单。商机只记录需求，产品、金额和下单表都放在报价单中。</p>') +
-        '<div class="deal-note-under-quotes"><b>备注</b><span>' +
-        esc(deal.note || '未填写') + '</span></div>' +
+    return '<div class="deal-quote-list">' +
+        (cards || '<div class="deal-quote-empty"><b>无报价单</b>' +
+            '<span>添加报价单后在这里比较不同方案</span></div>') +
         '</div>';
+}
+
+function dealOverviewHtml(deal, customerName, quotes) {
+    var confirmedQuote = (quotes || []).filter(function (quote) {
+        return quote.status === 'confirmed';
+    })[0];
+    var noteText = String(deal.note || '').trim();
+    var canAddQuote = !deal.order_id && deal.stage !== 'lost' && !confirmedQuote;
+    var canEditNote = !deal.order_id && deal.stage !== 'lost';
+    var canLose = !deal.order_id && deal.stage !== 'lost' && !confirmedQuote;
+    var orderAction;
+    if (deal.order_id) {
+        orderAction = '<a class="btn btn-sm btn-primary" href="#/orders/' + deal.order_id +
+            '">查看订单</a>';
+    } else if (confirmedQuote) {
+        orderAction = '<button type="button" class="btn btn-sm btn-primary" id="dealCreateOrder" ' +
+            'data-quote-order="' + confirmedQuote.id + '">生成订单</button>';
+    } else {
+        orderAction = '<button type="button" class="btn btn-sm btn-primary" disabled ' +
+            'title="客户确认报价单后才能生成订单">生成订单</button>';
+    }
+    var addQuoteAction = canAddQuote
+        ? '<button type="button" class="btn btn-sm btn-primary" id="headerCreateQuote">' +
+          '＋ 添加报价单</button>'
+        : '<button type="button" class="btn btn-sm btn-primary" disabled ' +
+          'title="已有客户确认的报价单或商机已关闭">＋ 添加报价单</button>';
+    var editNoteAction = canEditNote
+        ? '<button type="button" class="btn btn-sm" id="dealEdit">编辑备注</button>'
+        : '<button type="button" class="btn btn-sm" disabled title="商机已关闭">编辑备注</button>';
+    var loseAction = canLose
+        ? '<button type="button" class="btn btn-sm btn-danger" id="dealLose">标记流失</button>'
+        : '<button type="button" class="btn btn-sm btn-danger" disabled ' +
+          'title="已确认报价或商机已关闭">标记流失</button>';
+    return '<section class="deal-overview" id="dealQuotesCard">' +
+        '<div class="deal-overview-head">' +
+            '<div class="deal-overview-identity">' +
+                '<span class="deal-overview-crumb"><a href="#/deals">‹ 商机</a> /</span>' +
+                '<a class="deal-overview-name" href="#/customers/' + deal.customer_id + '">' +
+                    esc(customerName) + '</a>' +
+                '<span class="deal-overview-count">报价单 ' + (quotes || []).length + '</span>' +
+            '</div>' +
+            '<div class="deal-overview-status"><span>商机状态</span>' +
+                dealStageBadge(deal.stage, deal.stage_label) + '</div>' +
+        '</div>' +
+        (noteText ? '<div class="deal-overview-note"><b>备注</b><span>' +
+            esc(noteText) + '</span></div>' : '') +
+        quoteCardsHtml(deal, quotes) +
+        '<div class="deal-overview-actions">' + addQuoteAction + editNoteAction +
+            orderAction + loseAction + '</div>' +
+    '</section>';
 }
 
 function bindQuoteActions(root, deal, customerName, quotes, products) {
@@ -601,42 +650,12 @@ function viewDealDetail(root, rawId) {
         var canFollow = !d.order_id && d.stage !== 'lost';
         var canEditItems = !d.order_id && d.stage !== 'lost';
         var items = d.items || [];
-        var canCreateQuote = !d.order_id && d.stage !== 'lost';
-        var confirmedQuote = (quotes || []).filter(function (q) {
-            return q.status === 'confirmed';
-        })[0];
-
-        var orderLink = d.order_id
-            ? '<a class="badge ok" href="#/orders/' + d.order_id + '">已生成订单 ›</a>' : '';
-        var actionHtml = '';
-        if (d.order_id) {
-            actionHtml = '<button type="button" class="btn btn-sm" disabled title="已生成订单，商机不可修改">编辑商机</button>' +
-                '<a class="btn btn-sm btn-primary" href="#/orders/' + d.order_id + '">查看订单</a>' +
-                '<span class="small muted">已生成订单，商机锁定</span>';
-        } else if (d.stage === 'lost') {
-            actionHtml = '<button type="button" class="btn btn-sm" disabled title="商机已作废，不可修改">编辑备注</button>' +
-                '<span class="small muted">所有报价单均已作废</span>';
-        } else {
-            if (!confirmedQuote) {
-                actionHtml += '<button type="button" class="btn btn-sm btn-primary" id="headerCreateQuote">' +
-                    '＋ 创建报价单</button>';
-            }
-            actionHtml += '<button type="button" class="btn btn-sm" id="dealEdit">编辑备注</button>';
-            if (!confirmedQuote) {
-                actionHtml += '<button type="button" class="btn btn-sm btn-danger" id="dealLose">作废商机</button>';
-            }
-        }
 
         renderEntityFollowPage(root, {
             backHash: '#/deals',
             backLabel: '商机',
-            title: customerName + ' · ' + dealProductText(d),
-            titleHtml:
-                '<div class="entity-title-main"><h2><a class="crumb" href="#/deals">‹ 商机</a> / ' +
-                esc(customerName) + '</h2><div class="small muted">' + esc(dealProductText(d)) + '</div></div>',
-            badgesHtml: dealStageBadge(d.stage, d.stage_label) + ' ' + orderLink,
-            infoHtml: '',
-            actionsHtml: actionHtml,
+            title: customerName,
+            hideEntityCard: true,
             placeholder: '这次沟通聊了什么？客户对报价和参数是什么态度？下一步做什么？',
             canFollow: canFollow,
             lockedText: d.order_id
@@ -651,7 +670,7 @@ function viewDealDetail(root, rawId) {
                           ' · ' + esc(quote.status_label || quote.status) + '</option>';
                   }).join('') + '</select></div>'
                 : '',
-            beforeTimelineHtml: quoteCardsHtml(d, quotes, false) +
+            beforeTimelineHtml: dealOverviewHtml(d, customerName, quotes) +
                 ((!quotes.length && items.length)
                     ? dealItemsCardHtml(items, false, d.amount) : ''),
             extraHtml:
