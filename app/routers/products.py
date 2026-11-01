@@ -164,14 +164,14 @@ def _next_product_code(conn: sqlite3.Connection) -> str:
     return f"TS-{highest + 1:03d}"
 
 
-def _duplicate_form_code(conn: sqlite3.Connection, form_sha256: str) -> str | None:
+def _duplicate_form(conn: sqlite3.Connection, form_sha256: str) -> tuple[int, str] | None:
     row = conn.execute(
-        "SELECT code FROM products"
+        "SELECT id, code FROM products"
         " WHERE form_sha256 = ? AND is_delete = 0"
         " ORDER BY id LIMIT 1",
         (form_sha256,),
     ).fetchone()
-    return str(row["code"]) if row else None
+    return (int(row["id"]), str(row["code"])) if row else None
 
 
 def _prepare_product_data(data: dict) -> dict:
@@ -288,9 +288,10 @@ async def preview_product_import(
     form_sha256 = hashlib.sha256(data).hexdigest()
     with db_conn() as conn:
         code = _next_product_code(conn)
-        duplicate_code = _duplicate_form_code(conn, form_sha256)
+        duplicate = _duplicate_form(conn, form_sha256)
     parsed["code"] = code
-    parsed["duplicate_product_code"] = duplicate_code
+    parsed["duplicate_product_id"] = duplicate[0] if duplicate else None
+    parsed["duplicate_product_code"] = duplicate[1] if duplicate else None
     parsed["config_summary"] = config_summary(parsed)
     parsed["form_file_name"] = filename
     parsed["form_file_size"] = len(data)
@@ -317,12 +318,14 @@ async def import_product_from_form(
 
     form_sha256 = hashlib.sha256(data).hexdigest()
     with db_conn() as conn:
-        duplicate_code = _duplicate_form_code(conn, form_sha256)
-        if duplicate_code:
+        duplicate = _duplicate_form(conn, form_sha256)
+        if duplicate:
+            duplicate_id, duplicate_code = duplicate
             raise ApiError(
                 409,
                 "product_form_exists",
                 f"该下单表已生成过产品「{duplicate_code}」",
+                product_id=duplicate_id,
                 product_code=duplicate_code,
             )
         form_meta = _store_product_form(filename, ext, data)

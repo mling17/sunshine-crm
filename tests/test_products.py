@@ -208,7 +208,26 @@ class TestProducts(ApiTestCase):
         )
         self.assertEqual(duplicate.status_code, 409)
         self.assertEqual(duplicate.json()["code"], "product_form_exists")
+        self.assertEqual(duplicate.json()["product_id"], product["id"])
         self.assertEqual(duplicate.json()["product_code"], product["code"])
+
+    def test_existing_order_form_preview_links_to_existing_product(self):
+        resp = self.client.post(
+            "/api/crm/products/import-preview",
+            files={
+                "form_file": (
+                    "TS-001.xlsx",
+                    self.form_bytes(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        preview = resp.json()
+        products = self.client.get("/api/crm/products").json()
+        existing = next(item for item in products if item["code"] == "TS-001")
+        self.assertEqual(preview["duplicate_product_code"], "TS-001")
+        self.assertEqual(preview["duplicate_product_id"], existing["id"])
 
     def test_product_cannot_be_created_without_excel(self):
         resp = self.client.post(

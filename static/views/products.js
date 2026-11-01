@@ -210,7 +210,12 @@ function productImportPreviewHtml(preview) {
     ].filter(Boolean).join(' / ') || '无附加配置';
     var duplicate = preview.duplicate_product_code
         ? '<div class="notice warn product-import-warning">该下单表已生成过产品 <b>' +
-            esc(preview.duplicate_product_code) + '</b>，不能重复生成。</div>'
+            esc(preview.duplicate_product_code) + '</b>。请直接查看已有产品，避免重复建档。' +
+            (preview.duplicate_product_id
+                ? ' <a class="btn-link" href="#/products/' + preview.duplicate_product_id +
+                  '">查看已有产品</a>'
+                : '') +
+          '</div>'
         : '';
     var warnings = (preview.warnings || []).length
         ? '<div class="product-import-warnings"><b>请核对</b><ul>' +
@@ -253,7 +258,7 @@ function openProductImport(done) {
                     '<span class="hint">目前自动识别支持 .xlsx，最大 20MB；手工新增仍可归档 .xls。</span></div>' +
                 '<div id="productImportPreview" class="product-import-preview">' +
                     '<p class="small muted">选择文件后会自动读取模板信息。</p></div>' +
-                '<div class="form-actions">' +
+                '<div class="form-actions product-import-actions">' +
                     '<button type="button" class="btn modal-cancel">取消</button>' +
                     '<button type="button" class="btn" id="productImportScan" disabled>重新识别</button>' +
                     '<button type="submit" class="btn btn-primary" id="productImportSubmit" disabled>生成产品</button>' +
@@ -273,7 +278,8 @@ function openProductImport(done) {
     function file() { return fileInput.files && fileInput.files[0] ? fileInput.files[0] : null; }
     function setBusy(busy, text) {
         scanBtn.disabled = busy || !file();
-        submitBtn.disabled = busy || !preview || !!preview.duplicate_product_code;
+        submitBtn.disabled = busy || !preview;
+        submitBtn.textContent = preview && preview.duplicate_product_code ? '查看已有产品' : '生成产品';
         if (text) { scanBtn.textContent = text; }
     }
     function scan() {
@@ -318,7 +324,16 @@ function openProductImport(done) {
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var selected = file();
-        if (!selected || !preview || preview.duplicate_product_code) { return; }
+        if (!selected || !preview) { return; }
+        if (preview.duplicate_product_code) {
+            if (preview.duplicate_product_id) {
+                close();
+                navigate('#/products/' + preview.duplicate_product_id);
+            } else {
+                toast('该下单表已生成过产品 ' + preview.duplicate_product_code, true);
+            }
+            return;
+        }
         submitBtn.disabled = true;
         submitBtn.textContent = '生成中…';
         var data = new FormData();

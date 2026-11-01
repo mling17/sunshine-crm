@@ -213,6 +213,7 @@ class ProductImportPreview(BaseModel):
     """上传下单表后返回的识别结果；预览阶段不写入产品主档。"""
 
     code: str
+    duplicate_product_id: int | None = None
     duplicate_product_code: str | None = None
     name: str
     category: str

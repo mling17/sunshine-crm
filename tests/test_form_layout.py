@@ -177,6 +177,8 @@ class FormLayoutStructureTest(unittest.TestCase):
             "api('/products/import-form'",
             "productImportPreviewHtml(result)",
             "该下单表已生成过产品",
+            "查看已有产品",
+            "submitBtn.disabled = busy || !preview;",
         ):
             self.assertIn(marker, products)
         for selector in (
@@ -185,8 +187,10 @@ class FormLayoutStructureTest(unittest.TestCase):
             ".product-import-preview",
             ".product-import-title",
             ".product-import-warnings",
+            ".product-import-actions",
         ):
             self.assertIn(selector, self.css)
+        self.assertIn("position: sticky;", self.css)
 
 
 if __name__ == "__main__":
