@@ -401,51 +401,27 @@ function openFollowModal(opts) {
   modal.className = 'modal';
   modal.innerHTML =
     '<div class="modal-overlay"></div>' +
-    '<div class="modal-content followup-modal">' +
-    '<div class="modal-header">' +
-    '<div class="followup-modal-heading">' +
-    '<span class="followup-modal-mark" aria-hidden="true">' +
-    '<svg viewBox="0 0 24 24" fill="none"><path d="M8 3v3M16 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m9 14 2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
-    '</span>' +
-    '<div class="followup-modal-heading-copy">' +
-    '<span class="followup-modal-kicker">客户沟通</span>' +
-    '<h3>' + esc(opts.title || '记一条跟进') + '</h3>' +
-    '<p>记录沟通结果，安排下一次联系</p>' +
-    '</div></div>' +
-    '<button type="button" class="btn btn-link modal-close" aria-label="关闭跟进弹窗">×</button></div>' +
+    '<div class="modal-content">' +
+    '<div class="modal-header"><h3>' + esc(opts.title || '记一条跟进') + '</h3>' +
+    '<button type="button" class="btn btn-link modal-close">×</button></div>' +
     '<div class="modal-body">' +
     '<form id="fuModalForm" class="form-grid" autocomplete="off">' +
-    '<div class="field followup-content-field">' +
-    '<div class="followup-label-line"><label for="fuModalContent">跟进内容 <span class="followup-required">*</span></label>' +
-    '<span class="followup-field-note">最多 2000 字</span></div>' +
-    '<textarea id="fuModalContent" name="content" rows="4" maxlength="2000" required placeholder="' +
+    '<div class="field"><label>跟进内容 *</label>' +
+    '<textarea name="content" rows="4" maxlength="2000" required placeholder="' +
     esc(opts.placeholder || '聊了什么？对方什么态度？下一步做什么？') + '"></textarea></div>' +
-    '<div class="row-2 followup-options">' +
-    '<div class="field followup-option-card">' +
-    '<label for="fuMethod">跟进方式</label>' +
-    '<select id="fuMethod" name="method">' + dictOptions('follow_method', 'wechat') + '</select>' +
-    '<div class="followup-option-hint"><span class="followup-hint-dot" aria-hidden="true"></span>选择本次沟通渠道</div></div>' +
-    '<div class="field followup-option-card followup-schedule">' +
-    '<div class="followup-schedule-head"><label for="fuNextDate">下次跟进时间</label>' +
-    '<label class="next-followup-toggle" for="fuNextOn">' +
-    '<input type="checkbox" id="fuNextOn" checked aria-label="安排下次跟进">' +
-    '<span class="next-followup-track" aria-hidden="true"><span class="next-followup-knob"></span></span>' +
-    '<span class="next-followup-state">需要</span></label></div>' +
-    '<div class="followup-date-control">' +
-    '<span class="followup-date-icon" aria-hidden="true">' +
-    '<svg viewBox="0 0 24 24" fill="none"><path d="M8 3v3M16 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>' +
-    '</span>' +
+    '<div class="row-2">' +
+    '<div class="field"><label>跟进方式</label>' +
+    '<select name="method">' + dictOptions('follow_method', 'wechat') + '</select></div>' +
+    '<div class="field"><label class="label-with-switch label-with-checkbox">' +
+    '<span class="switch"><input type="checkbox" id="fuNextOn" checked><span>下次跟进时间</span></span></label>' +
     '<input type="date" name="next_date" id="fuNextDate" value="' + (opts.defaultNext || followDayAfter(3)) + '">' +
-    '</div>' +
-    '<div class="small muted followup-option-hint" id="fuNextHint"><span class="followup-hint-dot" aria-hidden="true"></span><span id="fuNextHintText">会显示在今日与后续待办中</span></div></div>' +
+    '<div class="small muted" id="fuNextHint">关掉表示这次不用再跟进</div></div>' +
     '</div>' +
     (opts.extraHtml || '') +
-    '<div class="field followup-attachment-field">' +
-    '<div class="followup-label-line"><label for="fuPhotos">附件</label>' +
-    '<span class="followup-field-note">图片 / Excel / PDF · 最多 10 个 · 单个 ≤20MB</span></div>' +
-    '<input id="fuPhotos" type="file" name="photos" multiple></div>' +
+    '<div class="field"><label>附件（图片 / Excel / PDF，最多 10 个、单个 ≤20MB）</label>' +
+    '<input type="file" name="photos" multiple></div>' +
     '<div id="fuThumbs" class="attach-strip"></div>' +
-    '<div class="form-actions followup-actions">' +
+    '<div class="form-actions">' +
     '<button type="button" class="btn modal-cancel">取消</button>' +
     '<button type="submit" class="btn btn-primary">保存跟进</button>' +
     '</div>' +
@@ -497,12 +473,9 @@ function openFollowModal(opts) {
 
   var nextOn = modal.querySelector('#fuNextOn');
   var nextDate = modal.querySelector('#fuNextDate');
-  var schedule = modal.querySelector('.followup-schedule');
-  var hintText = modal.querySelector('#fuNextHintText');
   function syncNext() {
     nextDate.disabled = !nextOn.checked;
-    schedule.classList.toggle('is-off', !nextOn.checked);
-    hintText.textContent = nextOn.checked ? '会显示在今日与后续待办中' : '本次不再安排跟进提醒';
+    nextDate.style.opacity = nextOn.checked ? '1' : '.45';
   }
   nextOn.addEventListener('change', syncNext);
   syncNext();
