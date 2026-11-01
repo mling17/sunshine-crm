@@ -130,7 +130,7 @@ def _quote_out(conn, row) -> QuoteOut:
     )
     data["order_no"] = order["order_no"] if order else None
     data["confirmation_files"] = [
-        AttachmentOut(**dict(item))
+        AttachmentOut(**dict(item), url=f"/api/crm/attachments/{item['id']}")
         for item in conn.execute(
             "SELECT * FROM attachments"
             " WHERE object_type = 'quote_confirmation' AND object_id = ?"

@@ -10,6 +10,7 @@ from tests._util import ApiTestCase
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_FORM = ROOT / "app/data/product_forms/TS-003.xlsx"
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 
 
 class DealQuoteTest(ApiTestCase):
@@ -196,6 +197,28 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(len(detail["items"]), 1)
         self.assertIsNotNone(detail["customer_confirmed_at"])
         self.assertTrue(detail["product_name_snapshot"])
+
+    def test_quote_confirmation_with_screenshot_returns_file_url(self):
+        _, _, quote = self._quote_with_item()
+        sent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        self.assertEqual(sent.status_code, 200, sent.text)
+
+        confirmed = self.client.post(
+            f"/api/crm/quotes/{quote['id']}/confirm",
+            data={"note": "客户通过微信确认"},
+            files={"screenshots": ("微信确认.png", PNG, "image/png")},
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        files = confirmed.json()["confirmation_files"]
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0]["file_name"], "微信确认.png")
+        self.assertEqual(
+            files[0]["url"],
+            f"/api/crm/attachments/{files[0]['id']}",
+        )
+        downloaded = self.client.get(files[0]["url"])
+        self.assertEqual(downloaded.status_code, 200)
+        self.assertEqual(downloaded.content, PNG)
 
     def test_pending_quote_can_return_to_draft_for_requote(self):
         _, deal, quote = self._quote_with_item()
