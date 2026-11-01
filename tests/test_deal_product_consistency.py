@@ -33,6 +33,24 @@ class DealProductParameterUiTest(unittest.TestCase):
             self.assertIn(marker, deals)
         self.assertIn(".deal-field-product-locked select:disabled", css)
 
+    def test_empty_product_state_is_distinct_and_focuses_search(self):
+        shared = (ROOT / "static/views/shared.js").read_text(encoding="utf-8")
+        css = (ROOT / "static/app.css").read_text(encoding="utf-8")
+
+        for marker in (
+            "data-picker-open-search",
+            "尚未关联产品",
+            "请在上方搜索框输入产品编码、名称或配置",
+            "ev.target.closest('[data-picker-open-search]')",
+            "input.focus()",
+        ):
+            self.assertIn(marker, shared)
+        for selector in (
+            ".product-picker-empty-mark",
+            ".product-picker-placeholder-action",
+        ):
+            self.assertIn(selector, css)
+
 
 class DealProductParameterApiTest(ApiTestCase):
     @staticmethod

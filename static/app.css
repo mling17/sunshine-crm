@@ -2998,42 +2998,70 @@ table.data-table a:hover { text-decoration: underline; }
 
 .product-picker-placeholder {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 10px;
   min-height: 56px;
-  padding: 9px 11px;
+  padding: 10px 12px;
   border: 1px dashed #d6e1ed;
   border-radius: 10px;
-  background: #fbfcfe;
+  background: #fafbfd;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  transition: border-color .15s ease, background .15s ease;
 }
 
-.product-picker-placeholder-icon {
+.product-picker-placeholder:hover {
+  border-color: #aebfd4;
+  background: #f5f8fc;
+}
+
+.product-picker-placeholder:focus-visible {
+  outline: 2px solid #3b73d9;
+  outline-offset: 2px;
+}
+
+.product-picker-empty-mark {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  color: #6382ab;
-  background: #eef4fb;
-  font-size: 17px;
+  min-width: 32px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: #758399;
+  background: #edf1f6;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
 }
 
 .product-picker-placeholder > div {
   display: grid;
+  flex: 1;
   gap: 2px;
   min-width: 0;
 }
 
 .product-picker-placeholder b {
-  color: #526278;
-  font-size: 11px;
+  color: #43556d;
+  font-size: 12px;
 }
 
-.product-picker-placeholder span:last-child {
-  color: #8c98a8;
+.product-picker-placeholder > div span {
+  color: #8491a2;
   font-size: 10px;
+}
+
+.product-picker-placeholder-action {
+  flex: none;
+  color: #496b9b;
+  font-size: 10px;
+  font-weight: 650;
 }
 
 .product-picker-card {
@@ -3212,6 +3240,10 @@ table.data-table a:hover { text-decoration: underline; }
 
   .product-picker-input {
     padding-right: 12px;
+  }
+
+  .product-picker-placeholder-action {
+    display: none;
   }
 
   .product-picker-list {

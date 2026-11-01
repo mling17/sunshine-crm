@@ -580,11 +580,12 @@ function productSearchText(product) {
 
 function productPickerSelectionHtml(product, emptyLabel) {
   if (!product) {
-    return '<div class="product-picker-placeholder">' +
-      '<span class="product-picker-placeholder-icon" aria-hidden="true">⌕</span>' +
-      '<div><b>' + esc(emptyLabel || '搜索并选择产品') + '</b>' +
-      '<span>支持产品编码、名称、系列、结构及配置关键词</span></div>' +
-      '</div>';
+    return '<button type="button" class="product-picker-placeholder" data-picker-open-search>' +
+      '<span class="product-picker-empty-mark">未选</span>' +
+      '<div><b>尚未关联产品</b>' +
+      '<span>请在上方搜索框输入产品编码、名称或配置</span></div>' +
+      '<span class="product-picker-placeholder-action">去搜索 ›</span>' +
+      '</button>';
   }
   var unavailable = product.is_active === false || product.form_available === false;
   var meta = [
@@ -761,10 +762,15 @@ function bindProductPicker(pickerEl, products, options) {
     choose(findProduct(products, option.getAttribute('data-product-id')));
   });
   selection.addEventListener('click', function (ev) {
-    if (!ev.target.closest('[data-picker-clear]')) { return; }
-    input.value = '';
-    refreshSelection(null);
-    input.focus();
+    if (ev.target.closest('[data-picker-clear]')) {
+      input.value = '';
+      refreshSelection(null);
+      input.focus();
+      return;
+    }
+    if (ev.target.closest('[data-picker-open-search]')) {
+      input.focus();
+    }
   });
 
   return {
