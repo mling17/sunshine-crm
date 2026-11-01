@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_013"
-SCHEMA_USER_VERSION = 13
+MIGRATION_VERSION = "v2_014"
+SCHEMA_USER_VERSION = 14
 
 
 def default_db_path() -> Path:
@@ -1001,6 +1001,29 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_013', datetime('now'), '报价单报价/待确认/客户已确认/作废状态与管理动作')"),
     ("user_version v2_013", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 30. v2_014：商机自动标签/手动标签 ----------
+    ("deal_tags", None, """
+    CREATE TABLE IF NOT EXISTS deal_tags (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      deal_id     INTEGER NOT NULL,
+      tag_id      INTEGER NOT NULL,
+      source      TEXT NOT NULL DEFAULT 'manual',
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      create_time TEXT NOT NULL DEFAULT '',
+      update_time TEXT NOT NULL DEFAULT '',
+      is_delete   INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(deal_id, tag_id, source)
+    )
+    """),
+    ("idx_deal_tags_deal", _tbl_guard("deal_tags"),
+     "CREATE INDEX IF NOT EXISTS idx_deal_tags_deal ON deal_tags(deal_id, is_delete)"),
+    ("idx_deal_tags_tag", _tbl_guard("deal_tags"),
+     "CREATE INDEX IF NOT EXISTS idx_deal_tags_tag ON deal_tags(tag_id)"),
+    ("schema_migrations v2_014", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_014', datetime('now'), '商机手动标签与报价待确认/金额自动标签')"),
+    ("user_version v2_014", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 

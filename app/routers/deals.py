@@ -12,6 +12,12 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app import dicts as dict_svc
+from app.deal_tags import (
+    add_manual_tag,
+    delete_manual_tag,
+    list_deal_tags,
+    sync_pending_quote_tags,
+)
 from app.db import db_conn
 from app.enums import (
     DEAL_LOST_REASON,
@@ -28,6 +34,8 @@ from app.models import (
     DealItemOut,
     DealItemUpdate,
     DealOut,
+    DealTagIn,
+    DealTagOut,
     DealUpdate,
     normalize_spec,
 )
@@ -318,7 +326,35 @@ def get_deal(deal_id: int) -> DealDetailOut:
         ).fetchone()
         data["order"] = dict(order_row) if order_row else None
         data["items"] = [dict(item) for item in _deal_items(conn, deal_id)]
+        data["tags"] = list_deal_tags(conn, deal_id)
     return DealDetailOut(**data)
+
+
+@router.get("/deals/{deal_id}/tags", response_model=list[DealTagOut])
+def get_deal_tags(deal_id: int) -> list[DealTagOut]:
+    with db_conn() as conn:
+        _deal_row(conn, deal_id)
+        return [DealTagOut(**row) for row in list_deal_tags(conn, deal_id)]
+
+
+@router.post("/deals/{deal_id}/tags", response_model=list[DealTagOut])
+def create_deal_tag(deal_id: int, payload: DealTagIn) -> list[DealTagOut]:
+    with db_conn() as conn:
+        _deal_row(conn, deal_id)
+        return [
+            DealTagOut(**row)
+            for row in add_manual_tag(conn, deal_id, payload.name)
+        ]
+
+
+@router.delete("/deals/{deal_id}/tags/{tag_link_id}", response_model=list[DealTagOut])
+def remove_deal_tag(deal_id: int, tag_link_id: int) -> list[DealTagOut]:
+    with db_conn() as conn:
+        _deal_row(conn, deal_id)
+        return [
+            DealTagOut(**row)
+            for row in delete_manual_tag(conn, deal_id, tag_link_id)
+        ]
 
 
 # ---------------- 新建 / 修改 ----------------
@@ -960,6 +996,47 @@ def _create_order(
                 now,
                 order_id,
             ),
+        )
+
+    auto_void_quotes = conn.execute(
+        "SELECT id, quote_no, status FROM deal_quotes"
+        " WHERE deal_id = ? AND is_delete = 0 AND status <> 'void'"
+        " ORDER BY id",
+        (deal_id,),
+    ).fetchall()
+    if auto_void_quotes:
+        conn.execute(
+            "UPDATE deal_quotes SET status = 'void', updated_at = ?"
+            " WHERE deal_id = ? AND is_delete = 0 AND status <> 'void'",
+            (now, deal_id),
+        )
+        sync_pending_quote_tags(conn, deal_id)
+        add_entry(
+            conn,
+            object_type="deal",
+            object_id=deal_id,
+            kind="quote",
+            customer_id=deal["customer_id"],
+            deal_id=deal_id,
+            quote_id=quote_id,
+            content=(
+                f"生成订单 {order_no}，系统自动作废 "
+                + "、".join(row["quote_no"] for row in auto_void_quotes)
+            ),
+            detail={
+                "event": "auto_void_for_order",
+                "order_id": order_id,
+                "order_no": order_no,
+                "quotes": [
+                    {
+                        "id": int(row["id"]),
+                        "quote_no": row["quote_no"],
+                        "status_before": row["status"],
+                        "status_after": "void",
+                    }
+                    for row in auto_void_quotes
+                ],
+            },
         )
 
     now_item = now_iso()

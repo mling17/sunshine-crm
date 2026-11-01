@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.db import db_conn
+from app.deal_tags import sync_pending_quote_tags
+from app.enums import DRIVE_TYPE_LABELS, QUOTE_STATUS_LABELS
 from app.errors import ApiError
 from app.models import AttachmentOut, QuoteIn, QuoteItemOut, QuoteOut
 from app.product_catalog import get_product, product_snapshot
@@ -197,6 +199,92 @@ def _sync_deal_quote_status(conn, deal_id: int) -> None:
         )
 
 
+def _form_summary(raw_content: str | None) -> dict:
+    try:
+        content = json.loads(raw_content) if raw_content else {}
+    except (TypeError, ValueError):
+        content = {}
+    sheets = content.get("sheets") or []
+    sheet = sheets[0] if sheets and isinstance(sheets[0], dict) else {}
+    rows = sheet.get("rows") or []
+    column_count = max((len(row) for row in rows if isinstance(row, list)), default=0)
+    return {
+        "sheet_name": sheet.get("name") or "Sheet1",
+        "row_count": len(rows),
+        "column_count": column_count,
+    }
+
+
+def _quote_timeline_item(row) -> dict:
+    data = dict(row)
+    form_available = bool(
+        data.get("form_storage_key")
+        and resolve_upload_path(data["form_storage_key"], must_exist=False).is_file()
+    )
+    preview_available = bool(
+        data.get("form_preview_storage_key")
+        and resolve_upload_path(
+            data["form_preview_storage_key"], must_exist=False
+        ).is_file()
+    )
+    return {
+        "id": int(data["id"]),
+        "product_id": int(data["product_id"]),
+        "product_code": data.get("product_code_snapshot"),
+        "product_name": data.get("product_name_snapshot"),
+        "product_config": data.get("product_config_snapshot"),
+        "product_type": data.get("product_type"),
+        "model": data.get("model"),
+        "drive_type": data.get("drive_type"),
+        "drive_type_label": DRIVE_TYPE_LABELS.get(data.get("drive_type")),
+        "quantity": int(data.get("quantity") or 1),
+        "amount": float(data.get("amount") or 0),
+        "recognized_total": float(data.get("recognized_total") or 0),
+        "note": data.get("note"),
+        "form_file_name": data.get("form_file_name"),
+        "form_file_size": int(data.get("form_file_size") or 0),
+        "form_available": form_available,
+        "form_url": (
+            f"/api/crm/quotes/items/{data['id']}/form" if form_available else None
+        ),
+        "form_preview_url": (
+            f"/api/crm/quotes/items/{data['id']}/form-preview"
+            if preview_available
+            else None
+        ),
+        "a1_value": data.get("a1_value"),
+        "amount_cell": data.get("amount_cell"),
+        **_form_summary(data.get("form_content_json")),
+    }
+
+
+def _quote_event_detail(
+    conn,
+    quote_id: int,
+    event: str,
+    *,
+    item_rows=None,
+    changes: list[dict] | None = None,
+) -> dict:
+    quote = _quote(conn, quote_id)
+    rows = _quote_items(conn, quote_id) if item_rows is None else item_rows
+    return {
+        "quote": {
+            "id": int(quote["id"]),
+            "quote_no": quote["quote_no"],
+            "title": quote["title"],
+            "note": quote["note"],
+            "status": quote["status"],
+            "status_label": QUOTE_STATUS_LABELS.get(quote["status"], quote["status"]),
+            "amount": float(quote["amount"] or 0),
+            "item_count": len(_quote_items(conn, quote_id)),
+        },
+        "items": [_quote_timeline_item(row) for row in rows],
+        "event": event,
+        "changes": changes or [],
+    }
+
+
 async def _read_xlsx(upload: UploadFile) -> tuple[str, bytes]:
     filename = Path(upload.filename or "").name
     if Path(filename).suffix.lower() != ".xlsx":
@@ -320,7 +408,7 @@ def create_quote(deal_id: int, payload: QuoteIn) -> QuoteOut:
             deal_id=deal_id,
             quote_id=quote_id,
             content=f"创建报价单 {quote_no}",
-            detail={"quote_id": quote_id, "quote_no": quote_no},
+            detail=_quote_event_detail(conn, quote_id, "quote_created"),
         )
         _sync_deal_quote_status(conn, deal_id)
         return _quote_out(conn, _quote(conn, quote_id))
@@ -392,7 +480,7 @@ async def add_quote_item(
             (quote_id,),
         ).fetchone()["n"]
         now = now_iso()
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO quote_items (quote_id, deal_id, product_id,"
             " product_code_snapshot, product_name_snapshot, product_config_snapshot,"
             " product_type, model, drive_type, quantity, spec, production_spec,"
@@ -442,6 +530,10 @@ async def add_quote_item(
                 0,
             ),
         )
+        item_id = int(cur.lastrowid or 0)
+        item_row = conn.execute(
+            "SELECT * FROM quote_items WHERE id = ?", (item_id,)
+        ).fetchone()
         total = _sync_amount(conn, quote_id)
         add_entry(
             conn,
@@ -461,7 +553,12 @@ async def add_quote_item(
                     else f"识别合计 ¥{recognized_total:,.2f}"
                 )
             ),
-            detail={"quote_id": quote_id, "amount": total},
+            detail=_quote_event_detail(
+                conn,
+                quote_id,
+                "item_created",
+                item_rows=[item_row],
+            ),
         )
         return _quote_out(conn, _quote(conn, quote_id))
 
@@ -498,6 +595,7 @@ async def update_quote_item(
         amount_cell = old["amount_cell"]
         preview_key = old["form_preview_storage_key"]
         quoted_amount = round(float(old["amount"] or 0), 2)
+        form_changed = False
         if amount is not None and str(amount).strip() != "":
             try:
                 quoted_amount = round(float(amount), 2)
@@ -531,12 +629,14 @@ async def update_quote_item(
             a1_value = inspected["a1_value"]
             amount_cell = inspected["amount_cell"]
             preview_key = inspected["preview_storage_key"]
+            form_changed = True
         elif resolved_product_id != int(old["product_id"]):
             raise ApiError(
                 400,
                 "quote_form_required_for_product_change",
                 "更换关联产品时必须重新上传并识别对应下单表",
             )
+        final_note = ((note or "").strip() or None) if note is not None else old["note"]
         conn.execute(
             "UPDATE quote_items SET product_id = ?, product_code_snapshot = ?,"
             " product_name_snapshot = ?, product_config_snapshot = ?, product_type = ?,"
@@ -555,7 +655,7 @@ async def update_quote_item(
                 snapshot["drive_type"],
                 quoted_amount,
                 quoted_amount,
-                ((note or "").strip() or None) if note is not None else old["note"],
+                final_note,
                 form_key,
                 form_name,
                 form_size,
@@ -570,7 +670,43 @@ async def update_quote_item(
                 item_id,
             ),
         )
+        current = conn.execute(
+            "SELECT * FROM quote_items WHERE id = ? AND is_delete = 0", (item_id,)
+        ).fetchone()
+        changes: list[dict] = []
+
+        def add_change(label: str, before, after) -> None:
+            if before != after:
+                changes.append({"label": label, "from": before, "to": after})
+
+        old_product = " · ".join(
+            value
+            for value in (old["product_code_snapshot"], old["product_name_snapshot"])
+            if value
+        ) or None
+        new_product = " · ".join(
+            value
+            for value in (
+                snapshot["product_code_snapshot"],
+                snapshot["product_name_snapshot"],
+            )
+            if value
+        ) or None
+        add_change("产品", old_product, new_product)
+        add_change(
+            "报价金额",
+            round(float(old["amount"] or 0), 2),
+            round(float(current["amount"] or 0), 2),
+        )
+        add_change("备注", old["note"], current["note"])
+        if form_changed:
+            add_change("下单表", old["form_file_name"], current["form_file_name"])
         total = _sync_amount(conn, old["quote_id"])
+        change_text = "；".join(
+            f"{change['label']}由「{change['from'] if change['from'] not in (None, '') else '未填写'}」"
+            f"改为「{change['to'] if change['to'] not in (None, '') else '未填写'}」"
+            for change in changes
+        )
         add_entry(
             conn,
             object_type="deal",
@@ -579,8 +715,17 @@ async def update_quote_item(
             customer_id=quote["customer_id"],
             deal_id=quote["deal_id"],
             quote_id=old["quote_id"],
-            content=f"修改报价单 {quote['quote_no']} 的产品明细",
-            detail={"quote_id": old["quote_id"], "amount": total},
+            content=(
+                f"修改报价单 {quote['quote_no']} 的产品明细"
+                + (f"：{change_text}" if change_text else "")
+            ),
+            detail=_quote_event_detail(
+                conn,
+                old["quote_id"],
+                "item_updated",
+                item_rows=[current],
+                changes=changes,
+            ),
         )
         return _quote_out(conn, _quote(conn, old["quote_id"]))
 
@@ -608,7 +753,12 @@ def delete_quote_item(item_id: int) -> QuoteOut:
             deal_id=quote["deal_id"],
             quote_id=old["quote_id"],
             content=f"报价单 {quote['quote_no']} 删除产品明细",
-            detail={"quote_id": old["quote_id"], "amount": total},
+            detail=_quote_event_detail(
+                conn,
+                old["quote_id"],
+                "item_deleted",
+                item_rows=[old],
+            ),
         )
         return _quote_out(conn, _quote(conn, old["quote_id"]))
 
@@ -637,9 +787,10 @@ def send_quote_to_customer(quote_id: int) -> QuoteOut:
             deal_id=quote["deal_id"],
             quote_id=quote_id,
             content=f"报价单 {quote['quote_no']} 已发客户确认",
-            detail={"quote_id": quote_id, "from": "draft", "to": "pending"},
+            detail=_quote_event_detail(conn, quote_id, "sent"),
         )
         _sync_deal_quote_status(conn, quote["deal_id"])
+        sync_pending_quote_tags(conn, quote["deal_id"])
         return _quote_out(conn, _quote(conn, quote_id))
 
 
@@ -673,9 +824,10 @@ def return_quote_for_requote(quote_id: int) -> QuoteOut:
             deal_id=quote["deal_id"],
             quote_id=quote_id,
             content=f"报价单 {quote['quote_no']} 已退回重新报价",
-            detail={"quote_id": quote_id, "from": "pending", "to": "draft"},
+            detail=_quote_event_detail(conn, quote_id, "requote"),
         )
         _sync_deal_quote_status(conn, quote["deal_id"])
+        sync_pending_quote_tags(conn, quote["deal_id"])
         return _quote_out(conn, _quote(conn, quote_id))
 
 
@@ -701,9 +853,10 @@ def void_quote(quote_id: int) -> QuoteOut:
             deal_id=quote["deal_id"],
             quote_id=quote_id,
             content=f"报价单 {quote['quote_no']} 已作废",
-            detail={"quote_id": quote_id, "to": "void"},
+            detail=_quote_event_detail(conn, quote_id, "voided"),
         )
         _sync_deal_quote_status(conn, quote["deal_id"])
+        sync_pending_quote_tags(conn, quote["deal_id"])
         return _quote_out(conn, _quote(conn, quote_id))
 
 
@@ -714,7 +867,14 @@ def delete_quote(quote_id: int) -> dict:
         deal = _deal(conn, quote["deal_id"])
         if deal["order_id"] is not None:
             raise ApiError(409, "deal_locked", "商机已生成订单，不能删除报价单")
+        if quote["status"] not in ("draft", "void"):
+            raise ApiError(
+                409,
+                "quote_delete_locked",
+                "「待客户确认」或「客户已确认」的报价单不能删除，请先作废",
+            )
         now = now_iso()
+        deleted_detail = _quote_event_detail(conn, quote_id, "quote_deleted")
         conn.execute(
             "UPDATE quote_items SET is_delete = 1, updated_at = ? WHERE quote_id = ?",
             (now, quote_id),
@@ -731,9 +891,10 @@ def delete_quote(quote_id: int) -> dict:
             customer_id=quote["customer_id"],
             deal_id=quote["deal_id"],
             content=f"删除报价单 {quote['quote_no']}",
-            detail={"quote_id": quote_id},
+            detail=deleted_detail,
         )
         _sync_deal_quote_status(conn, quote["deal_id"])
+        sync_pending_quote_tags(conn, quote["deal_id"])
     return {"ok": True}
 
 
@@ -815,8 +976,9 @@ async def confirm_quote(
                 f"客户已确认报价单 {quote['quote_no']}，报价 ¥{amount:,.2f}"
                 + (f"；{(note or '').strip()}" if (note or "").strip() else "")
             ),
-            detail={"quote_id": quote_id, "amount": amount},
+            detail=_quote_event_detail(conn, quote_id, "confirmed"),
         )
+        sync_pending_quote_tags(conn, deal["id"])
         return _quote_out(conn, _quote(conn, quote_id))
 
 

@@ -104,6 +104,20 @@ ENSURE_SQL: list[str] = [
       UNIQUE(customer_id, tag_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS deal_tags (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      deal_id     INTEGER NOT NULL,
+      tag_id      INTEGER NOT NULL,
+      source      TEXT NOT NULL DEFAULT 'manual',
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      create_time TEXT NOT NULL DEFAULT '',
+      update_time TEXT NOT NULL DEFAULT '',
+      is_delete   INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(deal_id, tag_id, source)
+    )
+    """,
     # ---------------- 索引 ----------------
     "CREATE INDEX IF NOT EXISTS idx_customers_name  ON customers(name)",
     "CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)",
@@ -115,6 +129,8 @@ ENSURE_SQL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_att_fu          ON attachments(follow_up_id)",
     "CREATE INDEX IF NOT EXISTS idx_cust_tag_c      ON customer_tags(customer_id)",
     "CREATE INDEX IF NOT EXISTS idx_cust_tag_t      ON customer_tags(tag_id)",
+    "CREATE INDEX IF NOT EXISTS idx_deal_tags_deal  ON deal_tags(deal_id, is_delete)",
+    "CREATE INDEX IF NOT EXISTS idx_deal_tags_tag   ON deal_tags(tag_id)",
 ]
 
 

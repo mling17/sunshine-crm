@@ -424,6 +424,19 @@ class QuoteOut(BaseModel):
         return self
 
 
+class DealTagIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: TagName = Field(min_length=1, max_length=32)
+
+
+class DealTagOut(BaseModel):
+    id: int
+    name: str
+    source: Literal["auto", "manual"]
+    deletable: bool
+
+
 class DealOut(BaseModel):
     id: int
     customer_id: int
@@ -488,6 +501,7 @@ class DealDetailOut(DealOut):
     order: dict | None = None
     items: list[DealItemOut] = Field(default_factory=list)
     quotes: list[QuoteOut] = Field(default_factory=list)
+    tags: list[DealTagOut] = Field(default_factory=list)
 
 
 # ---------------- 跟进 ----------------
@@ -508,6 +522,7 @@ class FollowUpOut(BaseModel):
     #: follow=人工跟进；create/change/stage/order/aftersale/pay/ship=系统履历
     kind: str | None = None
     content: str
+    detail: dict | None = None
     next_date: str | None = None
     created_at: str
 

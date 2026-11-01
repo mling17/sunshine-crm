@@ -123,16 +123,16 @@ function quoteItemHtml(item, editable) {
             '<span style="margin-left:auto"><b>' + money(item.amount) + '</b></span></div>' +
         '<div class="item-sub small">' +
             '报价金额 ' + money(item.amount) + '</div>' +
-        '<div class="small" style="margin:8px 0">' +
-            (item.template_url
-                ? '<a class="btn btn-sm" href="/crm' + esc(item.template_url) + '">下载产品模板</a> '
-                : '<span class="badge danger">产品模板缺失</span> ') +
+        '<div class="quote-item-actions">' +
             (item.form_url
-                ? '<a class="btn btn-sm" href="/crm' + esc(item.form_url) + '">下载已上传下单表</a>'
+                ? '<a class="btn btn-sm quote-file-action" href="/crm' + esc(item.form_url) +
+                  '" title="下载已上传下单表"><span aria-hidden="true">⇩</span> 下载下单表</a>'
                 : '<span class="badge warn">待上传下单表</span>') +
             (editable
-                ? ' <button type="button" class="btn btn-sm" data-quote-edit-item="' + item.id +
-                  '">编辑产品</button> <button type="button" class="btn btn-sm btn-danger" data-quote-delete-item="' +
+                ? '<span class="quote-action-divider" aria-hidden="true"></span>' +
+                  '<button type="button" class="btn btn-sm quote-edit-action" data-quote-edit-item="' +
+                  item.id + '">编辑产品</button>' +
+                  '<button type="button" class="btn btn-sm btn-outline-danger quote-delete-action" data-quote-delete-item="' +
                   item.id + '">删除</button>'
                 : '') +
         '</div>' +
@@ -170,17 +170,19 @@ function quoteCardsHtml(deal, quotes) {
             actions += '<button type="button" class="btn btn-sm btn-outline-danger" data-quote-void="' +
                 quote.id + '">作废</button> ';
         }
-        if (!quote.order_id && !deal.order_id) {
-            actions += '<button type="button" class="btn btn-sm btn-danger" data-quote-delete="' +
-                quote.id + '">删除报价单</button>';
-        }
+        var canDeleteQuote = !quote.order_id && !deal.order_id &&
+            (quote.status === 'draft' || quote.status === 'void');
+        var deleteCardAction = canDeleteQuote
+            ? '<button type="button" class="btn btn-sm btn-outline-danger deal-quote-card-delete" ' +
+              'data-quote-delete="' + quote.id + '" title="删除这张报价单卡片">删除</button>'
+            : '';
         var quoteTitle = quote.title || quote.quote_no;
         var itemCount = (quote.items || []).length;
         return '<details class="deal-quote-card">' +
             '<summary class="deal-quote-card-head">' +
                 '<span class="deal-quote-card-title">' + esc(quoteTitle) + '</span>' +
                 '<span class="deal-quote-card-side">' + quoteStatusBadge(quote) +
-                    '<b>' + money(quote.amount) + '</b></span>' +
+                    '<b>' + money(quote.amount) + '</b>' + deleteCardAction + '</span>' +
                 '<span class="deal-quote-card-meta">' + esc(quote.quote_no) +
                     ' · ' + itemCount + ' 项产品</span>' +
             '</summary>' +
@@ -209,13 +211,35 @@ function quoteCardsHtml(deal, quotes) {
         '</div>';
 }
 
+function dealTagsHtml(deal, quotes) {
+    var tags = deal.tags || [];
+    return '<div class="deal-tags" aria-label="商机标签">' +
+        '<span class="deal-tag deal-tag-system" title="系统标签，自动统计">报价单 ' +
+          (quotes || []).length + '</span>' +
+        tags.map(function (tag) {
+            return '<span class="deal-tag ' +
+                (tag.source === 'auto' ? 'deal-tag-auto' : 'deal-tag-manual') +
+                '" title="' + (tag.deletable ? '手动标签' : '系统自动标签，不能删除') + '">' +
+                esc(tag.name) +
+                (tag.deletable
+                    ? '<button type="button" class="deal-tag-remove" data-deal-tag-remove="' +
+                      tag.id + '" title="删除标签" aria-label="删除标签 ' + esc(tag.name) + '">×</button>'
+                    : '') +
+            '</span>';
+        }).join('') +
+        '<button type="button" class="deal-tag-add" data-deal-tag-add="' + deal.id +
+          '" title="添加标签" aria-label="添加标签">＋</button>' +
+    '</div>';
+}
+
 function dealOverviewHtml(deal, customerName, quotes) {
     var confirmedQuote = (quotes || []).filter(function (quote) {
         return quote.status === 'confirmed';
     })[0];
-    var noteText = String(deal.note || '').trim();
-    var canAddQuote = !deal.order_id && deal.stage !== 'lost' && !confirmedQuote;
-    var canEditNote = !deal.order_id && deal.stage !== 'lost';
+    var hasPendingOrConfirmedQuote = (quotes || []).some(function (quote) {
+        return quote.status === 'pending' || quote.status === 'confirmed';
+    });
+    var canAddQuote = !deal.order_id && deal.stage !== 'lost' && !hasPendingOrConfirmedQuote;
     var canLose = !deal.order_id && deal.stage !== 'lost' && !confirmedQuote;
     var orderAction;
     if (deal.order_id) {
@@ -232,10 +256,7 @@ function dealOverviewHtml(deal, customerName, quotes) {
         ? '<button type="button" class="btn btn-sm btn-primary" id="headerCreateQuote">' +
           '＋ 添加报价单</button>'
         : '<button type="button" class="btn btn-sm btn-primary" disabled ' +
-          'title="已有客户确认的报价单或商机已关闭">＋ 添加报价单</button>';
-    var editNoteAction = canEditNote
-        ? '<button type="button" class="btn btn-sm" id="dealEdit">编辑备注</button>'
-        : '<button type="button" class="btn btn-sm" disabled title="商机已关闭">编辑备注</button>';
+          'title="已有待客户确认或客户已确认的报价单，或商机已关闭">＋ 添加报价单</button>';
     var loseAction = canLose
         ? '<button type="button" class="btn btn-sm btn-danger" id="dealLose">标记流失</button>'
         : '<button type="button" class="btn btn-sm btn-danger" disabled ' +
@@ -246,15 +267,13 @@ function dealOverviewHtml(deal, customerName, quotes) {
                 '<span class="deal-overview-crumb"><a href="#/deals">‹ 商机</a> /</span>' +
                 '<a class="deal-overview-name" href="#/customers/' + deal.customer_id + '">' +
                     esc(customerName) + '</a>' +
-                '<span class="deal-overview-count">报价单 ' + (quotes || []).length + '</span>' +
+                dealTagsHtml(deal, quotes) +
             '</div>' +
             '<div class="deal-overview-status"><span>商机状态</span>' +
                 dealStageBadge(deal.stage, deal.stage_label) + '</div>' +
         '</div>' +
-        (noteText ? '<div class="deal-overview-note"><b>备注</b><span>' +
-            esc(noteText) + '</span></div>' : '') +
         quoteCardsHtml(deal, quotes) +
-        '<div class="deal-overview-actions">' + addQuoteAction + editNoteAction +
+        '<div class="deal-overview-actions">' + addQuoteAction +
             orderAction + loseAction + '</div>' +
     '</section>';
 }
@@ -326,8 +345,10 @@ function bindQuoteActions(root, deal, customerName, quotes, products) {
         });
     });
     $$('[data-quote-delete]', root).forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            if (!window.confirm('确认删除这张报价单及其所有产品明细？')) { return; }
+        btn.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (!window.confirm('确认删除整张报价单卡片及其所有产品明细？')) { return; }
             btn.disabled = true;
             api('/quotes/' + btn.getAttribute('data-quote-delete'), { method: 'DELETE' })
                 .then(function () { toast('报价单已删除'); return render(); })
@@ -340,6 +361,65 @@ function bindQuoteActions(root, deal, customerName, quotes, products) {
                 return String(q.id) === btn.getAttribute('data-quote-order');
             })[0];
             if (quote) { openDealOrderModal(deal, customerName, quote.items || [], quote); }
+        });
+    });
+}
+
+function bindDealTagActions(root, deal) {
+    $$('[data-deal-tag-add]', root).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            openDealTagModal(deal, function () { return render(); });
+        });
+    });
+    $$('[data-deal-tag-remove]', root).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            api('/deals/' + deal.id + '/tags/' + btn.getAttribute('data-deal-tag-remove'), {
+                method: 'DELETE'
+            }).then(function () {
+                toast('标签已删除');
+                return render();
+            }).catch(function (err) {
+                toast(err.message, true);
+                btn.disabled = false;
+            });
+        });
+    });
+}
+
+function openDealTagModal(deal, done) {
+    var modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = '<div class="modal-overlay"></div><div class="modal-content">' +
+        '<div class="modal-header"><h3>添加商机标签</h3>' +
+        '<button type="button" class="btn btn-link modal-close">×</button></div>' +
+        '<div class="modal-body"><form class="form-grid deal-tag-form">' +
+        '<div class="field"><label>标签名称 *</label>' +
+        '<input name="name" maxlength="32" required autofocus placeholder="例如：重点跟进、别墅项目"></div>' +
+        '<p class="small muted">手动添加的标签可删除；系统自动生成的标签不可删除。</p>' +
+        '<div class="form-actions"><button type="button" class="btn modal-cancel">取消</button>' +
+        '<button type="submit" class="btn btn-primary">添加标签</button></div></form></div></div>';
+    document.body.appendChild(modal);
+    function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
+    modal.querySelector('.modal-close').addEventListener('click', close);
+    modal.querySelector('.modal-cancel').addEventListener('click', close);
+    var form = modal.querySelector('form');
+    form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var name = String(form.querySelector('[name="name"]').value || '').trim();
+        if (!name) { toast('请输入标签名称', true); return; }
+        var btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        api('/deals/' + deal.id + '/tags', {
+            method: 'POST',
+            body: { name: name }
+        }).then(function () {
+            toast('标签已添加');
+            close();
+            if (done) { done(); }
+        }).catch(function (err) {
+            toast(err.message, true);
+            btn.disabled = false;
         });
     });
 }
@@ -394,7 +474,7 @@ function openQuoteItemModal(deal, quote, item, products, done) {
         '<div class="modal-body"><form id="quoteItemForm" class="form-grid">' +
         '<div class="field field-wide"><label>关联产品 *</label>' +
         productPickerHtml(products || [], item && item.product_id, '搜索并选择产品') +
-        '<div class="small" style="margin-top:8px" id="quoteTemplateHint">选择产品后可下载对应 Excel 模板。</div></div>' +
+        '<div class="small" style="margin-top:8px" id="quoteTemplateHint">选择产品后上传对应的 Excel 下单表。</div></div>' +
         '<div class="field"><label>对应下单表 * ' + (item && item.form_file_name
             ? '（当前：' + esc(item.form_file_name) + '，不选则保留）' : '') + '</label>' +
         '<input type="file" name="form_file" accept=".xlsx" ' + (item ? '' : 'required') + '></div>' +
@@ -458,13 +538,12 @@ function openQuoteItemModal(deal, quote, item, products, done) {
         onChange: function (product) {
             var hint = form.querySelector('#quoteTemplateHint');
             if (!product) {
-                hint.textContent = '选择产品后可下载对应 Excel 模板。';
+                hint.textContent = '选择产品后上传对应的 Excel 下单表。';
                 resetPreview();
                 return;
             }
             hint.innerHTML = '产品：' +
-                esc([product.code, product.name].filter(Boolean).join(' · ')) +
-                ' · <a href="' + API_BASE + '/products/' + product.id + '/form-file">下载 Excel 模板</a>';
+                esc([product.code, product.name].filter(Boolean).join(' · '));
             if (!item || String(product.id) !== String(item.product_id)) {
                 resetPreview();
             }
@@ -702,13 +781,6 @@ function viewDealDetail(root, rawId) {
             }
         });
 
-        var editBtn = $('#dealEdit', root);
-        if (editBtn) {
-            editBtn.addEventListener('click', function () {
-                openDealNoteEdit(d, function () { return render(); });
-            });
-        }
-
         var headerCreateQuote = $('#headerCreateQuote', root);
         if (headerCreateQuote) {
             headerCreateQuote.addEventListener('click', function () {
@@ -717,6 +789,7 @@ function viewDealDetail(root, rawId) {
         }
 
         bindQuoteActions(root, d, customerName, quotes, products);
+        bindDealTagActions(root, d);
 
         var addItemBtn = $('#btnAddDealItem', root);
         if (addItemBtn) {
@@ -860,42 +933,6 @@ function openDealItemModal(deal, item, products, done) {
     });
 }
 
-/* 商机本身只维护备注，产品、金额和下单表都在报价单中。 */
-function openDealNoteEdit(deal, done) {
-    var modal = document.createElement('div');
-    modal.className = 'modal';
-    modal.innerHTML = '<div class="modal-overlay"></div><div class="modal-content">' +
-        '<div class="modal-header"><h3>编辑商机备注</h3>' +
-        '<button type="button" class="btn btn-link modal-close">×</button></div>' +
-        '<div class="modal-body"><form id="dealNoteForm" class="form-grid">' +
-        '<div class="field"><label>备注</label><textarea name="note" maxlength="500" rows="5">' +
-        esc(deal.note || '') + '</textarea></div>' +
-        '<p class="small muted">产品、尺寸、生产参数和价格请在报价单中维护。</p>' +
-        '<div class="form-actions"><button type="button" class="btn modal-cancel">取消</button>' +
-        '<button type="submit" class="btn btn-primary">保存备注</button></div></form></div></div>';
-    document.body.appendChild(modal);
-    function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
-    modal.querySelector('.modal-close').addEventListener('click', close);
-    modal.querySelector('.modal-cancel').addEventListener('click', close);
-    var form = modal.querySelector('form');
-    form.addEventListener('submit', function (ev) {
-        ev.preventDefault();
-        var btn = form.querySelector('button[type="submit"]');
-        btn.disabled = true;
-        api('/deals/' + deal.id, {
-            method: 'PUT',
-            body: { note: String(form.querySelector('[name="note"]').value || '').trim() || null }
-        }).then(function () {
-            toast('商机备注已保存');
-            close();
-            if (done) { done(); }
-        }).catch(function (err) {
-            toast(err.message, true);
-            btn.disabled = false;
-        });
-    });
-}
-
 /* ---------------- 旧版单产品编辑（仅保留兼容，不再从商机详情入口打开） ---------------- */
 function openDealEdit(deal, products, done) {
     var modal = document.createElement('div');
@@ -941,8 +978,6 @@ function openDealEdit(deal, products, done) {
         '<div class="field"><label>阶段</label>' +
         '<select name="stage">' + stageOptions(deal.stage) + '</select></div>' +
         '</div>' +
-        '<div class="field"><label>备注</label>' +
-        '<textarea name="note" maxlength="500">' + esc(deal.note || '') + '</textarea></div>' +
         '<div class="form-actions">' +
         '<button type="button" class="btn modal-cancel">取消</button>' +
         '<button type="submit" class="btn btn-primary">保存修改</button>' +
@@ -1011,7 +1046,6 @@ function openDealEdit(deal, products, done) {
             spec: val('spec') || null,
             amount: amount,
             stage: val('stage'),
-            note: val('note') || null
         };
         if (String(deal.product_id || '') !== String(productPicker.getValue() || '')) {
             payload.product_id = productPicker.getValue() ? Number(productPicker.getValue()) : null;
@@ -1104,7 +1138,7 @@ function viewDealNew(root, route) {
             '<div class="deal-convert-page-head">' +
               '<div><a class="crumb" href="' + backHash + '">‹ ' + backLabel + '</a>' +
               '<span class="deal-convert-kicker">销售流程 · 新建商机</span>' +
-              '<h2>转商机</h2><p>先记录客户需求，产品与报价在商机内创建</p></div>' +
+              '<h2>转商机</h2><p>确认后创建商机，产品与报价在商机内维护</p></div>' +
             '</div>' +
             '<div class="deal-convert-page-body">' +
               dealConvertFormHtml('dealNewForm', [], fromName,
@@ -1123,7 +1157,7 @@ function viewDealNew(root, route) {
                     method: 'POST',
                     body: {
                         customer_id: custId,
-                        note: deal.note
+                        note: null
                     }
                 });
             return req.then(function (res) {
@@ -1209,8 +1243,7 @@ function openDealOrderModal(deal, customerName, items, quote) {
         '<div class="field"><label>收货电话 *</label><input name="receiver_phone" maxlength="32" inputmode="tel"></div>' +
         '<div class="field field-wide"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
         '</div>' +
-        '<div class="field"><label>订单备注</label><textarea name="note" maxlength="500">' +
-        esc(deal.note || '') + '</textarea></div>' +
+        '<div class="field"><label>订单备注</label><textarea name="note" maxlength="500"></textarea></div>' +
         '<p class="small muted">优惠只减产品合计，运费单独计入订单应收，不混入产品金额。' +
         '优惠与运费在生成订单时补充，产品明细和下单表来自客户已确认的报价单。</p>' +
         '<div class="form-actions">' +

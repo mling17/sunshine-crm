@@ -235,6 +235,68 @@ function photoThumbs(files) {
   }).join('') + '</div>';
 }
 
+function timelineQuoteDetailHtml(detail) {
+  if (!detail || !detail.quote || !Array.isArray(detail.items)) { return ''; }
+  var quote = detail.quote;
+  var changes = Array.isArray(detail.changes) ? detail.changes : [];
+  var itemHtml = detail.items.map(function (item) {
+    var product = [item.product_code, item.product_name].filter(Boolean).join(' · ') || '未关联产品';
+    var attrs = [
+      item.product_type,
+      item.model,
+      item.drive_type_label,
+      item.quantity ? ('×' + item.quantity) : null
+    ].filter(Boolean);
+    var formMeta = item.form_file_name
+      ? [
+          item.form_file_name,
+          item.sheet_name,
+          item.row_count ? item.row_count + ' 行' : null,
+          item.column_count ? item.column_count + ' 列' : null,
+          item.a1_value ? 'A1 ' + item.a1_value : null
+        ].filter(Boolean).join(' · ')
+      : '未上传下单表';
+    var preview = item.form_preview_url
+      ? '<button type="button" class="thumb tl-quote-form-thumb" data-img="/crm' +
+        esc(item.form_preview_url) + '" data-name="' + esc(product + ' · 下单表') + '">' +
+        '<img src="/crm' + esc(item.form_preview_url) + '" alt="下单表内容缩略图" loading="lazy"></button>'
+      : '';
+    var download = item.form_url
+      ? '<a class="btn btn-sm" href="/crm' + esc(item.form_url) + '">下载已上传下单表</a>'
+      : '';
+    return '<div class="tl-quote-product">' +
+      '<div class="tl-quote-product-head"><b>' + esc(product) + '</b>' +
+        '<span>' + money(item.amount) + '</span></div>' +
+      (attrs.length ? '<div class="small muted">' + esc(attrs.join(' · ')) + '</div>' : '') +
+      (item.product_config ? '<div class="small muted">' + esc(item.product_config) + '</div>' : '') +
+      '<div class="tl-quote-facts"><span>报价 ' + money(item.amount) + '</span>' +
+        '<span>识别合计 ' + money(item.recognized_total) + '</span>' +
+        (item.note ? '<span>备注：' + esc(item.note) + '</span>' : '') + '</div>' +
+      '<div class="small muted tl-quote-form-meta">' + esc(formMeta) + '</div>' +
+      (preview || download ? '<div class="tl-quote-form-actions">' + preview + download + '</div>' : '') +
+    '</div>';
+  }).join('');
+  var changeHtml = changes.length
+    ? '<div class="tl-quote-changes">' + changes.map(function (change) {
+        var before = change.from === null || change.from === undefined || change.from === ''
+          ? '未填写' : String(change.from);
+        var after = change.to === null || change.to === undefined || change.to === ''
+          ? '未填写' : String(change.to);
+        return '<div><b>' + esc(change.label || '字段') + '</b>：' +
+          esc(before) + ' → ' + esc(after) + '</div>';
+      }).join('') + '</div>'
+    : '';
+  return '<div class="tl-quote-detail">' +
+    '<div class="tl-quote-detail-head"><b>' + esc(quote.quote_no || '报价单') + '</b>' +
+      '<span>' + esc(quote.title || '') + '</span>' +
+      '<span class="badge quote">' + esc(quote.status_label || quote.status || '') + '</span>' +
+      '<strong>合计 ' + money(quote.amount) + '</strong></div>' +
+    (quote.note ? '<div class="small muted">报价备注：' + esc(quote.note) + '</div>' : '') +
+    changeHtml +
+    (itemHtml ? '<div class="tl-quote-products">' + itemHtml + '</div>' : '') +
+  '</div>';
+}
+
 /* 缩略图点击委托（全页统一） */
 document.addEventListener('click', function (ev) {
   var el = ev.target && ev.target.closest ? ev.target.closest('[data-img]') : null;
@@ -260,6 +322,7 @@ function timelineHtml(records) {
       '<span class="tl-time">' + fmtDateTime(r.at) + '</span></div>' +
       '<div class="tl-content">' + esc(r.content) + '</div>' +
       (meta.length ? '<div class="tl-meta small muted">' + esc(meta.join(' · ')) + '</div>' : '') +
+      timelineQuoteDetailHtml(r.detail) +
       photoThumbs(r.files) +
       '</div></div>';
   }).join('') + '</div>';
@@ -304,6 +367,7 @@ function followupRecordsFromApi(records) {
       next_date: r.next_date,
       method: r.method,
       quote_no: r.quote_no,
+      detail: r.detail || null,
       files: photos
     };
   });
@@ -812,23 +876,21 @@ function dealConvertFormHtml(formId, products, sourceName, sourceType) {
     '<section class="deal-convert-section">' +
       '<div class="deal-convert-section-head">' +
         '<div><span class="deal-convert-step">01</span>' +
-          '<div><h4>商机备注</h4><p>先记录客户需求和下次沟通重点，产品与报价在商机内创建</p></div></div>' +
+          '<div><h4>确认创建商机</h4><p>商机用于汇总本轮报价与跟进，无需先填写备注</p></div></div>' +
       '</div>' +
-      '<div class="deal-convert-field-grid">' +
-        '<div class="field deal-convert-field-wide"><label>需求备注</label>' +
-          '<textarea name="note" maxlength="500" rows="4" ' +
-            'placeholder="记录客户需求、现场条件或特殊配置…"></textarea>' +
-        '</div>' +
-      '</div>' +
+      (isCustomer
+        ? '<div class="deal-convert-confirm-copy">将从当前客户创建一条新商机，之后可继续添加报价单。</div>'
+        : '<div class="deal-convert-warning"><b>线索将移出线索池</b>' +
+          '<span>创建商机后，这条记录不再在线索中显示，请到客户档案中继续跟进。</span></div>') +
     '</section>' +
     '<p class="deal-convert-footnote">' +
       (isCustomer
         ? '商机创建后，在商机页创建报价单并关联合适的产品。'
-        : '线索转化后会建立客户档案，商机本身不再绑定产品。') +
+        : '商机创建后会同时建立客户档案，原线索及其标签、跟进记录会迁移到客户名下。') +
     '</p>' +
     '<div class="form-actions">' +
       '<button type="button" class="btn modal-cancel">取消</button>' +
-      '<button type="submit" class="btn btn-primary">创建商机</button>' +
+      '<button type="submit" class="btn btn-primary">确定创建商机</button>' +
     '</div>' +
   '</form>';
 }
@@ -838,9 +900,7 @@ function bindDealConvertForm(form, products, onSubmit) {
 
   form.addEventListener('submit', function (ev) {
     ev.preventDefault();
-    var payload = {
-      note: String(form.querySelector('[name="note"]').value || '').trim() || null
-    };
+    var payload = { note: null };
     submitButton.disabled = true;
     var request = onSubmit(payload);
     if (request && typeof request.catch === 'function') {
@@ -874,7 +934,7 @@ function openDealConvertModal(source, sourceType) {
     '<div class="modal-content wide deal-convert-modal">' +
     '<div class="modal-header deal-convert-modal-head">' +
       '<div><span class="deal-convert-kicker">销售流程 · 新建商机</span>' +
-      '<h3>转商机</h3><p>先记录需求，产品与金额在报价单中维护</p></div>' +
+      '<h3>转商机</h3><p>确认后创建商机，产品与金额在报价单中维护</p></div>' +
       '<button type="button" class="btn btn-link modal-close" aria-label="关闭">×</button>' +
     '</div>' +
     '<div class="modal-body">' +
@@ -895,7 +955,7 @@ function openDealConvertModal(source, sourceType) {
           method: 'POST',
           body: {
             customer_id: sourceId,
-            note: deal.note
+            note: null
           }
         })
         : api('/leads/' + sourceId + '/convert', {

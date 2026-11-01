@@ -37,6 +37,7 @@ from app.routers import (
 )
 from app.schema import ensure_schema
 from app.migrations import run_migrations
+from app.deal_tags import backfill_pending_quote_tags
 from app.errors import install_error_handler
 from app.security import hash_password, now_iso
 
@@ -71,6 +72,8 @@ def seed_admin_if_needed() -> None:
 async def lifespan(_app: FastAPI):
     ensure_schema(settings.db_path)
     run_migrations(settings.db_path)  # V2 增量迁移
+    with db_conn() as conn:
+        backfill_pending_quote_tags(conn)
     settings.uploads_path.mkdir(parents=True, exist_ok=True)
     seed_admin_if_needed()
     log.info(

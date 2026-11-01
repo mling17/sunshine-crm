@@ -93,7 +93,6 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             "quoteFormPreview",
             "<label>报价金额 *</label>",
             "quote-form-thumbnail",
-            "下载产品模板",
             "data-quote-confirm",
             "data-quote-send",
             "data-quote-requote",
@@ -109,8 +108,31 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("opts.followExtraHtml", self.shared)
         self.assertIn("重新报价", self.deals)
         self.assertIn("/requote", self.deals)
+        self.assertIn("timelineQuoteDetailHtml", self.shared)
+        self.assertIn("下单表内容缩略图", self.shared)
+        self.assertIn("data-deal-tag-add", self.deals)
+        self.assertIn("data-deal-tag-remove", self.deals)
+        self.assertNotIn("下载产品模板", self.deals)
         self.assertIn("payload.quote_id", self.shared)
         self.assertIn('name="quote_id"', self.deals)
+        quote_cards = self.deals[
+            self.deals.index("function quoteCardsHtml"):
+            self.deals.index("function dealTagsHtml")
+        ]
+        self.assertLess(
+            quote_cards.index('data-quote-delete="'),
+            quote_cards.index("</summary>"),
+            "删除按钮应位于报价单卡片标题层级，而不是卡片明细操作区",
+        )
+        self.assertIn(
+            "quote.status === 'draft' || quote.status === 'void'",
+            quote_cards,
+        )
+        delete_binding = self.deals[
+            self.deals.index("$$('[data-quote-delete]'"):
+            self.deals.index("$$('[data-quote-order]'")
+        ]
+        self.assertIn("ev.stopPropagation()", delete_binding)
         quote_form = self.deals[
             self.deals.index("function openQuoteItemModal"):
             self.deals.index("function openQuoteConfirmModal")
@@ -120,7 +142,7 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
     def test_deal_page_uses_quote_cards_and_priority_actions(self):
         detail = self.deals[
             self.deals.index("function viewDealDetail"):
-            self.deals.index("function openDealNoteEdit")
+            self.deals.index("function openDealEdit")
         ]
         self.assertNotIn("infoHtml: infoGrid([", detail)
         self.assertIn("hideEntityCard: true", detail)
@@ -134,26 +156,51 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         ]
         self.assertIn('class="deal-overview-head"', overview)
         self.assertIn('class="deal-overview-name"', overview)
-        self.assertIn('class="deal-overview-count"', overview)
         self.assertIn('class="deal-overview-status"', overview)
-        self.assertIn("(noteText ?", overview)
+        self.assertIn("dealTagsHtml(deal, quotes)", overview)
+        self.assertNotIn("(noteText ?", overview)
         self.assertIn('class="deal-overview-actions"', overview)
         self.assertIn("＋ 添加报价单", overview)
-        self.assertIn(">编辑备注</button>", overview)
         self.assertIn(">生成订单</button>", overview)
         self.assertIn(">标记流失</button>", overview)
-        self.assertIn("addQuoteAction + editNoteAction +", overview)
+        self.assertIn("dealTagsHtml(deal, quotes)", overview)
+        self.assertIn("addQuoteAction +", overview)
         self.assertIn("orderAction + loseAction", overview)
+        self.assertNotIn("编辑备注", overview)
+        self.assertNotIn("deal-overview-note", overview)
 
         for marker in (
             ".deal-overview {",
-            ".deal-overview-note {",
+            ".deal-tags {",
+            ".deal-tag-auto {",
+            ".deal-tag-manual {",
+            ".deal-tag-add {",
             ".deal-quote-list {",
             "display: flex;",
             ".deal-quote-empty {",
             ".deal-overview-actions {",
         ):
             self.assertIn(marker, self.css)
+        self.assertIn("线索将移出线索池", self.shared)
+        self.assertIn("确定创建商机", self.shared)
+
+    def test_add_quote_is_disabled_when_a_quote_is_pending_or_confirmed(self):
+        overview = self.deals[
+            self.deals.index("function dealOverviewHtml"):
+            self.deals.index("function bindQuoteActions")
+        ]
+        self.assertIn(
+            "quote.status === 'pending' || quote.status === 'confirmed'",
+            overview,
+        )
+        self.assertIn(
+            "deal.stage !== 'lost' && !hasPendingOrConfirmedQuote",
+            overview,
+        )
+        self.assertIn(
+            'title="已有待客户确认或客户已确认的报价单，或商机已关闭"',
+            overview,
+        )
 
     def test_quote_action_colors_are_not_overridden_by_neutral_buttons(self):
         neutral = (

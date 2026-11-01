@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DealProductParameterUiTest(unittest.TestCase):
-    def test_quote_form_links_product_template_and_spreadsheet(self):
+    def test_quote_form_uploads_product_spreadsheet(self):
         shared = (ROOT / "static/views/shared.js").read_text(encoding="utf-8")
         deals = (ROOT / "static/views/deals.js").read_text(encoding="utf-8")
         css = (ROOT / "static/app.css").read_text(encoding="utf-8")
@@ -23,7 +23,7 @@ class DealProductParameterUiTest(unittest.TestCase):
         for marker in (
             "function openQuoteItemModal",
             "productPickerHtml(products || []",
-            "下载 Excel 模板",
+            "选择产品后上传对应的 Excel 下单表",
             'name="form_file"',
             "quotes/form-preview",
             "A1 校验通过",

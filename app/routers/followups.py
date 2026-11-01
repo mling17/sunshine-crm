@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Literal
 
@@ -155,6 +156,12 @@ def _photos_for(conn, follow_up_ids: list[int]) -> dict[int, list[AttachmentOut]
 
 def _to_item(row, photos: list[AttachmentOut]) -> FollowUpItemOut:
     data = dict(row)
+    raw_detail = data.get("detail")
+    if isinstance(raw_detail, str) and raw_detail:
+        try:
+            data["detail"] = json.loads(raw_detail)
+        except (TypeError, ValueError):
+            data["detail"] = None
     # 跟进方式的中文也走字典（follow_method 是 A 类，可改名）
     data["method_label"] = labels.follow_method(data.get("method"))
     return FollowUpItemOut(
@@ -166,7 +173,7 @@ def _fetch_item(conn, follow_up_id: int) -> FollowUpItemOut:
     row = conn.execute(
         """
         SELECT fu.id, fu.customer_id, fu.deal_id, fu.quote_id, fu.object_type, fu.object_id, fu.method, fu.kind,
-               fu.content, fu.next_date, fu.created_at,
+               fu.content, fu.detail, fu.next_date, fu.created_at,
                c.name AS customer_name, d.stage AS deal_stage,
                q.quote_no, q.title AS quote_title
         FROM follow_ups fu
@@ -566,7 +573,7 @@ def list_follow_ups(
         rows = conn.execute(
             f"""
             SELECT fu.id, fu.customer_id, fu.deal_id, fu.quote_id, fu.method, fu.kind, fu.content, fu.next_date,
-                   fu.created_at, fu.object_type, fu.object_id,
+                   fu.detail, fu.created_at, fu.object_type, fu.object_id,
                    c.name AS customer_name, d.stage AS deal_stage,
                    q.quote_no, q.title AS quote_title
             FROM follow_ups fu

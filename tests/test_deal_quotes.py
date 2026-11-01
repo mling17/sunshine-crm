@@ -123,7 +123,20 @@ class DealQuoteTest(ApiTestCase):
 
         timeline = self.client.get(f"/api/crm/deals/{deal['id']}").json()["timeline"]
         self.assertTrue(any(item["type"] == "quote" for item in timeline))
-        self.assertTrue(any("上传下单表" in item["content"] for item in timeline))
+        upload_event = next(item for item in timeline if "上传下单表" in item["content"])
+        self.assertEqual(upload_event["detail"]["event"], "item_created")
+        upload_item = upload_event["detail"]["items"][0]
+        self.assertEqual(upload_item["sheet_name"], "Sheet1")
+        self.assertGreater(upload_item["row_count"], 0)
+        self.assertTrue(upload_item["form_preview_url"])
+        self.assertTrue(upload_item["form_url"])
+
+        follow_records = self.client.get(
+            "/api/crm/follow-ups",
+            params={"object_type": "deal", "object_id": deal["id"], "include_system": True},
+        ).json()
+        follow_upload = next(item for item in follow_records if "上传下单表" in item["content"])
+        self.assertEqual(follow_upload["detail"]["event"], "item_created")
 
     def test_follow_up_can_link_to_quote(self):
         _, deal, quote = self._quote_with_item()
@@ -198,6 +211,15 @@ class DealQuoteTest(ApiTestCase):
         self.assertIsNotNone(detail["customer_confirmed_at"])
         self.assertTrue(detail["product_name_snapshot"])
 
+        quotes_after_order = self.client.get(
+            f"/api/crm/deals/{deal['id']}/quotes"
+        ).json()
+        source_after_order = next(
+            item for item in quotes_after_order if item["id"] == quote["id"]
+        )
+        self.assertEqual(source_after_order["status"], "void")
+        self.assertEqual(source_after_order["order_id"], data["order"]["id"])
+
     def test_quote_confirmation_with_screenshot_returns_file_url(self):
         _, _, quote = self._quote_with_item()
         sent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")
@@ -261,6 +283,52 @@ class DealQuoteTest(ApiTestCase):
         blocked = self.client.post(f"/api/crm/quotes/{quote['id']}/requote")
         self.assertEqual(blocked.status_code, 409, blocked.text)
         self.assertEqual(blocked.json()["code"], "quote_requote_not_allowed")
+
+    def test_send_quote_creates_auto_tags_and_requote_removes_them(self):
+        _, deal, quote = self._quote_with_item()
+        manual = self.client.post(
+            f"/api/crm/deals/{deal['id']}/tags",
+            json={"name": "重点跟进"},
+        )
+        self.assertEqual(manual.status_code, 200, manual.text)
+
+        sent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        self.assertEqual(sent.status_code, 200, sent.text)
+        detail = self.client.get(f"/api/crm/deals/{deal['id']}").json()
+        tags = {tag["name"]: tag for tag in detail["tags"]}
+        self.assertIn("待确认", tags)
+        self.assertIn("金额 ¥25.50", tags)
+        self.assertEqual(tags["待确认"]["source"], "auto")
+        self.assertFalse(tags["待确认"]["deletable"])
+        self.assertTrue(tags["重点跟进"]["deletable"])
+
+        send_event = next(
+            item for item in detail["timeline"]
+            if item["content"] == f"报价单 {quote['quote_no']} 已发客户确认"
+        )
+        self.assertEqual(send_event["detail"]["event"], "sent")
+        self.assertEqual(send_event["detail"]["quote"]["status"], "pending")
+        self.assertTrue(send_event["detail"]["items"][0]["form_preview_url"])
+
+        locked = self.client.delete(
+            f"/api/crm/deals/{deal['id']}/tags/{tags['待确认']['id']}"
+        )
+        self.assertEqual(locked.status_code, 409, locked.text)
+        self.assertEqual(locked.json()["code"], "deal_tag_auto_locked")
+
+        removed = self.client.delete(
+            f"/api/crm/deals/{deal['id']}/tags/{tags['重点跟进']['id']}"
+        )
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertNotIn("重点跟进", {tag["name"] for tag in removed.json()})
+
+        requoted = self.client.post(f"/api/crm/quotes/{quote['id']}/requote")
+        self.assertEqual(requoted.status_code, 200, requoted.text)
+        after_requote = self.client.get(f"/api/crm/deals/{deal['id']}").json()
+        auto_names = {
+            tag["name"] for tag in after_requote["tags"] if tag["source"] == "auto"
+        }
+        self.assertEqual(auto_names, set())
 
     def test_quote_requires_xlsx_form(self):
         _, deal = self._deal()
@@ -362,6 +430,61 @@ class DealQuoteTest(ApiTestCase):
         deal_after = self.client.get(f"/api/crm/deals/{deal['id']}").json()
         self.assertEqual(deal_after["stage"], "quote")
         self.assertEqual(deal_after["amount"], 0.0)
+
+    def test_pending_and_confirmed_quotes_cannot_be_deleted(self):
+        _, deal, quote = self._quote_with_item()
+
+        sent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        self.assertEqual(sent.status_code, 200, sent.text)
+        pending_delete = self.client.delete(f"/api/crm/quotes/{quote['id']}")
+        self.assertEqual(pending_delete.status_code, 409, pending_delete.text)
+        self.assertEqual(pending_delete.json()["code"], "quote_delete_locked")
+
+        confirmed = self.client.post(f"/api/crm/quotes/{quote['id']}/confirm")
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        confirmed_delete = self.client.delete(f"/api/crm/quotes/{quote['id']}")
+        self.assertEqual(confirmed_delete.status_code, 409, confirmed_delete.text)
+        self.assertEqual(confirmed_delete.json()["code"], "quote_delete_locked")
+
+    def test_generating_order_voids_all_non_void_quotes(self):
+        _, deal, quote = self._quote_with_item()
+        alternative = self.client.post(
+            f"/api/crm/deals/{deal['id']}/quotes",
+            json={"title": "未采用的备选方案"},
+        )
+        self.assertEqual(alternative.status_code, 200, alternative.text)
+        alternative = alternative.json()
+
+        self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        confirmed = self.client.post(f"/api/crm/quotes/{quote['id']}/confirm")
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+
+        ordered = self.client.post(
+            f"/api/crm/quotes/{quote['id']}/orders",
+            json={"deposit": 5, "logistics_mode": "self"},
+        )
+        self.assertEqual(ordered.status_code, 200, ordered.text)
+        order = ordered.json()["order"]
+
+        quotes = self.client.get(f"/api/crm/deals/{deal['id']}/quotes").json()
+        self.assertTrue(quotes)
+        self.assertEqual({item["status"] for item in quotes}, {"void"})
+        source = next(item for item in quotes if item["id"] == quote["id"])
+        alternative = next(item for item in quotes if item["id"] == alternative["id"])
+        self.assertEqual(source["order_id"], order["id"])
+        self.assertIsNone(alternative["order_id"])
+
+        timeline = self.client.get(f"/api/crm/deals/{deal['id']}").json()["timeline"]
+        auto_void = next(
+            item for item in timeline
+            if item.get("detail", {}).get("event") == "auto_void_for_order"
+        )
+        self.assertEqual(
+            {item["status_after"] for item in auto_void["detail"]["quotes"]},
+            {"void"},
+        )
+        self.assertIn(quote["quote_no"], auto_void["content"])
+        self.assertIn(alternative["quote_no"], auto_void["content"])
 
     def test_quote_name_is_required(self):
         _, deal = self._deal()

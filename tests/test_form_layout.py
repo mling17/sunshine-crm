@@ -58,6 +58,18 @@ class FormLayoutStructureTest(unittest.TestCase):
         self.assertIn('<form id="profileForm" class="modal-body form-grid"', self.index)
         self.assertIn('<form id="passwordForm" class="modal-body form-grid"', self.index)
 
+    def test_product_menu_follows_aftersales_and_uses_data_dictionary(self):
+        aftersales = self.index.index('data-view="aftersales"')
+        products = self.index.index('data-view="products"')
+        logistics = self.index.index('data-view="logistics"')
+        self.assertLess(aftersales, products)
+        self.assertLess(products, logistics)
+
+        products_view = self.views["products.js"]
+        self.assertIn("dictOptions('product_type', current, emptyLabel)", products_view)
+        self.assertIn("productCategoryOptions('', '全部分类')", products_view)
+        self.assertIn("productCategoryOptions(p.category || '天窗', null)", products_view)
+
     def test_customer_and_lead_share_deal_convert_modal(self):
         self.assertIn("openDealConvertModal(source, sourceType)", self.views["shared.js"])
         self.assertIn("openDealConvertModal(lead, 'lead')", self.views["leads.js"])
@@ -65,7 +77,7 @@ class FormLayoutStructureTest(unittest.TestCase):
         self.assertIn("openCustomerDealModal(c)", self.views["customers.js"])
         self.assertNotIn("/deals/new?customer=", self.views["customers.js"])
 
-    def test_deal_convert_forms_only_require_a_note(self):
+    def test_deal_convert_is_confirmation_only(self):
         shared = self.views["shared.js"]
         deals = self.views["deals.js"]
 
@@ -83,11 +95,13 @@ class FormLayoutStructureTest(unittest.TestCase):
         self.assertNotIn("productPickerHtml(products", form_builder)
         self.assertNotIn('name="product_type"', form_builder)
         self.assertNotIn("modelComboHtml", form_builder)
-        self.assertIn("商机备注", form_builder)
-        self.assertIn('name="note"', form_builder)
-        self.assertIn("产品与报价在商机内创建", form_builder)
+        self.assertNotIn("商机备注", form_builder)
+        self.assertNotIn('name="note"', form_builder)
+        self.assertIn("确认创建商机", form_builder)
+        self.assertIn("确定创建商机", form_builder)
         self.assertNotIn('name="amount"', form_builder)
         self.assertNotIn('name="drive_type"', form_builder)
+        self.assertIn("线索将移出线索池", shared)
 
     def test_product_picker_searches_catalog_fields_and_supports_keyboard(self):
         shared = self.views["shared.js"]
