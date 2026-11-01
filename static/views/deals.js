@@ -87,11 +87,11 @@ function quoteStatusBadge(quote) {
 
 function quoteFormPreviewHtml(item) {
     if (item.form_preview_url) {
-        return '<details class="quote-form-sheet" open><summary>下单表数据区域</summary>' +
-            '<div class="quote-form-preview" style="overflow:auto;padding:10px">' +
-            '<img src="/crm' + esc(item.form_preview_url) + '" alt="下单表数据区域" ' +
-            'style="max-width:none;width:auto;min-width:min(100%,720px);display:block">' +
-            '</div></details>';
+        var previewUrl = '/crm' + item.form_preview_url;
+        return '<div class="small muted" style="margin:8px 0 6px">下单表</div>' +
+            '<button type="button" class="thumb quote-form-thumbnail" ' +
+            'data-img="' + esc(previewUrl) + '" data-name="下单表数据区域">' +
+            '<img src="' + esc(previewUrl) + '" alt="下单表缩略图" loading="lazy"></button>';
     }
     var content = item.form_content || {};
     var sheets = content.sheets || [];
@@ -120,8 +120,7 @@ function quoteItemHtml(item, editable) {
             '<span class="badge muted">×' + esc(item.quantity || 1) + '</span>' +
             '<span style="margin-left:auto"><b>' + money(item.amount) + '</b></span></div>' +
         '<div class="item-sub small">' +
-            '识别合计 ' + money(item.recognized_total || item.amount) +
-            ' · A1 ' + esc(item.a1_value || '—') + '</div>' +
+            '报价金额 ' + money(item.amount) + '</div>' +
         '<div class="small" style="margin:8px 0">' +
             (item.template_url
                 ? '<a class="btn btn-sm" href="/crm' + esc(item.template_url) + '">下载产品模板</a> '
@@ -306,11 +305,10 @@ function openQuoteItemModal(deal, quote, item, products, done) {
         '<div class="field"><label>对应下单表 * ' + (item && item.form_file_name
             ? '（当前：' + esc(item.form_file_name) + '，不选则保留）' : '') + '</label>' +
         '<input type="file" name="form_file" accept=".xlsx" ' + (item ? '' : 'required') + '></div>' +
-        '<div class="row-2"><div class="field"><label>识别合计金额</label>' +
-        '<input name="recognized_total" readonly value="' +
-        (item && item.recognized_total ? Number(item.recognized_total).toFixed(2) : '待识别') + '"></div>' +
-        '<div class="field"><label>识别依据</label><input name="amount_cell" readonly value="' +
-        esc(item && item.amount_cell || '上传后识别 Sheet1 合计行') + '"></div></div>' +
+        '<div class="field"><label>报价金额 *</label>' +
+        '<input name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" ' +
+        'placeholder="上传下单表后自动识别，可修改" value="' +
+        (item && item.amount ? Number(item.amount).toFixed(2) : '') + '"></div>' +
         '<div class="field"><label>备注</label><textarea name="note" maxlength="500" ' +
         'placeholder="记录这版报价的沟通要点">' + esc(item && item.note || '') + '</textarea></div>' +
         '<div class="card" id="quoteFormPreview" style="margin:0;display:none">' +
@@ -329,8 +327,7 @@ function openQuoteItemModal(deal, quote, item, products, done) {
     var form = modal.querySelector('form');
     var submitBtn = form.querySelector('button[type="submit"]');
     var fileInput = form.querySelector('[name="form_file"]');
-    var totalInput = form.querySelector('[name="recognized_total"]');
-    var cellInput = form.querySelector('[name="amount_cell"]');
+    var amountInput = form.querySelector('[name="amount"]');
     var previewBox = form.querySelector('#quoteFormPreview');
     var previewBody = form.querySelector('#quoteFormPreviewBody');
     var previewStatus = form.querySelector('#quoteFormPreviewStatus');
@@ -338,27 +335,23 @@ function openQuoteItemModal(deal, quote, item, products, done) {
         preview_token: item.form_sha256,
         image_url: item.form_preview_url,
         recognized_total: item.recognized_total,
-        a1_value: item.a1_value,
-        amount_cell: item.amount_cell
+        a1_value: item.a1_value
     } : null;
 
     function resetPreview() {
         previewState = null;
         previewBox.style.display = 'none';
         previewBody.innerHTML = '';
-        totalInput.value = '待识别';
-        cellInput.value = '上传后识别 Sheet1 合计行';
+        if (!item) { amountInput.value = ''; }
         submitBtn.disabled = true;
     }
 
     function renderPreview(data) {
         previewState = data;
-        totalInput.value = Number(data.recognized_total || 0).toFixed(2);
-        cellInput.value = data.amount_cell || '已识别合计行';
+        amountInput.value = Number(data.recognized_total || 0).toFixed(2);
         previewStatus.textContent = 'A1 校验通过 · ' + (data.a1_value || '');
         previewBody.innerHTML = '<div class="small muted" style="margin-bottom:8px">' +
-            'A1：' + esc(data.a1_value || '—') +
-            ' · 合计单元格：' + esc(data.amount_cell || '—') + '</div>' +
+            'A1：' + esc(data.a1_value || '—') + ' · 合计金额已填入上方，可手动修改</div>' +
             '<div style="overflow:auto;padding:8px;background:#fff">' +
             '<img src="/crm' + esc(data.image_url) + '" alt="下单表数据区域" ' +
             'style="max-width:none;width:auto;min-width:min(100%,720px);display:block"></div>';
@@ -414,8 +407,14 @@ function openQuoteItemModal(deal, quote, item, products, done) {
         var file = fileInput.files[0];
         if (!item && !file) { toast('请上传与产品对应的下单表', true); return; }
         if (file && !previewState) { toast('请等待下单表识别完成', true); return; }
+        var quotedAmount = numOrNull(amountInput.value);
+        if (quotedAmount === null || quotedAmount <= 0) {
+            toast('报价金额必须大于 0', true);
+            return;
+        }
         var fd = new FormData();
         fd.append('product_id', picker.getValue());
+        fd.append('amount', String(quotedAmount));
         fd.append('note', String(form.querySelector('[name="note"]').value || '').trim());
         if (file) {
             fd.append('form_file', file);

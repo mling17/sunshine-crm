@@ -381,7 +381,6 @@ class QuoteItemOut(BaseModel):
     form_available: bool = False
     recognized_total: float = 0.0
     a1_value: str | None = None
-    amount_cell: str | None = None
     form_content: dict = Field(default_factory=dict)
     template_url: str | None = None
     form_url: str | None = None

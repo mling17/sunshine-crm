@@ -90,6 +90,8 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             "quotes/form-preview",
             "recognized_total",
             "quoteFormPreview",
+            "<label>报价金额 *</label>",
+            "quote-form-thumbnail",
             "下载产品模板",
             "data-quote-confirm",
             "data-quote-order",
@@ -99,6 +101,11 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("opts.followExtraHtml", self.shared)
         self.assertIn("payload.quote_id", self.shared)
         self.assertIn('name="quote_id"', self.deals)
+        quote_form = self.deals[
+            self.deals.index("function openQuoteItemModal"):
+            self.deals.index("function openQuoteConfirmModal")
+        ]
+        self.assertNotIn("识别依据", quote_form)
 
 
 if __name__ == "__main__":

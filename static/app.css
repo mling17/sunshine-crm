@@ -1681,6 +1681,8 @@ table.data-table th.nowrap { white-space: nowrap; }
 }
 .thumb:active { transform: scale(0.96); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.quote-form-thumbnail { width: 180px; height: 120px; background: #fff; }
+.quote-form-thumbnail img { object-fit: contain; }
 .file-chip {
   display: inline-flex; align-items: center; gap: 4px; height: 26px; max-width: 210px;
   padding: 0 10px; font-size: 12px; color: #4a5464; background: #f5f7fa;

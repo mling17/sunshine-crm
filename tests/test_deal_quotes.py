@@ -57,6 +57,7 @@ class DealQuoteTest(ApiTestCase):
         self.assertTrue(preview_data["a1_value"])
         self.assertEqual(preview_data["recognized_total"], 20.0)
         self.assertTrue(preview_data["image_url"])
+        self.assertNotIn("amount_cell", preview_data)
         self.assertEqual(preview_data["sheet_content"]["name"], "Sheet1")
 
         item = self.client.post(
@@ -64,6 +65,7 @@ class DealQuoteTest(ApiTestCase):
             data={
                 "product_id": str(product["id"]),
                 "preview_token": preview_data["preview_token"],
+                "amount": "25.50",
                 "note": "客户确认现场洞口",
             },
             files={
@@ -76,10 +78,11 @@ class DealQuoteTest(ApiTestCase):
         )
         self.assertEqual(item.status_code, 200, item.text)
         quote = item.json()
-        self.assertEqual(quote["amount"], 20.0)
+        self.assertEqual(quote["amount"], 25.5)
         self.assertEqual(len(quote["items"]), 1)
         line = quote["items"][0]
         self.assertEqual(line["recognized_total"], 20.0)
+        self.assertEqual(line["amount"], 25.5)
         self.assertTrue(line["form_available"])
         self.assertTrue(line["form_preview_url"])
         self.assertGreater(len(line["form_content"]["sheets"]), 0)
@@ -154,7 +157,7 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(confirmed.json()["status"], "confirmed")
         deal_after = self.client.get(f"/api/crm/deals/{deal['id']}").json()
         self.assertEqual(deal_after["stage"], "won")
-        self.assertEqual(deal_after["amount"], 20.0)
+        self.assertEqual(deal_after["amount"], 25.5)
 
         second_quote = self.client.post(
             f"/api/crm/deals/{deal['id']}/quotes",
@@ -176,9 +179,9 @@ class DealQuoteTest(ApiTestCase):
         data = ordered.json()
         self.assertEqual(data["order"]["quote_id"], quote["id"])
         self.assertEqual(data["order"]["status"], "pending_payment")
-        self.assertEqual(data["order"]["product_total"], 20.0)
-        self.assertEqual(data["order"]["amount"], 18.0)
-        self.assertEqual(data["order"]["balance_amount"], 13.0)
+        self.assertEqual(data["order"]["product_total"], 25.5)
+        self.assertEqual(data["order"]["amount"], 23.5)
+        self.assertEqual(data["order"]["balance_amount"], 18.5)
 
         detail = self.client.get(f"/api/crm/orders/{data['order']['id']}").json()
         self.assertEqual(detail["quote"]["quote_no"], quote["quote_no"])
@@ -222,6 +225,20 @@ class DealQuoteTest(ApiTestCase):
         )
         self.assertEqual(resp.status_code, 400, resp.text)
         self.assertEqual(resp.json()["code"], "quote_form_product_mismatch")
+
+    def test_recognized_price_can_be_adjusted_without_reuploading(self):
+        _, _, quote = self._quote_with_item()
+        item_id = quote["items"][0]["id"]
+        changed = self.client.put(
+            f"/api/crm/quotes/items/{item_id}",
+            data={"amount": "88.88", "note": "最终让利价"},
+        )
+        self.assertEqual(changed.status_code, 200, changed.text)
+        changed_quote = changed.json()
+        self.assertEqual(changed_quote["amount"], 88.88)
+        self.assertEqual(changed_quote["items"][0]["amount"], 88.88)
+        self.assertEqual(changed_quote["items"][0]["recognized_total"], 20.0)
+        self.assertTrue(changed_quote["items"][0]["form_preview_url"])
 
 
 if __name__ == "__main__":

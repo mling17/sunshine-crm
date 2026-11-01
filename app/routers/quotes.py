@@ -301,7 +301,6 @@ async def preview_quote_form(
         "a1_value": inspected["a1_value"],
         "expected_a1": inspected["expected_a1"],
         "recognized_total": inspected["recognized_total"],
-        "amount_cell": inspected["amount_cell"],
         "sheet_content": inspected["sheet_content"],
         "image_url": (
             f"/api/crm/quotes/form-previews/{inspected['preview_token']}"
@@ -314,6 +313,7 @@ async def add_quote_item(
     quote_id: int,
     product_id: int = Form(...),
     preview_token: str = Form(...),
+    amount: str | None = Form(default=None),
     note: str | None = Form(default=None),
     form_file: UploadFile = File(...),
 ) -> QuoteOut:
@@ -330,7 +330,16 @@ async def add_quote_item(
                 "quote_form_preview_stale",
                 "下单表在预览后发生变化，请重新识别",
             )
-        amount = round(float(inspected["recognized_total"]), 2)
+        recognized_total = round(float(inspected["recognized_total"]), 2)
+        if amount is None or str(amount).strip() == "":
+            quoted_amount = recognized_total
+        else:
+            try:
+                quoted_amount = round(float(amount), 2)
+            except (TypeError, ValueError) as exc:
+                raise ApiError(400, "invalid_amount", "报价金额必须是数字") from exc
+            if quoted_amount <= 0:
+                raise ApiError(400, "invalid_amount", "报价金额必须大于 0")
         key, digest = _store_form(filename, data)
         snapshot = product_snapshot(product)
         next_sort = conn.execute(
@@ -361,8 +370,8 @@ async def add_quote_item(
                 1,
                 None,
                 None,
-                amount,
-                amount,
+                quoted_amount,
+                quoted_amount,
                 (note or "").strip() or None,
                 key,
                 filename,
@@ -377,7 +386,7 @@ async def add_quote_item(
                     },
                     ensure_ascii=False,
                 ),
-                amount,
+                recognized_total,
                 inspected["a1_value"],
                 inspected["amount_cell"],
                 inspected["preview_storage_key"],
@@ -401,7 +410,12 @@ async def add_quote_item(
             content=(
                 f"报价单 {quote['quote_no']} 添加产品"
                 f" {snapshot['product_name_snapshot'] or snapshot['product_code_snapshot']}"
-                f"，上传下单表 {filename}，识别合计 ¥{amount:,.2f}"
+                f"，上传下单表 {filename}，"
+                + (
+                    f"识别合计 ¥{recognized_total:,.2f}，报价改为 ¥{quoted_amount:,.2f}"
+                    if quoted_amount != recognized_total
+                    else f"识别合计 ¥{recognized_total:,.2f}"
+                )
             ),
             detail={"quote_id": quote_id, "amount": total},
         )
@@ -413,6 +427,7 @@ async def update_quote_item(
     item_id: int,
     product_id: int | None = Form(default=None),
     preview_token: str | None = Form(default=None),
+    amount: str | None = Form(default=None),
     note: str | None = Form(default=None),
     form_file: UploadFile | None = File(default=None),
 ) -> QuoteOut:
@@ -438,6 +453,14 @@ async def update_quote_item(
         a1_value = old["a1_value"]
         amount_cell = old["amount_cell"]
         preview_key = old["form_preview_storage_key"]
+        quoted_amount = round(float(old["amount"] or 0), 2)
+        if amount is not None and str(amount).strip() != "":
+            try:
+                quoted_amount = round(float(amount), 2)
+            except (TypeError, ValueError) as exc:
+                raise ApiError(400, "invalid_amount", "报价金额必须是数字") from exc
+            if quoted_amount <= 0:
+                raise ApiError(400, "invalid_amount", "报价金额必须大于 0")
         if form_file is not None and form_file.filename:
             filename, data = await _read_xlsx(form_file)
             inspected = _inspect_upload(product, filename, data)
@@ -448,6 +471,8 @@ async def update_quote_item(
                     "下单表在预览后发生变化，请重新识别",
                 )
             recognized_total = round(float(inspected["recognized_total"]), 2)
+            if amount is None or str(amount).strip() == "":
+                quoted_amount = recognized_total
             form_key, form_sha = _store_form(filename, data)
             form_name, form_size = filename, len(data)
             form_mime = DOC_MIME_BY_EXT[".xlsx"]
@@ -484,8 +509,8 @@ async def update_quote_item(
                 snapshot["product_type"],
                 snapshot["model"],
                 snapshot["drive_type"],
-                recognized_total,
-                recognized_total,
+                quoted_amount,
+                quoted_amount,
                 ((note or "").strip() or None) if note is not None else old["note"],
                 form_key,
                 form_name,

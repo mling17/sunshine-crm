@@ -65,10 +65,10 @@ def _load_workbooks(data: bytes):
         raise QuoteFormParseError("服务端缺少 Excel 解析组件") from exc
     try:
         formula_book = load_workbook(
-            io.BytesIO(data), read_only=True, data_only=False, keep_links=False
+            io.BytesIO(data), read_only=False, data_only=False, keep_links=False
         )
         value_book = load_workbook(
-            io.BytesIO(data), read_only=True, data_only=True, keep_links=False
+            io.BytesIO(data), read_only=False, data_only=True, keep_links=False
         )
     except Exception as exc:
         raise QuoteFormParseError("Excel 无法解析，请确认文件未损坏或加密") from exc
@@ -145,61 +145,204 @@ def _extract_total(rows: list[list[Any]]) -> tuple[float | None, str | None]:
     return None, None
 
 
-def _render_data_area_png(rows: list[list[Any]]) -> bytes:
+def _color(value: Any, default: str) -> str:
+    rgb = getattr(value, "rgb", None)
+    if isinstance(rgb, str) and len(rgb) == 8:
+        return "#" + rgb[-6:]
+    return default
+
+
+def _display_value(value: Any, number_format: str | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat(sep=" ") if isinstance(value, datetime) else value.isoformat()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        fmt = (number_format or "").lower()
+        if "%" in fmt:
+            decimals = 2 if "0.00" in fmt else 0
+            return f"{float(value) * 100:.{decimals}f}%"
+        if "¥" in fmt or "￥" in fmt or "cny" in fmt:
+            return f"¥{float(value):,.2f}"
+        if "#,##0.00" in fmt:
+            return f"{float(value):,.2f}"
+        if "#,##0" in fmt:
+            return f"{float(value):,.0f}"
+    return str(value)
+
+
+def _font_candidates() -> list[Path]:
+    return [
+        Path("C:/Windows/Fonts/msyh.ttc"),
+        Path("C:/Windows/Fonts/msyhbd.ttc"),
+        Path("C:/Windows/Fonts/simhei.ttf"),
+        Path("C:/Windows/Fonts/simsun.ttc"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf"),
+        Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ]
+
+
+def _wrap_text(value: str, font, max_width: int) -> list[str]:
+    from PIL import ImageFont
+
+    if not value:
+        return [""]
+    lines: list[str] = []
+    for paragraph in value.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if not paragraph:
+            lines.append("")
+            continue
+        current = ""
+        for char in paragraph:
+            candidate = current + char
+            box = font.getbbox(candidate) if hasattr(font, "getbbox") else ImageFont
+            width = box[2] - box[0] if isinstance(box, tuple) else len(candidate) * 8
+            if current and width > max_width:
+                lines.append(current)
+                current = char
+            else:
+                current = candidate
+        lines.append(current)
+    return lines or [""]
+
+
+def _render_data_area_png(worksheet, value_worksheet, rows: list[list[Any]]) -> bytes:
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError as exc:
         raise QuoteFormParseError("服务端缺少图片生成组件 Pillow") from exc
 
-    font = None
-    for candidate in (
-        Path("C:/Windows/Fonts/msyh.ttc"),
-        Path("C:/Windows/Fonts/simhei.ttf"),
-        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-        Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
-    ):
+    font_path = None
+    for candidate in _font_candidates():
         if candidate.is_file():
-            try:
-                font = ImageFont.truetype(str(candidate), 14)
-                break
-            except OSError:
-                pass
-    if font is None:
-        font = ImageFont.load_default()
+            font_path = str(candidate)
+            break
+    font_cache = {}
+
+    def get_font(cell_font):
+        size = max(9, min(24, round(float(cell_font.sz or 11) * 96 / 72)))
+        key = (size, bool(cell_font.bold), bool(cell_font.italic))
+        if key not in font_cache:
+            if font_path:
+                try:
+                    font_cache[key] = ImageFont.truetype(font_path, size)
+                except OSError:
+                    font_cache[key] = ImageFont.load_default()
+            else:
+                font_cache[key] = ImageFont.load_default()
+        return font_cache[key]
 
     col_count = max((len(row) for row in rows), default=0)
     if not rows or not col_count:
         raise QuoteFormParseError("Sheet1 没有可保存的数据区域")
 
+    from openpyxl.utils import get_column_letter
+    from openpyxl.utils.cell import range_boundaries
+
     widths = []
-    for col in range(col_count):
-        longest = 0
-        for row in rows:
-            value = row[col] if col < len(row) else ""
-            text = "" if value is None else str(value)
-            longest = max(longest, max((len(line) for line in text.splitlines()), default=0))
-        widths.append(min(320, max(88, 22 + longest * 8)))
-    row_height = 30
-    width = sum(widths) + 20
-    height = len(rows) * row_height + 20
+    for col in range(1, col_count + 1):
+        dim = worksheet.column_dimensions.get(get_column_letter(col))
+        excel_width = float(dim.width) if dim and dim.width else 8.43
+        widths.append(max(40, min(420, int(excel_width * 7 + 5))))
+    heights = []
+    for row_index in range(1, len(rows) + 1):
+        dim = worksheet.row_dimensions.get(row_index)
+        points = float(dim.height) if dim and dim.height else 15
+        heights.append(max(22, min(160, int(points * 96 / 72))))
+
+    merged_anchors = {}
+    covered = set()
+    merged_ranges = list(worksheet.merged_cells.ranges)
+    for merged in merged_ranges:
+        min_col, min_row, max_col, max_row = range_boundaries(str(merged))
+        if min_row < 1 or min_col < 1 or min_row > len(rows) or min_col > col_count:
+            continue
+        merged_anchors[(min_row, min_col)] = (max_row, max_col)
+        for row_index in range(min_row, max_row + 1):
+            for col_index in range(min_col, max_col + 1):
+                if (row_index, col_index) != (min_row, min_col):
+                    covered.add((row_index, col_index))
+
+    width = sum(widths) + 2
+    height = sum(heights) + 2
     image = Image.new("RGB", (width, height), "#ffffff")
     draw = ImageDraw.Draw(image)
+    y_positions = [1]
+    for value in heights:
+        y_positions.append(y_positions[-1] + value)
+    x_positions = [1]
+    for value in widths:
+        x_positions.append(x_positions[-1] + value)
 
-    x = 10
-    for col, col_width in enumerate(widths):
-        y = 10
-        for row in rows:
-            value = row[col] if col < len(row) else ""
-            text = "" if value is None else str(value)
-            draw.rectangle(
-                (x, y, x + col_width, y + row_height),
-                outline="#d9e1ea",
-                fill="#f8fafc" if value not in (None, "") else "#ffffff",
+    def draw_cell(row_index: int, col_index: int, end_row: int, end_col: int):
+        if (row_index, col_index) in covered:
+            return
+        cell = value_worksheet.cell(row_index, col_index)
+        style_cell = worksheet.cell(row_index, col_index)
+        x1, x2 = x_positions[col_index - 1], x_positions[min(end_col, col_count)]
+        y1, y2 = y_positions[row_index - 1], y_positions[min(end_row, len(rows))]
+        fill = _color(style_cell.fill.fgColor, "#ffffff") if style_cell.fill.fill_type else "#ffffff"
+        draw.rectangle((x1, y1, x2, y2), fill=fill)
+
+        border = style_cell.border
+        border_width = max(
+            1,
+            min(3, max(
+                int(side.style == "medium") + 1 if side and side.style else 0
+                for side in (border.left, border.right, border.top, border.bottom)
+            )),
+        )
+        border_color = _color(
+            next((side.color for side in (border.left, border.right, border.top, border.bottom)
+                  if side and side.color), None),
+            "#b8c2cf",
+        )
+        draw.rectangle((x1, y1, x2, y2), outline=border_color, width=border_width)
+
+        value = cell.value
+        if value in (None, ""):
+            return
+        text = _display_value(value, style_cell.number_format)
+        font = get_font(style_cell.font)
+        horizontal = style_cell.alignment.horizontal or "general"
+        vertical = style_cell.alignment.vertical or "bottom"
+        wrapped = _wrap_text(text, font, max(10, x2 - x1 - 8))
+        line_boxes = [draw.textbbox((0, 0), line, font=font) for line in wrapped]
+        text_height = sum(box[3] - box[1] + 2 for box in line_boxes)
+        text_width = max((box[2] - box[0] for box in line_boxes), default=0)
+        if horizontal == "center":
+            tx = x1 + max(3, (x2 - x1 - text_width) // 2)
+        elif horizontal == "right":
+            tx = x2 - text_width - 4
+        else:
+            tx = x1 + 4
+        if vertical == "center":
+            ty = y1 + max(2, (y2 - y1 - text_height) // 2)
+        elif vertical == "top":
+            ty = y1 + 3
+        else:
+            ty = max(y1 + 3, y2 - text_height - 3)
+        color = _color(style_cell.font.color, "#1d2939")
+        for line in wrapped:
+            draw.text((tx, ty), line, fill=color, font=font)
+            ty += draw.textbbox((0, 0), line, font=font)[3] + 2
+
+    for row_index in range(1, len(rows) + 1):
+        for col_index in range(1, col_count + 1):
+            if (row_index, col_index) in covered:
+                continue
+            end_row, end_col = merged_anchors.get(
+                (row_index, col_index), (row_index, col_index)
             )
-            if text:
-                draw.text((x + 5, y + 7), text[:160], fill="#1d2939", font=font)
-            y += row_height
-        x += col_width
+            draw_cell(
+                row_index,
+                col_index,
+                min(end_row, len(rows)),
+                min(end_col, col_count),
+            )
 
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
@@ -236,14 +379,14 @@ def inspect_excel_form(data: bytes, filename: str) -> dict:
         rows = [row[:last_col] for row in rows]
         a1_value = value_sheet["A1"].value
         a1_value = str(a1_value).strip() if a1_value not in (None, "") else None
+        amount, amount_cell = _extract_total(rows)
+        if amount is None:
+            raise QuoteFormParseError("未在 Sheet1 中识别到大于 0 的合计金额")
+        image_bytes = _render_data_area_png(formula_sheet, value_sheet, rows)
     finally:
         formula_book.close()
         value_book.close()
 
-    amount, amount_cell = _extract_total(rows)
-    if amount is None:
-        raise QuoteFormParseError("未在 Sheet1 中识别到大于 0 的合计金额")
-    image_bytes = _render_data_area_png(rows)
     return {
         "filename": Path(filename).name,
         "a1_value": a1_value,
