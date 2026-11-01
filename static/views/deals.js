@@ -755,14 +755,15 @@ function viewDealDetail(root, rawId) {
                 ? '商机已生成订单，请到订单中继续处理'
                 : (d.stage === 'lost' ? '已作废的商机不能再添加跟进' : '已转订单的商机请到订单中继续跟进'),
             records: timelineRecords,
-            followExtraHtml: quotes.length
-                ? '<div class="field"><label>关联报价单</label><select name="quote_id">' +
-                  '<option value="">不关联报价单</option>' +
-                  quotes.map(function (quote) {
-                      return '<option value="' + quote.id + '">' + esc(quote.quote_no) +
-                          ' · ' + esc(quote.status_label || quote.status) + '</option>';
-                  }).join('') + '</select></div>'
-                : '',
+            followExtraHtml:
+                '<div class="field"><label>关联报价单</label><select name="quote_id"' +
+                (quotes.length ? '' : ' disabled') + '>' +
+                (quotes.length ? '<option value="">不关联报价单</option>' :
+                    '<option value="">暂无报价单</option>') +
+                quotes.map(function (quote) {
+                    return '<option value="' + quote.id + '">' + esc(quote.quote_no) +
+                        ' · ' + esc(quote.status_label || quote.status) + '</option>';
+                }).join('') + '</select></div>',
             beforeTimelineHtml: dealOverviewHtml(d, customerName, quotes) +
                 ((!quotes.length && items.length)
                     ? dealItemsCardHtml(items, false, d.amount) : ''),

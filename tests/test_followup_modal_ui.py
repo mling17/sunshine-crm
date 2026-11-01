@@ -55,6 +55,17 @@ class FollowupModalUiTest(unittest.TestCase):
         ):
             self.assertIn(marker, css)
 
+    def test_deal_followup_always_keeps_quote_field(self):
+        deals = (ROOT / "static" / "views" / "deals.js").read_text(encoding="utf-8")
+        detail = deals[
+            deals.index("function viewDealDetail"):
+            deals.index("function openDealEdit")
+        ]
+        self.assertIn("followExtraHtml:", detail)
+        self.assertNotIn("followExtraHtml: quotes.length", detail)
+        self.assertIn("暂无报价单", detail)
+        self.assertIn("(quotes.length ? '' : ' disabled')", detail)
+
 
 if __name__ == "__main__":
     unittest.main()
