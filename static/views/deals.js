@@ -1189,49 +1189,95 @@ function openDealOrderModal(deal, customerName, items, quote) {
     var productTotal = (items || []).reduce(function (sum, item) {
         return sum + (Number(item.amount) || 0);
     }, 0);
+    var quoteTitle = quote && (quote.title || quote.quote_no) || '客户已确认报价单';
+    var quotePreviewHtml = (items || []).map(function (item) {
+        var productName = dealItemName(item);
+        var previewUrl = item.form_preview_url ? '/crm' + item.form_preview_url : '';
+        return '<article class="order-quote-card">' +
+            (previewUrl
+                ? '<button type="button" class="order-quote-preview" ' +
+                  'data-img="' + esc(previewUrl) + '" ' +
+                  'data-name="' + esc(productName + ' · 报价单下单表') + '" ' +
+                  'title="点击查看报价单大图">' +
+                  '<img src="' + esc(previewUrl) + '" alt="' +
+                  esc(productName + ' 报价单缩略图') + '" loading="lazy">' +
+                  '<span class="order-quote-zoom">查看大图</span></button>'
+                : '<div class="order-quote-preview is-empty">' +
+                  '<span>报价单缩略图暂不可用</span></div>') +
+            '<div class="order-quote-card-copy">' +
+                '<div class="order-quote-card-title">' + esc(productName) + '</div>' +
+                '<div class="order-quote-card-meta"><span>数量 ' +
+                    esc(item.quantity || 1) + '</span><strong>' + money(item.amount) +
+                    '</strong></div>' +
+            '</div>' +
+        '</article>';
+    }).join('');
 
     var modal = document.createElement('div');
-    modal.className = 'modal';
+    modal.className = 'modal deal-order-modal';
     modal.innerHTML =
         '<div class="modal-overlay"></div>' +
-        '<div class="modal-content wide">' +
-        '<div class="modal-header"><h3>生成订单</h3>' +
-        '<button type="button" class="btn btn-link modal-close">×</button></div>' +
+        '<div class="modal-content deal-order-content wide">' +
+        '<div class="modal-header deal-order-header">' +
+        '<div class="order-modal-heading"><span class="order-modal-kicker">报价单转订单</span>' +
+        '<h3>生成订单</h3><p>' + esc(customerName) + ' · ' + esc(quoteTitle) + '</p></div>' +
+        '<button type="button" class="btn btn-link modal-close" aria-label="关闭生成订单弹层">×</button></div>' +
         '<div class="modal-body">' +
-        '<form id="dealOrderForm" class="form-grid" autocomplete="off">' +
-        '<p class="small muted" style="margin-top:0">' +
-        esc(customerName) + ' · 客户已确认报价单 ' + esc(quote && quote.quote_no || '') +
-        '，生成后直接进入待支付。</p>' +
-        '<div class="card" style="margin:0"><div class="card-head"><h3>产品明细</h3>' +
-        '<span class="small muted">共 ' + (items || []).length + ' 项</span></div>' +
-        (items || []).map(function (item) {
-            return '<div class="item"><div class="item-main"><div class="item-title">' +
-                esc(dealItemName(item)) + '<span class="badge muted">×' +
-                esc(item.quantity || 1) + '</span></div><div class="item-sub small muted">' +
-                esc([item.spec, item.production_spec].filter(Boolean).join(' · ') || '参数待确认') +
-                '</div></div><div class="item-side"><b>' + money(item.amount) + '</b></div></div>';
-        }).join('') + '</div>' +
-        '<div class="row-3">' +
+        '<form id="dealOrderForm" class="order-form" autocomplete="off">' +
+        '<section class="order-quote-summary">' +
+        '<div class="order-quote-summary-head">' +
+            '<div><span class="order-section-eyebrow">客户已确认报价单</span>' +
+            '<h4>' + esc(quoteTitle) + '</h4>' +
+            '<p>' + esc(quote && quote.quote_no || '') + ' · 共 ' +
+                (items || []).length + ' 项产品</p></div>' +
+            '<span class="order-confirmed-badge"><span aria-hidden="true">✓</span> 已确认</span>' +
+        '</div>' +
+        '<div class="order-quote-gallery">' +
+            (quotePreviewHtml || '<p class="order-quote-empty">报价单没有可展示的下单表</p>') +
+        '</div>' +
+        '<div class="order-quote-total"><span>报价产品合计</span>' +
+            '<strong>' + money(productTotal) + '</strong></div>' +
+        '</section>' +
+        '<section class="order-form-section">' +
+        '<div class="order-section-heading"><span>01</span><div>' +
+            '<h4>金额与定金</h4><p>优惠只作用于产品金额，运费单独计入订单应收。</p></div></div>' +
+        '<div class="order-money-grid">' +
         '<div class="field"><label>产品合计</label>' +
-        '<input name="product_total" type="number" value="' + productTotal + '" readonly></div>' +
+        '<div class="order-money-control"><span>¥</span>' +
+        '<input class="order-money-input" name="product_total" type="number" ' +
+        'value="' + productTotal + '" readonly tabindex="-1"></div></div>' +
         '<div class="field"><label>整单优惠</label>' +
-        '<input name="discount_amount" type="number" min="0" step="0.01" inputmode="decimal" value="0"></div>' +
+        '<div class="order-money-control"><span>¥</span>' +
+        '<input class="order-money-input is-editable" name="discount_amount" type="number" ' +
+        'min="0" step="0.01" inputmode="decimal" value="0"></div></div>' +
         '<div class="field"><label>优惠后产品应收</label>' +
-        '<input name="product_payable" type="number" readonly></div>' +
-        '</div>' +
-        '<div class="field"><label>优惠说明（优惠大于 0 时填写）</label>' +
-        '<input name="discount_reason" maxlength="200" placeholder="微信协商的优惠原因"></div>' +
-        '<div class="row-3">' +
+        '<div class="order-money-control"><span>¥</span>' +
+        '<input class="order-money-input" name="product_payable" type="number" ' +
+        'readonly tabindex="-1"></div></div>' +
         '<div class="field"><label>运费（我方收取）</label>' +
-        '<input name="logistics_fee" type="number" min="0" step="0.01" inputmode="decimal" value="0"></div>' +
-        '<div class="field"><label>订单应收</label>' +
-        '<input name="amount" type="number" readonly></div>' +
-        '<div class="field"><label>定金（第一笔）*</label>' +
-        '<input name="deposit" type="number" min="0" step="0.01" inputmode="decimal" required ' +
-        'placeholder="按协商填定金"></div>' +
+        '<div class="order-money-control"><span>¥</span>' +
+        '<input class="order-money-input is-editable" name="logistics_fee" type="number" ' +
+        'min="0" step="0.01" inputmode="decimal" value="0"></div></div>' +
+        '<div class="field order-receivable-field"><label>订单应收</label>' +
+        '<div class="order-money-control is-total"><span>¥</span>' +
+        '<input class="order-money-input" name="amount" type="number" readonly tabindex="-1"></div></div>' +
         '</div>' +
-        '<div class="field"><label>尾款（自动计算）</label><input name="balance" disabled></div>' +
-        '<div class="row-2">' +
+        '<div class="order-payment-grid">' +
+        '<div class="field"><label>定金（第一笔）*</label>' +
+        '<div class="order-money-control"><span>¥</span>' +
+        '<input class="order-money-input is-editable" name="deposit" type="number" ' +
+        'min="0" step="0.01" inputmode="decimal" required placeholder="按协商填定金"></div></div>' +
+        '<div class="field"><label>尾款（自动计算）</label>' +
+        '<div class="order-money-control"><span>¥</span>' +
+        '<input class="order-money-input" name="balance" type="number" disabled></div></div>' +
+        '</div>' +
+        '<div class="field order-field-wide"><label>优惠说明（优惠大于 0 时填写）</label>' +
+        '<input name="discount_reason" maxlength="200" placeholder="微信协商的优惠原因"></div>' +
+        '</section>' +
+        '<section class="order-form-section">' +
+        '<div class="order-section-heading"><span>02</span><div>' +
+            '<h4>物流与收货</h4><p>包邮或代办需要选择物流公司并填写完整收货信息。</p></div></div>' +
+        '<div class="order-shipping-grid">' +
         '<div class="field"><label>物流方式</label>' +
         '<select name="logistics_mode">' +
         '<option value="self">自提（不填收货信息）</option>' +
@@ -1241,17 +1287,23 @@ function openDealOrderModal(deal, customerName, items, quote) {
         '<div class="field" data-ship hidden><label>物流公司 *</label>' +
         '<select name="carrier_id"><option value="">请选择</option></select></div>' +
         '</div>' +
-        '<div class="row-3" data-ship hidden>' +
+        '<div class="order-address-grid" data-ship hidden>' +
         '<div class="field"><label>收货人 *</label><input name="receiver_name" maxlength="32"></div>' +
         '<div class="field"><label>收货电话 *</label><input name="receiver_phone" maxlength="32" inputmode="tel"></div>' +
-        '<div class="field field-wide"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
+        '<div class="field order-field-wide"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
         '</div>' +
-        '<div class="field"><label>订单备注</label><textarea name="note" maxlength="500"></textarea></div>' +
-        '<p class="small muted">优惠只减产品合计，运费单独计入订单应收，不混入产品金额。' +
-        '优惠与运费在生成订单时补充，产品明细和下单表来自客户已确认的报价单。</p>' +
-        '<div class="form-actions">' +
+        '</section>' +
+        '<section class="order-form-section order-note-section">' +
+        '<div class="order-section-heading"><span>03</span><div>' +
+            '<h4>订单备注</h4><p>可补充交付、安装或客户特别要求。</p></div></div>' +
+        '<div class="field order-field-wide"><label>备注</label>' +
+        '<textarea name="note" maxlength="500" placeholder="填写订单补充说明（选填）"></textarea></div>' +
+        '</section>' +
+        '<p class="order-source-note">优惠只减产品合计，运费单独计入订单应收，不混入产品金额。' +
+        '产品、价格和下单表均来自客户已确认的报价单；生成后直接进入待支付。</p>' +
+        '<div class="form-actions order-form-actions">' +
         '<button type="button" class="btn modal-cancel">取消</button>' +
-        '<button type="submit" class="btn btn-primary">生成订单</button>' +
+        '<button type="submit" class="btn btn-primary">确认生成订单</button>' +
         '</div>' +
         '</form>' +
         '</div></div>';
@@ -1271,6 +1323,18 @@ function openDealOrderModal(deal, customerName, items, quote) {
     var modeEl = form.querySelector('[name="logistics_mode"]');
     var carrierEl = form.querySelector('[name="carrier_id"]');
     var shipFields = $$('[data-ship]', modal);
+
+    $$('.order-money-input.is-editable', modal).forEach(function (input) {
+        input.addEventListener('wheel', function (ev) {
+            ev.preventDefault();
+            input.blur();
+        }, { passive: false });
+        input.addEventListener('keydown', function (ev) {
+            if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+                ev.preventDefault();
+            }
+        });
+    });
 
     function refreshMoney() {
         var discount = Number(discountEl.value) || 0;

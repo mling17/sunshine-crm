@@ -64,6 +64,63 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("Math.round(receivable * 100) / 100", order_modal)
         self.assertNotIn("amount: amount,", order_modal)
 
+    def test_order_modal_uses_confirmed_quote_thumbnails(self):
+        order_modal = self.deals[
+            self.deals.index("function openDealOrderModal"):
+        ]
+        self.assertIn('class="order-quote-gallery"', order_modal)
+        self.assertIn('class="order-quote-preview"', order_modal)
+        self.assertIn("item.form_preview_url", order_modal)
+        self.assertIn('data-img="', order_modal)
+        self.assertIn("点击查看报价单大图", order_modal)
+        self.assertIn("报价单缩略图暂不可用", order_modal)
+        self.assertNotIn("<h3>产品明细</h3>", order_modal)
+
+    def test_order_modal_uses_grouped_responsive_form_layout(self):
+        order_modal = self.deals[
+            self.deals.index("function openDealOrderModal"):
+        ]
+        for marker in (
+            '<form id="dealOrderForm" class="order-form"',
+            '<section class="order-quote-summary">',
+            '<section class="order-form-section">',
+            '<h4>金额与定金</h4>',
+            '<h4>物流与收货</h4>',
+            '<h4>订单备注</h4>',
+            'class="order-money-grid"',
+            'class="order-payment-grid"',
+            'class="order-shipping-grid"',
+            'class="order-address-grid"',
+            'class="form-actions order-form-actions"',
+        ):
+            self.assertIn(marker, order_modal)
+        for marker in (
+            ".deal-order-modal .order-money-grid {",
+            ".deal-order-modal .order-payment-grid,",
+            ".deal-order-modal .order-shipping-grid,",
+            ".deal-order-modal .order-address-grid {",
+            ".deal-order-modal .order-form-actions {",
+            "@media (max-width: 720px)",
+            "@media (max-width: 640px)",
+        ):
+            self.assertIn(marker, self.css)
+
+    def test_order_money_inputs_do_not_step_with_mouse(self):
+        order_modal = self.deals[
+            self.deals.index("function openDealOrderModal"):
+        ]
+        self.assertGreaterEqual(
+            order_modal.count('class="order-money-input is-editable"'),
+            3,
+            "优惠、运费和定金都应是价格输入框",
+        )
+        self.assertIn("input.addEventListener('wheel'", order_modal)
+        self.assertIn("ev.preventDefault()", order_modal)
+        self.assertIn("input.blur()", order_modal)
+        self.assertIn("ev.key === 'ArrowUp' || ev.key === 'ArrowDown'", order_modal)
+        self.assertIn(".order-money-input::-webkit-inner-spin-button", self.css)
+        self.assertIn("appearance: textfield", self.css)
+
     def test_deal_list_and_customer_deal_cards_do_not_prefill_deposit(self):
         deal_items = self.shared[
             self.shared.index("function dealItemHtml"):

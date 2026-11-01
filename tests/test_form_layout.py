@@ -29,7 +29,7 @@ class FormLayoutStructureTest(unittest.TestCase):
             "deals.js": [
                 '<form id="dealEditForm" class="form-grid"',
                 '<form id="dealLoseForm" class="form-grid"',
-                '<form id="dealOrderForm" class="form-grid"',
+                '<form id="dealOrderForm" class="order-form"',
             ],
             "orders.js": [
                 '<form id="asNewForm" class="form-modal form-grid"',
