@@ -93,6 +93,9 @@ def _usage_maps(conn: sqlite3.Connection) -> tuple[dict[int, int], dict[int, int
         int(row["product_id"]): int(row["n"])
         for row in conn.execute(
             "SELECT product_id, COUNT(DISTINCT deal_id) AS n FROM ("
+            " SELECT product_id, deal_id FROM quote_items"
+            " WHERE product_id IS NOT NULL AND is_delete = 0"
+            " UNION"
             " SELECT product_id, deal_id FROM deal_items"
             " WHERE product_id IS NOT NULL AND is_delete = 0"
             " UNION"
@@ -105,6 +108,11 @@ def _usage_maps(conn: sqlite3.Connection) -> tuple[dict[int, int], dict[int, int
         int(row["product_id"]): int(row["n"])
         for row in conn.execute(
             "SELECT product_id, COUNT(DISTINCT order_id) AS n FROM ("
+            " SELECT q.product_id AS product_id, o.id AS order_id"
+            " FROM quote_items q JOIN orders o ON o.quote_id = q.quote_id"
+            " WHERE q.product_id IS NOT NULL"
+            " AND q.is_delete = 0 AND o.is_delete = 0"
+            " UNION"
             " SELECT product_id, order_id FROM order_items"
             " WHERE product_id IS NOT NULL AND is_delete = 0"
             " UNION"

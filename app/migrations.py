@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_010"
-SCHEMA_USER_VERSION = 10
+MIGRATION_VERSION = "v2_011"
+SCHEMA_USER_VERSION = 11
 
 
 def default_db_path() -> Path:
@@ -877,7 +877,80 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_010", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_010', datetime('now'), '多产品明细、整单优惠、独立运费与客户确认')"),
-    ("user_version v2_010", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 27. v2_011：商机内报价单 + 下单表快照 + 履历关联 ----------
+    ("deal_quotes", None, """
+    CREATE TABLE IF NOT EXISTS deal_quotes (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      quote_no              TEXT NOT NULL UNIQUE,
+      deal_id               INTEGER NOT NULL,
+      customer_id           INTEGER NOT NULL,
+      title                 TEXT NOT NULL,
+      note                  TEXT,
+      status                TEXT NOT NULL DEFAULT 'draft',
+      amount                REAL NOT NULL DEFAULT 0,
+      confirmed_at          TEXT,
+      confirmation_note     TEXT,
+      order_id              INTEGER,
+      created_at            TEXT NOT NULL,
+      updated_at            TEXT NOT NULL,
+      create_time           TEXT NOT NULL DEFAULT '',
+      update_time           TEXT NOT NULL DEFAULT '',
+      is_delete             INTEGER NOT NULL DEFAULT 0
+    )
+    """),
+    ("quote_items", None, """
+    CREATE TABLE IF NOT EXISTS quote_items (
+      id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+      quote_id                 INTEGER NOT NULL,
+      deal_id                  INTEGER NOT NULL,
+      product_id               INTEGER NOT NULL,
+      product_code_snapshot    TEXT,
+      product_name_snapshot    TEXT,
+      product_config_snapshot  TEXT,
+      product_type             TEXT,
+      model                    TEXT,
+      drive_type               TEXT,
+      quantity                 INTEGER NOT NULL DEFAULT 1,
+      spec                     TEXT,
+      production_spec          TEXT,
+      unit_price               REAL NOT NULL DEFAULT 0,
+      amount                   REAL NOT NULL DEFAULT 0,
+      note                     TEXT,
+      form_storage_key         TEXT,
+      form_file_name           TEXT,
+      form_file_size           INTEGER NOT NULL DEFAULT 0,
+      form_mime_type           TEXT,
+      form_sha256              TEXT,
+      form_content_json        TEXT,
+      sort                     INTEGER NOT NULL DEFAULT 0,
+      created_at               TEXT NOT NULL,
+      updated_at               TEXT NOT NULL,
+      create_time              TEXT NOT NULL DEFAULT '',
+      update_time              TEXT NOT NULL DEFAULT '',
+      is_delete                INTEGER NOT NULL DEFAULT 0
+    )
+    """),
+    ("idx_deal_quotes_deal", _tbl_guard("deal_quotes"),
+     "CREATE INDEX IF NOT EXISTS idx_deal_quotes_deal ON deal_quotes(deal_id, is_delete, id)"),
+    ("uq_deal_quotes_confirmed", _tbl_guard("deal_quotes"),
+     "CREATE UNIQUE INDEX IF NOT EXISTS uq_deal_quotes_confirmed"
+     " ON deal_quotes(deal_id) WHERE status = 'confirmed' AND is_delete = 0"),
+    ("idx_quote_items_quote", _tbl_guard("quote_items"),
+     "CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items(quote_id, is_delete, sort)"),
+    ("orders.quote_id", _col_guard("orders", "quote_id"),
+     "ALTER TABLE orders ADD COLUMN quote_id INTEGER"),
+    ("order_items.source_quote_item_id", _col_guard("order_items", "source_quote_item_id"),
+     "ALTER TABLE order_items ADD COLUMN source_quote_item_id INTEGER"),
+    ("follow_ups.quote_id", _col_guard("follow_ups", "quote_id"),
+     "ALTER TABLE follow_ups ADD COLUMN quote_id INTEGER"),
+    ("idx_orders_quote", _tbl_guard("orders"),
+     "CREATE INDEX IF NOT EXISTS idx_orders_quote ON orders(quote_id)"),
+    ("idx_fu_quote", _tbl_guard("follow_ups"),
+     "CREATE INDEX IF NOT EXISTS idx_fu_quote ON follow_ups(quote_id)"),
+    ("schema_migrations v2_011", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_011', datetime('now'), '商机报价单、Excel下单表、履历关联与订单来源')"),
+    ("user_version v2_011", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -992,7 +1065,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
     required_tables = (
         "leads", "lead_tags", "customer_contacts", "carriers", "orders",
         "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
-        "products", "deal_items", "order_items",
+        "products", "deal_items", "order_items", "deal_quotes", "quote_items",
     )
     for table in required_tables:
         assert table_exists(conn, table), f"缺表 {table}"
@@ -1008,9 +1081,9 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
         "orders": (
             "product_id", "product_code_snapshot", "product_name_snapshot",
             "product_config_snapshot", "product_total", "discount_amount",
-            "product_payable", "customer_confirmed_at",
+            "product_payable", "customer_confirmed_at", "quote_id",
         ),
-        "follow_ups": ("object_type", "object_id", "method"),
+        "follow_ups": ("object_type", "object_id", "method", "quote_id"),
         "attachments": ("object_type", "object_id", "follow_up_id"),
         "products": (
             "form_storage_key", "form_file_name", "form_file_size",

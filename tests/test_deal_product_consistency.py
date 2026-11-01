@@ -13,25 +13,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DealProductParameterUiTest(unittest.TestCase):
-    def test_form_locks_drive_type_when_product_defines_it(self):
+    def test_quote_form_links_product_template_and_spreadsheet(self):
         shared = (ROOT / "static/views/shared.js").read_text(encoding="utf-8")
         deals = (ROOT / "static/views/deals.js").read_text(encoding="utf-8")
         css = (ROOT / "static/app.css").read_text(encoding="utf-8")
 
-        for marker in (
-            "function syncProductDriveField(product, driveSelect, hint)",
-            "driveSelect.disabled = !!linkedDrive",
-            "产品参数随关联产品同步",
-            'class="deal-inline-badge">随产品',
-            "product.drive_type || String(driveSelect.value || '').trim()",
-        ):
+        for marker in ("function productPickerHtml", "function bindProductPicker"):
             self.assertIn(marker, shared)
         for marker in (
-            "syncProductDriveField(product, driveSelect, driveHint)",
-            "productPicker.getProduct().drive_type",
+            "function openQuoteItemModal",
+            "productPickerHtml(products || []",
+            "下载 Excel 模板",
+            'name="form_file"',
+            "form_file",
         ):
             self.assertIn(marker, deals)
-        self.assertIn(".deal-field-product-locked select:disabled", css)
+        self.assertIn(".product-picker", css)
 
     def test_empty_product_state_is_distinct_and_focuses_search(self):
         shared = (ROOT / "static/views/shared.js").read_text(encoding="utf-8")

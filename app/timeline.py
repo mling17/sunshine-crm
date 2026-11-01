@@ -69,6 +69,7 @@ def add_entry(
     content: str,
     customer_id: int | None = None,
     deal_id: int | None = None,
+    quote_id: int | None = None,
     method: str | None = None,
     detail: dict | None = None,
     created_at: str | None = None,
@@ -86,14 +87,15 @@ def add_entry(
         created_at = now_iso()
     cur = conn.execute(
         "INSERT INTO follow_ups"
-        " (object_type, object_id, customer_id, deal_id, method, kind, content, detail,"
+        " (object_type, object_id, customer_id, deal_id, quote_id, method, kind, content, detail,"
         "  next_date, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             object_type,
             object_id,
             customer_id,
             deal_id,
+            quote_id,
             method,
             kind,
             content,
@@ -153,9 +155,10 @@ def entries_for(
     商机详情/订单详情都要求「订单每次操作都留痕」。
     """
     rows = conn.execute(
-        "SELECT * FROM follow_ups"
-        " WHERE (object_type = ? AND object_id = ?)"
-        " ORDER BY datetime(created_at) DESC, id DESC LIMIT ?",
+        "SELECT fu.*, q.quote_no, q.title AS quote_title"
+        " FROM follow_ups fu LEFT JOIN deal_quotes q ON q.id = fu.quote_id"
+        " WHERE (fu.object_type = ? AND fu.object_id = ?)"
+        " ORDER BY datetime(fu.created_at) DESC, fu.id DESC LIMIT ?",
         (object_type, object_id, limit),
     ).fetchall()
     files = _files_for(conn, [row["id"] for row in rows if row["kind"] == "follow"])
@@ -174,6 +177,9 @@ def entries_for(
                 "detail": _loads(row["detail"]),
                 "files": files.get(int(row["id"]), []),
                 "follow_up_id": row["id"],
+                "quote_id": row["quote_id"],
+                "quote_no": row["quote_no"],
+                "quote_title": row["quote_title"],
             }
         )
 

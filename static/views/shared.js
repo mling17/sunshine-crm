@@ -167,6 +167,8 @@ var RECORD_META = {
   create: { label: '创建', cls: 'create', icon: '✨' },
   change: { label: '编辑', cls: 'change', icon: '✏️' },
   stage: { label: '状态变更', cls: 'stage', icon: '🚩' },
+  quote: { label: '报价单', cls: 'quote', icon: '📋' },
+  confirm: { label: '客户确认', cls: 'confirm', icon: '✅' },
   order: { label: '生成订单', cls: 'order', icon: '📦' },
   aftersale: { label: '售后', cls: 'after', icon: '🛠' },
   pay: { label: '收款', cls: 'pay', icon: '💰' },
@@ -250,6 +252,7 @@ function timelineHtml(records) {
     var meta = [];
     if (r.method) { meta.push('方式：' + (dictLabel('follow_method', r.method, r.method))); }
     if (r.next_date) { meta.push('下次跟进：' + r.next_date); }
+    if (r.quote_no) { meta.push('关联报价单：' + r.quote_no); }
     return '<div class="tl-item tl-' + m.cls + '">' +
       '<div class="tl-dot">' + m.icon + '</div>' +
       '<div class="tl-body">' +
@@ -282,7 +285,8 @@ function collectFiles(records) {
 function followupRecordsFromApi(records) {
   var TYPE_MAP = {
     follow: 'follow', create: 'create', change: 'change', update: 'change',
-    stage: 'stage', order: 'order', aftersale: 'aftersale', pay: 'pay', ship: 'ship'
+    stage: 'stage', quote: 'quote', confirm: 'confirm', order: 'order',
+    aftersale: 'aftersale', pay: 'pay', ship: 'ship'
   };
   return (records || []).map(function (r) {
     var photos = (r.photos || []).map(function (ph) {
@@ -299,6 +303,7 @@ function followupRecordsFromApi(records) {
       content: r.content || '',
       next_date: r.next_date,
       method: r.method,
+      quote_no: r.quote_no,
       files: photos
     };
   });
@@ -348,6 +353,7 @@ function openFollowModal(opts) {
     '<input type="date" name="next_date" id="fuNextDate" value="' + (opts.defaultNext || followDayAfter(3)) + '">' +
     '<div class="small muted" id="fuNextHint">关掉表示这次不用再跟进</div></div>' +
     '</div>' +
+    (opts.extraHtml || '') +
     '<div class="field"><label>附件（图片 / Excel / PDF，最多 10 个、单个 ≤20MB）</label>' +
     '<input type="file" name="photos" multiple></div>' +
     '<div id="fuThumbs" class="attach-strip"></div>' +
@@ -420,6 +426,8 @@ function openFollowModal(opts) {
       next_date: nextOn.checked ? (nextDate.value || null) : null,
       files: picked
     };
+    var quoteSelect = modal.querySelector('[name="quote_id"]');
+    if (quoteSelect && quoteSelect.value) { payload.quote_id = Number(quoteSelect.value); }
     close();
     if (typeof opts.onSubmit === 'function') { opts.onSubmit(payload); }
   });
@@ -457,6 +465,7 @@ function renderEntityFollowPage(root, opts) {
       openFollowModal({
         title: opts.modalTitle || ('记一条跟进 · ' + opts.title),
         placeholder: opts.placeholder,
+        extraHtml: opts.followExtraHtml || '',
         onSubmit: opts.onSubmit
       });
     });
@@ -798,58 +807,22 @@ function dealConvertFormHtml(formId, products, sourceName, sourceType) {
   var isCustomer = sourceType === 'customer';
   return '<form id="' + formId + '" class="form-grid deal-convert-form" autocomplete="off">' +
     dealConvertSourceHtml(sourceName, sourceType) +
-    '<section class="deal-convert-section deal-convert-section-product">' +
-      '<div class="deal-convert-section-head">' +
-        '<div><span class="deal-convert-step">01</span>' +
-          '<div><h4>关联产品</h4><p>按产品编码、名称、系列或配置快速查找</p></div></div>' +
-        '<span class="deal-convert-required">必填</span>' +
-      '</div>' +
-      productPickerHtml(products, '', '搜索并选择产品') +
-      '<div class="small muted deal-product-hint" data-product-hint>' +
-        '从产品库选择后，产品类型、型号和配置会自动带出。' +
-      '</div>' +
-    '</section>' +
     '<section class="deal-convert-section">' +
       '<div class="deal-convert-section-head">' +
-        '<div><span class="deal-convert-step">02</span>' +
-          '<div><h4>项目参数</h4><p>产品参数随关联产品同步，再补充现场量尺和报价</p></div></div>' +
-        '<span class="deal-convert-required">报价必填</span>' +
+        '<div><span class="deal-convert-step">01</span>' +
+          '<div><h4>商机备注</h4><p>先记录客户需求和下次沟通重点，产品与报价在商机内创建</p></div></div>' +
       '</div>' +
       '<div class="deal-convert-field-grid">' +
-        '<div class="field deal-product-sync-field"><label>手动 / 电动 * ' +
-          '<span class="deal-inline-badge">随产品</span></label>' +
-          '<select name="drive_type" required>' +
-            '<option value="">请选择驱动方式</option>' +
-            '<option value="manual">手动</option>' +
-            '<option value="electric">电动</option>' +
-          '</select>' +
-          '<div class="small muted deal-field-tip" data-drive-hint>' +
-            '选择产品后会同步产品驱动方式' +
-          '</div>' +
-        '</div>' +
-        '<div class="field"><label>尺寸/洞口尺寸 *</label>' +
-          '<input name="spec" maxlength="32" required placeholder="例：1480*2350">' +
-          '<div class="small muted deal-field-tip">可输入 x / X / ×，保存时统一为 *</div>' +
-        '</div>' +
-        '<div class="field"><label>报价金额 *</label>' +
-          '<div class="deal-money-input"><span>¥</span>' +
-            '<input name="amount" type="number" min="0.01" step="0.01" ' +
-              'inputmode="decimal" required placeholder="0.00">' +
-          '</div>' +
-        '</div>' +
-        '<div class="field"><label>初始阶段</label>' +
-          '<div class="deal-static-value"><span>报价</span><small>创建后可继续推进</small></div>' +
-        '</div>' +
         '<div class="field deal-convert-field-wide"><label>需求备注</label>' +
-          '<textarea name="note" maxlength="300" ' +
+          '<textarea name="note" maxlength="500" rows="4" ' +
             'placeholder="记录客户需求、现场条件或特殊配置…"></textarea>' +
         '</div>' +
       '</div>' +
     '</section>' +
     '<p class="deal-convert-footnote">' +
       (isCustomer
-        ? '商机创建后归入当前客户，产品参数会保存在历史快照中。'
-        : '线索转化后将建立客户档案；定金与尾款在生成订单时填写。') +
+        ? '商机创建后，在商机页创建报价单并关联合适的产品。'
+        : '线索转化后会建立客户档案，商机本身不再绑定产品。') +
     '</p>' +
     '<div class="form-actions">' +
       '<button type="button" class="btn modal-cancel">取消</button>' +
@@ -859,44 +832,11 @@ function dealConvertFormHtml(formId, products, sourceName, sourceType) {
 }
 
 function bindDealConvertForm(form, products, onSubmit) {
-  var driveSelect = form.querySelector('[name="drive_type"]');
-  var driveHint = form.querySelector('[data-drive-hint]');
-  var productHint = form.querySelector('[data-product-hint]');
   var submitButton = form.querySelector('button[type="submit"]');
-  var picker = bindProductPicker(form.querySelector('[data-product-picker]'), products, {
-    onChange: function (product) {
-      if (!product) {
-        syncProductDriveField(null, driveSelect, driveHint);
-        if (productHint) { productHint.textContent = '请选择一个在售且已上传下单表的产品。'; }
-        return;
-      }
-      syncProductDriveField(product, driveSelect, driveHint);
-      if (productHint) {
-        productHint.textContent = product.config_summary ||
-          [product.series, product.structure, product.opening_mode].filter(Boolean).join(' · ');
-      }
-    }
-  });
 
   form.addEventListener('submit', function (ev) {
     ev.preventDefault();
-    var product = picker.getProduct();
-    var model = String(form.querySelector('[name="spec"]').value || '').trim();
-    var drive = product.drive_type || String(driveSelect.value || '').trim();
-    var amount = numOrNull(form.querySelector('[name="amount"]').value);
-    if (!product) { toast('请搜索并选择产品', true); picker.focus(); return; }
-    if (!drive) { toast('请选择手动 / 电动', true); driveSelect.focus(); return; }
-    if (!model) { toast('尺寸/洞口尺寸必填', true); return; }
-    if (amount === null || !(amount > 0)) { toast('金额必须大于 0', true); return; }
-
     var payload = {
-      title: [product.category, product.code].filter(Boolean).join(' ').slice(0, 100) || null,
-      product_id: product.id,
-      product_type: product.category || null,
-      model: product.code || null,
-      spec: model,
-      amount: amount,
-      drive_type: drive,
       note: String(form.querySelector('[name="note"]').value || '').trim() || null
     };
     submitButton.disabled = true;
@@ -909,7 +849,7 @@ function bindDealConvertForm(form, products, onSubmit) {
     }
   });
 
-  return picker;
+  return null;
 }
 
 /* 线索 / 客户转商机共用弹层，确保字段与交互完全一致。 */
@@ -925,19 +865,18 @@ function openDealConvertModal(source, sourceType) {
     ? (source.name || source.company_name || ('客户 #' + sourceId))
     : (source.name || source.company_name || ('线索 #' + sourceId));
 
-  loadProductCatalog().then(function (products) {
-    var modal = document.createElement('div');
+  var modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML =
     '<div class="modal-overlay"></div>' +
     '<div class="modal-content wide deal-convert-modal">' +
     '<div class="modal-header deal-convert-modal-head">' +
       '<div><span class="deal-convert-kicker">销售流程 · 新建商机</span>' +
-      '<h3>转商机</h3><p>先锁定产品，再补充现场参数与报价</p></div>' +
+      '<h3>转商机</h3><p>先记录需求，产品与金额在报价单中维护</p></div>' +
       '<button type="button" class="btn btn-link modal-close" aria-label="关闭">×</button>' +
     '</div>' +
     '<div class="modal-body">' +
-      dealConvertFormHtml('dealConvertForm', products, sourceName, sourceType) +
+      dealConvertFormHtml('dealConvertForm', [], sourceName, sourceType) +
     '</div></div>';
     document.body.appendChild(modal);
 
@@ -948,19 +887,12 @@ function openDealConvertModal(source, sourceType) {
     modal.querySelector('.modal-cancel').addEventListener('click', close);
 
     var form = modal.querySelector('form');
-    bindDealConvertForm(form, products, function (deal) {
+    bindDealConvertForm(form, [], function (deal) {
       var request = isCustomer
         ? api('/deals', {
           method: 'POST',
           body: {
             customer_id: sourceId,
-            product_id: deal.product_id,
-            product_type: deal.product_type,
-            model: deal.model,
-            spec: deal.spec,
-            amount: deal.amount,
-            drive_type: deal.drive_type,
-            stage: 'quote',
             note: deal.note
           }
         })
@@ -978,7 +910,4 @@ function openDealConvertModal(source, sourceType) {
         return res;
       });
     });
-  }).catch(function (err) {
-    toast(err && err.message ? err.message : '加载产品失败', true);
-  });
 }

@@ -33,6 +33,7 @@ from app.routers import (
     leads,
     orders,
     products,
+    quotes,
 )
 from app.schema import ensure_schema
 from app.migrations import run_migrations
@@ -111,6 +112,7 @@ app.include_router(csvimport.router)
 app.include_router(leads.router)
 app.include_router(orders.router)
 app.include_router(products.router)
+app.include_router(quotes.router)
 app.include_router(carriers.router)
 app.include_router(aftersales.router)
 app.include_router(addresses.router)

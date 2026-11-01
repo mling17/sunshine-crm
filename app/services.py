@@ -321,15 +321,26 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     # 阶段固定「报价」（定稿 §1.1），不再接受前端指定
     if deal_in.stage is not None and deal_in.stage not in ("quote", ""):
         raise HTTPException(status_code=400, detail="转化生成的商机阶段固定为「报价」")
-    # 「手动/电动」必填（定稿 §7.5 关键属性）
-    # 关联产品已标注驱动方式时以产品为准；仅缺字段的产品允许人工补全。
-    resolved_drive = snapshot.get("drive_type") or deal_in.drive_type
-    if not resolved_drive:
-        raise ApiError(status_code=400, code="drive_type_required", message="请选择手动 / 电动")
-    if resolved_drive not in ("manual", "electric"):
-        raise ApiError(status_code=400, code="invalid_drive_type", message="手动 / 电动 只能是 manual 或 electric")
-    if deal_in.amount <= 0:
-        raise HTTPException(status_code=400, detail="商机金额必须大于0")
+    # 新流程商机只保留客户与备注；产品和金额由后续报价单承载。
+    # 若旧客户端仍提交产品/金额，则继续按旧规则校验。
+    legacy_config = bool(
+        deal_in.product_id
+        or deal_in.product_type
+        or deal_in.model
+        or deal_in.spec
+        or deal_in.amount > 0
+        or deal_in.drive_type
+    )
+    if legacy_config:
+        resolved_drive = snapshot.get("drive_type") or deal_in.drive_type
+        if not resolved_drive:
+            raise ApiError(status_code=400, code="drive_type_required", message="请选择手动 / 电动")
+        if resolved_drive not in ("manual", "electric"):
+            raise ApiError(status_code=400, code="invalid_drive_type", message="手动 / 电动 只能是 manual 或 electric")
+        if deal_in.amount <= 0:
+            raise HTTPException(status_code=400, detail="商机金额必须大于0")
+    else:
+        resolved_drive = None
     
     cur = conn.execute(
         """

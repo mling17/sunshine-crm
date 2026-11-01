@@ -80,6 +80,23 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("/confirm", self.orders)
         self.assertIn("客户通过微信查看下单表", self.orders)
 
+    def test_quotation_upload_preview_and_followup_link_are_wired(self):
+        for marker in (
+            "function quoteCardsHtml",
+            "function quoteFormPreviewHtml",
+            "function openQuoteItemModal",
+            "function openQuoteConfirmModal",
+            'name="form_file"',
+            "下载产品模板",
+            "data-quote-confirm",
+            "data-quote-order",
+            "/quotes/items/",
+        ):
+            self.assertIn(marker, self.deals)
+        self.assertIn("opts.followExtraHtml", self.shared)
+        self.assertIn("payload.quote_id", self.shared)
+        self.assertIn('name="quote_id"', self.deals)
+
 
 if __name__ == "__main__":
     unittest.main()

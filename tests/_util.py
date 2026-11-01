@@ -42,7 +42,8 @@ def reset_data() -> None:
         # 子表先删，避免 orders/aftersales 的 RESTRICT 外键挡住 customers 删除
         for table in (
             "aftersale_status_log", "aftersales", "order_status_log", "orders",
-            "order_items", "attachments", "follow_ups", "deal_items", "deals", "customer_tags",
+            "order_items", "attachments", "follow_ups", "quote_items", "deal_quotes",
+            "deal_items", "deals", "customer_tags",
             "lead_tags", "leads", "customers", "tags", "sessions", "import_log", "products",
         ):
             conn.execute(f"DELETE FROM {table}")

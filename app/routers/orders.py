@@ -172,6 +172,16 @@ def get_order(order_id: int) -> OrderDetailOut:
             " FROM deals WHERE id = ?", (row['deal_id'],)
         ).fetchone()
         order_dict['deal'] = dict(deal_row) if deal_row else None
+        quote_row = (
+            conn.execute(
+                "SELECT id, quote_no, title, status, amount, confirmed_at"
+                " FROM deal_quotes WHERE id = ? AND is_delete = 0",
+                (row["quote_id"],),
+            ).fetchone()
+            if row["quote_id"]
+            else None
+        )
+        order_dict["quote"] = dict(quote_row) if quote_row else None
         # 订单履历（收款/状态变更/发货/改收货/售后）
         order_dict['timeline'] = entries_for(
             conn, object_type="order", object_id=order_id, include_order_events=True

@@ -162,6 +162,9 @@ function viewOrderDetail(root, rawId) {
         var infoHtml = infoGrid([
             ['客户', '<a href="#/customers/' + order.customer_id + '">' + esc(customerName) + '</a>', true],
             ['关联商机', dealHtml, true],
+            ['来源报价单', order.quote
+                ? esc(order.quote.quote_no) + ' · ' + fmtDateTime(order.quote.confirmed_at)
+                : '历史订单'],
             ['产品数量', String((order.items || []).length) + ' 项'],
             ['关联产品', order.product_id
                 ? '<a href="#/products/' + order.product_id + '">' +

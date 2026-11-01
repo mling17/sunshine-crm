@@ -165,12 +165,14 @@ def _to_item(row, photos: list[AttachmentOut]) -> FollowUpItemOut:
 def _fetch_item(conn, follow_up_id: int) -> FollowUpItemOut:
     row = conn.execute(
         """
-        SELECT fu.id, fu.customer_id, fu.deal_id, fu.object_type, fu.object_id, fu.method, fu.kind,
+        SELECT fu.id, fu.customer_id, fu.deal_id, fu.quote_id, fu.object_type, fu.object_id, fu.method, fu.kind,
                fu.content, fu.next_date, fu.created_at,
-               c.name AS customer_name, d.stage AS deal_stage
+               c.name AS customer_name, d.stage AS deal_stage,
+               q.quote_no, q.title AS quote_title
         FROM follow_ups fu
         LEFT JOIN customers c ON c.id = fu.customer_id
         LEFT JOIN deals d ON d.id = fu.deal_id
+        LEFT JOIN deal_quotes q ON q.id = fu.quote_id
         WHERE fu.id = ? AND fu.is_delete = 0
         """,
         (follow_up_id,),
@@ -222,7 +224,7 @@ def _check_deal_frozen(conn, deal_id: int) -> None:
         raise HTTPException(status_code=404, detail="商机不存在")
     
     # 检查是否为冻结状态
-    if deal["order_id"] is not None or deal["stage"] in ("won", "lost"):
+    if deal["order_id"] is not None or deal["stage"] == "lost":
         raise ApiError(
             status_code=409,
             code="deal_frozen",
@@ -239,6 +241,7 @@ async def create_follow_up(
     object_id: str | None = Form(default=None, description="对象ID（V1 兼容时可省略）"),
     customer_id: str | None = Form(default=None, description="V1 兼容：客户ID"),
     deal_id: str | None = Form(default=None, description="V1 兼容：商机ID"),
+    quote_id: str | None = Form(default=None, description="可关联当前商机的报价单"),
     content: str = Form(..., description="跟进内容"),
     method: str | None = Form(default=None),
     next_date: str | None = Form(default=None),
@@ -283,6 +286,20 @@ async def create_follow_up(
     stage_value = _clean_stage(stage)
     method_value = (method or "").strip()
     intent_level_value = (intent_level or "").strip()
+    quote_id_value = _clean_optional_int(quote_id, "quote_id")
+    if quote_id_value is not None:
+        with db_conn() as _quote_conn:
+            quote_row = _quote_conn.execute(
+                "SELECT deal_id FROM deal_quotes WHERE id = ? AND is_delete = 0",
+                (quote_id_value,),
+            ).fetchone()
+        if quote_row is None:
+            raise HTTPException(status_code=404, detail="报价单不存在")
+        expected_deal_id = int(deal_id) if deal_id else (
+            object_id_value if object_type == "deal" else None
+        )
+        if expected_deal_id is None or int(quote_row["deal_id"]) != expected_deal_id:
+            raise HTTPException(status_code=400, detail="报价单不属于当前商机")
     
     # V1 兼容：带 deal_id 时校验存在性与归属（计划 §2.3 / §5.4）
     deal_row_checked = None
@@ -332,7 +349,7 @@ async def create_follow_up(
             if deal is None:
                 raise HTTPException(status_code=404, detail="商机不存在")
             # 检查商机是否被冻结
-            if deal["order_id"] is not None or deal["stage"] in ("won", "lost"):
+            if deal["order_id"] is not None or deal["stage"] == "lost":
                 raise ApiError(
                     status_code=409,
                     code="deal_frozen",
@@ -408,15 +425,16 @@ async def create_follow_up(
         cur = conn.execute(
             """
             INSERT INTO follow_ups
-                (object_type, object_id, customer_id, deal_id, method, kind, content, next_date,
+                (object_type, object_id, customer_id, deal_id, quote_id, method, kind, content, next_date,
                  created_at)
-            VALUES (?, ?, ?, ?, ?, 'follow', ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'follow', ?, ?, ?)
             """,
             (
                 object_type,
                 object_id_value,
                 customer_id_value,
                 deal_id_value,
+                quote_id_value,
                 method_value,
                 content_value,
                 next_date_value,
@@ -547,12 +565,14 @@ def list_follow_ups(
     with db_conn() as conn:
         rows = conn.execute(
             f"""
-            SELECT fu.id, fu.customer_id, fu.deal_id, fu.method, fu.kind, fu.content, fu.next_date,
+            SELECT fu.id, fu.customer_id, fu.deal_id, fu.quote_id, fu.method, fu.kind, fu.content, fu.next_date,
                    fu.created_at, fu.object_type, fu.object_id,
-                   c.name AS customer_name, d.stage AS deal_stage
+                   c.name AS customer_name, d.stage AS deal_stage,
+                   q.quote_no, q.title AS quote_title
             FROM follow_ups fu
             LEFT JOIN customers c ON c.id = fu.customer_id
             LEFT JOIN deals d ON d.id = fu.deal_id
+            LEFT JOIN deal_quotes q ON q.id = fu.quote_id
             WHERE fu.is_delete = 0
             {" AND " + " AND ".join(where_parts) if where_parts else ""}
             ORDER BY fu.created_at DESC, fu.id DESC

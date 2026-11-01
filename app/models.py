@@ -349,6 +349,77 @@ class DealItemOut(BaseModel):
         return self
 
 
+class QuoteIn(BaseModel):
+    """新建报价单：产品与下单表在报价单内继续维护。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: OptionalText = Field(default=None, max_length=120)
+    note: OptionalText = Field(default=None, max_length=1000)
+
+
+class QuoteItemOut(BaseModel):
+    id: int
+    quote_id: int
+    product_id: int
+    product_code_snapshot: str | None = None
+    product_name_snapshot: str | None = None
+    product_config_snapshot: str | None = None
+    product_type: str | None = None
+    model: str | None = None
+    drive_type: str | None = None
+    drive_type_label: str | None = None
+    quantity: int = 1
+    spec: str | None = None
+    production_spec: str | None = None
+    unit_price: float = 0.0
+    amount: float = 0.0
+    note: str | None = None
+    form_file_name: str | None = None
+    form_file_size: int = 0
+    form_available: bool = False
+    form_content: dict = Field(default_factory=dict)
+    template_url: str | None = None
+    form_url: str | None = None
+    sort: int = 0
+    created_at: str
+    updated_at: str
+
+    @model_validator(mode="after")
+    def _fill_drive_label(self) -> "QuoteItemOut":
+        if self.drive_type_label is None and self.drive_type:
+            self.drive_type_label = labels.drive_type(self.drive_type)
+        return self
+
+
+class QuoteOut(BaseModel):
+    id: int
+    quote_no: str
+    deal_id: int
+    customer_id: int
+    title: str
+    note: str | None = None
+    status: str
+    status_label: str | None = None
+    amount: float = 0.0
+    confirmed_at: str | None = None
+    confirmation_note: str | None = None
+    order_id: int | None = None
+    order_no: str | None = None
+    items: list[QuoteItemOut] = Field(default_factory=list)
+    confirmation_files: list["AttachmentOut"] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+    @model_validator(mode="after")
+    def _fill_status_label(self) -> "QuoteOut":
+        if self.status_label is None:
+            from app.enums import QUOTE_STATUS_LABELS
+
+            self.status_label = QUOTE_STATUS_LABELS.get(self.status, self.status)
+        return self
+
+
 class DealOut(BaseModel):
     id: int
     customer_id: int
@@ -379,6 +450,8 @@ class DealOut(BaseModel):
     #: 已生成订单 → 基本信息冻结（PLANNER-V3 §6.2）
     locked: bool = False
     locked_at: str | None = None
+    quote_count: int = 0
+    confirmed_quote_no: str | None = None
 
     @model_validator(mode="after")
     def _fill_stage_label(self) -> "DealOut":
@@ -410,6 +483,7 @@ class DealDetailOut(DealOut):
     materials: list[dict] = Field(default_factory=list)
     order: dict | None = None
     items: list[DealItemOut] = Field(default_factory=list)
+    quotes: list[QuoteOut] = Field(default_factory=list)
 
 
 # ---------------- 跟进 ----------------
@@ -419,6 +493,9 @@ class FollowUpOut(BaseModel):
     id: int
     customer_id: int | None = None
     deal_id: int | None = None
+    quote_id: int | None = None
+    quote_no: str | None = None
+    quote_title: str | None = None
     object_type: str | None = None
     object_id: int | None = None
     method: str | None = None
@@ -470,7 +547,7 @@ class CustomerDetailOut(CustomerOut):
 
 
 class DealIn(BaseModel):
-    """新建商机。``amount`` 是报价金额；定金/尾款只能在生成订单时填写。"""
+    """新建商机。新流程只要求客户和备注；产品在报价单中维护。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -479,7 +556,7 @@ class DealIn(BaseModel):
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
     spec: SpecText = Field(default=None, max_length=200)
-    amount: float = Field(ge=0)
+    amount: float = Field(default=0, ge=0)
     stage: str = Field(default=DEFAULT_STAGE, max_length=32)
     #: 手动/电动 —— 必填由路由层给业务错误码（drive_type_required），不在 pydantic 层拦
     drive_type: OptionalText = Field(default=None, max_length=32)
@@ -687,7 +764,7 @@ class LeadConvertDeal(BaseModel):
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
     spec: SpecText = Field(default=None, max_length=200)
-    amount: float = Field(gt=0)
+    amount: float = Field(default=0, ge=0)
     drive_type: OptionalText = Field(default=None, max_length=32)
     note: OptionalText = Field(default=None, max_length=500)
     stage: str | None = Field(default=None, max_length=32)
@@ -772,6 +849,7 @@ class OrderOut(BaseModel):
     order_no: str
     customer_id: int
     deal_id: int
+    quote_id: int | None = None
     product_type: str | None = None
     model: str | None = None
     product_id: int | None = None
@@ -833,6 +911,7 @@ class OrderDetailOut(BaseModel):
     order_no: str
     customer_id: int
     deal_id: int
+    quote_id: int | None = None
     product_type: str | None = None
     model: str | None = None
     product_id: int | None = None
@@ -877,6 +956,7 @@ class OrderDetailOut(BaseModel):
     carrier_contacts: list[dict] = Field(default_factory=list)
     aftersales: list[dict] = Field(default_factory=list)
     deal: dict | None = None
+    quote: dict | None = None
     timeline: list[dict] = Field(default_factory=list)
     items: list[dict] = Field(default_factory=list)
     confirmation_files: list[AttachmentOut] = Field(default_factory=list)

@@ -284,7 +284,13 @@ def list_deals(
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     with db_conn() as conn:
         rows = conn.execute(
-            "SELECT d.*, c.name AS customer_name FROM deals d"
+            "SELECT d.*, c.name AS customer_name,"
+            " (SELECT COUNT(*) FROM deal_quotes q"
+            "  WHERE q.deal_id = d.id AND q.is_delete = 0) AS quote_count,"
+            " (SELECT q.quote_no FROM deal_quotes q"
+            "  WHERE q.deal_id = d.id AND q.status = 'confirmed' AND q.is_delete = 0"
+            "  ORDER BY q.id DESC LIMIT 1) AS confirmed_quote_no"
+            " FROM deals d"
             f" LEFT JOIN customers c ON c.id = d.customer_id {where_sql}"
             " ORDER BY d.id DESC",
             params,
@@ -328,16 +334,36 @@ def create_deal(payload: DealIn) -> DealOut:
             raise HTTPException(status_code=404, detail="客户不存在")
         product = _product(conn, payload.product_id) if payload.product_id else None
 
-    linked_drive = product.get("drive_type") if product else None
-    # 产品已标注驱动方式时以产品参数为准，禁止请求参数造成商机与产品不一致。
-    drive = _drive_type(linked_drive or payload.drive_type)
-    if product:
-        product_type = product["category"]
-        model = product["code"]
-        snapshot = product_snapshot(product)
+    # 新流程：商机本身只保存客户与备注，产品配置进入报价单。
+    # 仍接受产品字段，用于兼容旧页面和旧数据。
+    legacy_config = bool(
+        payload.product_id
+        or payload.product_type
+        or payload.model
+        or payload.spec
+        or payload.amount > 0
+        or payload.drive_type
+    )
+    if legacy_config:
+        linked_drive = product.get("drive_type") if product else None
+        drive = _drive_type(linked_drive or payload.drive_type)
+        if product:
+            product_type = product["category"]
+            model = product["code"]
+            snapshot = product_snapshot(product)
+        else:
+            product_type = _product_type(payload.product_type)
+            model = _model(payload.model)
+            snapshot = {
+                "product_id": None,
+                "product_code_snapshot": None,
+                "product_name_snapshot": None,
+                "product_config_snapshot": None,
+            }
     else:
-        product_type = _product_type(payload.product_type)
-        model = _model(payload.model)
+        drive = None
+        product_type = None
+        model = None
         snapshot = {
             "product_id": None,
             "product_code_snapshot": None,
@@ -379,30 +405,31 @@ def create_deal(payload: DealIn) -> DealOut:
             ),
         )
         deal_id = int(cur.lastrowid or 0)
-        now = now_iso()
-        conn.execute(
-            "INSERT INTO deal_items (deal_id, product_id, product_code_snapshot,"
-            " product_name_snapshot, product_config_snapshot, product_type, model,"
-            " drive_type, quantity, spec, production_spec, unit_price, amount, note,"
-            " sort, created_at, updated_at, create_time, update_time, is_delete)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?, 0, ?, ?, '', '', 0)",
-            (
-                deal_id,
-                snapshot["product_id"],
-                snapshot["product_code_snapshot"],
-                snapshot["product_name_snapshot"],
-                snapshot["product_config_snapshot"],
-                product_type,
-                model,
-                drive,
-                spec,
-                amount,
-                amount,
-                payload.note,
-                now,
-                now,
-            ),
-        )
+        if legacy_config:
+            now = now_iso()
+            conn.execute(
+                "INSERT INTO deal_items (deal_id, product_id, product_code_snapshot,"
+                " product_name_snapshot, product_config_snapshot, product_type, model,"
+                " drive_type, quantity, spec, production_spec, unit_price, amount, note,"
+                " sort, created_at, updated_at, create_time, update_time, is_delete)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?, 0, ?, ?, '', '', 0)",
+                (
+                    deal_id,
+                    snapshot["product_id"],
+                    snapshot["product_code_snapshot"],
+                    snapshot["product_name_snapshot"],
+                    snapshot["product_config_snapshot"],
+                    product_type,
+                    model,
+                    drive,
+                    spec,
+                    amount,
+                    amount,
+                    payload.note,
+                    now,
+                    now,
+                ),
+            )
         add_entry(
             conn,
             object_type="deal",
@@ -411,9 +438,9 @@ def create_deal(payload: DealIn) -> DealOut:
             customer_id=payload.customer_id,
             deal_id=deal_id,
             content=(
-                f"创建商机：{snapshot['product_name_snapshot'] or product_type or '未填产品'}"
-                f" {model or ''} {spec or ''}，"
-                f"报价 ¥{amount:,.2f}"
+                f"创建商机：{snapshot['product_name_snapshot'] or product_type or '待创建报价单'}"
+                f" {model or ''} {spec or ''}"
+                + (f"，报价 ¥{amount:,.2f}" if amount > 0 else "")
             ).strip(),
             detail={"amount": amount, "drive_type": drive},
         )
@@ -720,12 +747,44 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
 # ---------------- 生成订单 ----------------
 
 
-def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool = True) -> tuple[dict, dict]:
+def _create_order(
+    conn,
+    deal_id: int,
+    payload: dict,
+    *,
+    require_receiver: bool = True,
+    quote_id: int | None = None,
+) -> tuple[dict, dict]:
     """生成订单的唯一实现；`/win` 兼容端点也走这里。"""
     deal = _deal_row(conn, deal_id)
-    items = _deal_items(conn, deal_id)
+    quote = None
+    if quote_id is not None:
+        quote = conn.execute(
+            "SELECT * FROM deal_quotes WHERE id = ? AND deal_id = ? AND is_delete = 0",
+            (quote_id, deal_id),
+        ).fetchone()
+        if quote is None:
+            raise HTTPException(status_code=404, detail="报价单不存在")
+        if quote["status"] != "confirmed":
+            raise ApiError(
+                status_code=409,
+                code="quote_not_confirmed",
+                message="客户确认报价单后才能生成订单",
+            )
+        items = conn.execute(
+            "SELECT * FROM quote_items WHERE quote_id = ? AND is_delete = 0"
+            " ORDER BY sort, id",
+            (quote_id,),
+        ).fetchall()
+    else:
+        items = _deal_items(conn, deal_id)
 
-    if conn.execute("SELECT 1 FROM orders WHERE deal_id = ?", (deal_id,)).fetchone():
+    existing_sql = (
+        "SELECT 1 FROM orders WHERE quote_id = ? AND is_delete = 0"
+        if quote_id is not None
+        else "SELECT 1 FROM orders WHERE deal_id = ? AND is_delete = 0"
+    )
+    if conn.execute(existing_sql, (quote_id if quote_id is not None else deal_id,)).fetchone():
         raise ApiError(status_code=409, code="order_exists", message="该商机已有订单")
     if not items:
         raise ApiError(
@@ -733,7 +792,7 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
             code="deal_item_required",
             message="商机没有产品明细，不能生成订单",
         )
-    if deal["stage"] not in ("confirm", "won"):
+    if quote_id is None and deal["stage"] not in ("confirm", "won"):
         raise ApiError(
             status_code=409,
             code="deal_not_ready",
@@ -844,27 +903,30 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
 
     order_no = next_no(conn, "orders", "order_no", "SO", now_local_iso()[:8])
     now = now_iso()
+    order_status = "pending_payment" if quote_id is not None else "pending_confirmation"
+    summary_item = items[0]
     cur = conn.execute(
-        "INSERT INTO orders (order_no, customer_id, deal_id, product_id,"
+        "INSERT INTO orders (order_no, customer_id, deal_id, quote_id, product_id,"
         " product_code_snapshot, product_name_snapshot, product_config_snapshot,"
         " product_type, model, spec, amount, product_total, discount_amount,"
         " discount_reason, product_payable,"
         " deposit_amount, balance_amount, deposit_paid, balance_paid, logistics_mode, carrier_id,"
         " logistics_fee, tracking_no, address_id, receiver_name, receiver_phone, receiver_address,"
         " status, note, owner, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?,"
-        " 'pending_confirmation', ?, ?, ?, ?)",
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?,"
+        " ?, ?, ?, ?, ?)",
         (
             order_no,
             deal["customer_id"],
             deal_id,
-            deal["product_id"],
-            deal["product_code_snapshot"],
-            deal["product_name_snapshot"],
-            deal["product_config_snapshot"],
-            deal["product_type"],
-            deal["model"],
-            deal["spec"],
+            quote_id,
+            summary_item["product_id"],
+            summary_item["product_code_snapshot"],
+            summary_item["product_name_snapshot"],
+            summary_item["product_config_snapshot"],
+            summary_item["product_type"],
+            summary_item["model"],
+            summary_item["spec"],
             amount,
             product_total,
             discount,
@@ -880,6 +942,7 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
             receiver_name,
             receiver_phone,
             receiver_address,
+            order_status,
             payload.get("note") or None,
             deal["owner"],
             now,
@@ -887,19 +950,31 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
         ),
     )
     order_id = int(cur.lastrowid or 0)
+    if quote_id is not None:
+        conn.execute(
+            "UPDATE orders SET customer_confirmed_at = ?,"
+            " customer_confirmation_note = ?, updated_at = ? WHERE id = ?",
+            (
+                quote["confirmed_at"],
+                quote["confirmation_note"] or f"客户已确认报价单 {quote['quote_no']}",
+                now,
+                order_id,
+            ),
+        )
 
     now_item = now_iso()
     for sort, item in enumerate(items):
         conn.execute(
-            "INSERT INTO order_items (order_id, source_deal_item_id, product_id,"
+            "INSERT INTO order_items (order_id, source_deal_item_id, source_quote_item_id, product_id,"
             " product_code_snapshot, product_name_snapshot, product_config_snapshot,"
             " product_type, model, drive_type, quantity, spec, production_spec,"
             " unit_price, amount, note, sort, created_at, updated_at,"
             " create_time, update_time, is_delete)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0)",
             (
                 order_id,
-                item["id"],
+                None if quote_id is not None else item["id"],
+                item["id"] if quote_id is not None else None,
                 item["product_id"],
                 item["product_code_snapshot"],
                 item["product_name_snapshot"],
@@ -919,11 +994,22 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
             ),
         )
 
-    conn.execute(
-        "UPDATE deals SET stage = 'confirm', closed_at = NULL, order_id = ?,"
-        " locked_at = ?, updated_at = ? WHERE id = ?",
-        (order_id, now_local_iso(), now, deal_id),
-    )
+    if quote_id is not None:
+        conn.execute(
+            "UPDATE deal_quotes SET order_id = ?, updated_at = ? WHERE id = ?",
+            (order_id, now, quote_id),
+        )
+        conn.execute(
+            "UPDATE deals SET stage = 'won', closed_at = COALESCE(closed_at, ?), order_id = ?,"
+            " locked_at = ?, amount = ?, updated_at = ? WHERE id = ?",
+            (now_local_iso(), order_id, now_local_iso(), product_total, now, deal_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE deals SET stage = 'confirm', closed_at = NULL, order_id = ?,"
+            " locked_at = ?, updated_at = ? WHERE id = ?",
+            (order_id, now_local_iso(), now, deal_id),
+        )
 
     carrier_name = None
     if carrier_id:
@@ -940,9 +1026,11 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
         kind="order",
         customer_id=deal["customer_id"],
         deal_id=deal_id,
+        quote_id=quote_id,
         content=(
             f"生成订单 {order_no}：产品 {product_total:,.2f}，优惠 {discount:,.2f}，"
-            f"运费 {fee:,.2f}，应收 {amount:,.2f}；待客户确认"
+            f"运费 {fee:,.2f}，应收 {amount:,.2f}；"
+            + ("客户已确认报价单" if quote_id is not None else "待客户确认")
         ),
         detail={
             "order_id": order_id,
@@ -957,11 +1045,13 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
     )
     conn.execute(
         "INSERT INTO order_status_log (order_id, from_status, to_status, event_type, note, detail,"
-        " created_at) VALUES (?, NULL, 'pending_confirmation', 'order', ?, ?, ?)",
+        " created_at) VALUES (?, NULL, ?, 'order', ?, ?, ?)",
         (
             order_id,
+            order_status,
             f"生成订单 {order_no}：产品 ¥{product_total:,.2f}，优惠 ¥{discount:,.2f}，"
-            f"运费 ¥{fee:,.2f}，应收 ¥{amount:,.2f}；等待客户确认",
+            f"运费 ¥{fee:,.2f}，应收 ¥{amount:,.2f}；"
+            + ("客户已确认报价单" if quote_id is not None else "等待客户确认"),
             '{"order_no": "%s"}' % order_no,
             now,
         ),

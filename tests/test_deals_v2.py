@@ -72,7 +72,8 @@ class DealsTest(ApiTestCase):
         )
         self.assertEqual(resp.status_code, 400, resp.text)  # 计划 §2.6：校验失败 400
         resp = self.client.post("/api/crm/deals", json={"customer_id": c["id"]})
-        self.assertEqual(resp.status_code, 400, "amount 必填")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["amount"], 0.0, "新商机只需备注，报价由报价单产生")
 
     # ---------- 阶段流转 ----------
     def test_manual_stage_won_requires_customer_confirmation(self):

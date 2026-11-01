@@ -65,7 +65,7 @@ class FormLayoutStructureTest(unittest.TestCase):
         self.assertIn("openCustomerDealModal(c)", self.views["customers.js"])
         self.assertNotIn("/deals/new?customer=", self.views["customers.js"])
 
-    def test_deal_convert_forms_share_searchable_product_picker(self):
+    def test_deal_convert_forms_only_require_a_note(self):
         shared = self.views["shared.js"]
         deals = self.views["deals.js"]
 
@@ -73,19 +73,21 @@ class FormLayoutStructureTest(unittest.TestCase):
         self.assertIn("function bindDealConvertForm(form, products, onSubmit)", shared)
         self.assertIn("dealConvertFormHtml('dealConvertForm'", shared)
         self.assertIn("dealConvertFormHtml('dealNewForm'", deals)
-        self.assertIn("bindDealConvertForm(form, products", shared)
-        self.assertIn("bindDealConvertForm(form, products", deals)
+        self.assertIn("bindDealConvertForm(form, []", shared)
+        self.assertIn("bindDealConvertForm(form, []", deals)
 
         form_builder = shared[
             shared.index("function dealConvertFormHtml"):
             shared.index("function bindDealConvertForm")
         ]
-        self.assertIn("productPickerHtml(products", form_builder)
+        self.assertNotIn("productPickerHtml(products", form_builder)
         self.assertNotIn('name="product_type"', form_builder)
         self.assertNotIn("modelComboHtml", form_builder)
-        self.assertIn("关联产品", form_builder)
-        self.assertIn("项目参数", form_builder)
-        self.assertIn("尺寸/洞口尺寸", form_builder)
+        self.assertIn("商机备注", form_builder)
+        self.assertIn('name="note"', form_builder)
+        self.assertIn("产品与报价在商机内创建", form_builder)
+        self.assertNotIn('name="amount"', form_builder)
+        self.assertNotIn('name="drive_type"', form_builder)
 
     def test_product_picker_searches_catalog_fields_and_supports_keyboard(self):
         shared = self.views["shared.js"]
@@ -147,8 +149,8 @@ class FormLayoutStructureTest(unittest.TestCase):
         self.assertNotIn("productSelectHtml(", edit)
 
     def test_spec_labels_are_unified(self):
-        for filename in ("shared.js", "deals.js"):
-            self.assertIn("尺寸/洞口尺寸", self.views[filename])
+        self.assertIn("洞口尺寸", self.views["deals.js"])
+        self.assertNotIn("尺寸（宽×高", self.views["deals.js"])
         for filename, source in self.views.items():
             self.assertNotIn("尺寸（宽×高 mm）", source, filename)
 

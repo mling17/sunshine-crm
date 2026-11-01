@@ -69,6 +69,15 @@ DEAL_STAGE_LABELS: Dict[str, str] = {
     "lost": "流失",
 }
 
+# ---------------- 报价单状态 ----------------
+QUOTE_STATUS = Literal["draft", "confirmed", "void"]
+QUOTE_STATUS_ORDER = ("draft", "confirmed", "void")
+QUOTE_STATUS_LABELS: Dict[str, str] = {
+    "draft": "待客户确认",
+    "confirmed": "客户已确认",
+    "void": "已作废",
+}
+
 # ---------------- 商机流失原因 ----------------
 DEAL_LOST_REASON = Literal["price", "competitor", "give_up", "budget", "other"]
 DEAL_LOST_REASON_LABELS: Dict[str, str] = {
@@ -181,13 +190,14 @@ DRIVE_TYPE_LABELS: Dict[str, str] = {
 }
 
 # ---------------- 时间线类型 ----------------
-TIMELINE_TYPE = Literal["follow", "create", "change", "stage", "order", "confirm", "aftersale", "pay", "ship", "address"]
-TIMELINE_TYPE_ORDER = ("follow", "create", "change", "stage", "order", "confirm", "aftersale", "pay", "ship", "address")
+TIMELINE_TYPE = Literal["follow", "create", "change", "stage", "quote", "order", "confirm", "aftersale", "pay", "ship", "address"]
+TIMELINE_TYPE_ORDER = ("follow", "create", "change", "stage", "quote", "order", "confirm", "aftersale", "pay", "ship", "address")
 TIMELINE_TYPE_LABELS: Dict[str, str] = {
     "follow": "跟进",
     "create": "创建",
     "change": "编辑",
     "stage": "状态变更",
+    "quote": "报价单",
     "order": "生成订单",
     "confirm": "客户确认",
     "aftersale": "售后",

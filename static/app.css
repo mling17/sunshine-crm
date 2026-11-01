@@ -436,6 +436,39 @@
   border-color: #c82333;
 }
 
+/* 报价单 Excel 预览：保留表格密度，内容在卡片内滚动 */
+.quote-form-sheet {
+  margin-top: 10px;
+  border: 1px solid var(--line, #dfe6ef);
+  border-radius: 10px;
+  background: #fbfdff;
+}
+.quote-form-sheet > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+  color: var(--ink, #17253a);
+}
+.quote-form-preview {
+  border-top: 1px solid var(--line, #dfe6ef);
+}
+.quote-form-preview table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.quote-form-preview td {
+  min-width: 64px;
+  max-width: 320px;
+  padding: 6px 8px;
+  border-right: 1px solid #edf1f6;
+  border-bottom: 1px solid #edf1f6;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .btn-sm {
   padding: 4px 8px;
   font-size: 12px;
