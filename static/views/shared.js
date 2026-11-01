@@ -412,12 +412,12 @@ function openFollowModal(opts) {
     '<div class="row-2">' +
     '<div class="field"><label>跟进方式</label>' +
     '<select name="method">' + dictOptions('follow_method', 'wechat') + '</select></div>' +
-    '<div class="field"><label class="label-with-switch label-with-checkbox">' +
+    (opts.extraHtml || '') +
+    '</div>' +
+    '<div class="field followup-schedule-field"><label class="label-with-switch label-with-checkbox">' +
     '<span class="switch"><input type="checkbox" id="fuNextOn" checked><span>下次跟进时间</span></span></label>' +
     '<input type="date" name="next_date" id="fuNextDate" value="' + (opts.defaultNext || followDayAfter(3)) + '">' +
     '<div class="small muted" id="fuNextHint">关掉表示这次不用再跟进</div></div>' +
-    '</div>' +
-    (opts.extraHtml || '') +
     '<div class="field"><label>附件（图片 / Excel / PDF，最多 10 个、单个 ≤20MB）</label>' +
     '<input type="file" name="photos" multiple></div>' +
     '<div id="fuThumbs" class="attach-strip"></div>' +

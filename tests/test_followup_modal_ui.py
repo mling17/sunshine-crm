@@ -35,6 +35,13 @@ class FollowupModalUiTest(unittest.TestCase):
         self.assertNotIn("<span>需要</span>", self.modal)
         self.assertIn("nextDate.disabled = !nextOn.checked", self.modal)
 
+    def test_quote_field_precedes_next_followup_time(self):
+        extra_html = self.modal.index("(opts.extraHtml || '')")
+        next_followup = self.modal.index("下次跟进时间")
+        self.assertLess(self.modal.index('name="method"'), extra_html)
+        self.assertLess(extra_html, next_followup)
+        self.assertIn('class="field followup-schedule-field"', self.modal)
+
 
 if __name__ == "__main__":
     unittest.main()
