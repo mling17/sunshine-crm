@@ -9,7 +9,7 @@ from tests._util import ApiTestCase
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SAMPLE_FORM = ROOT / "app/data/product_forms/TS-001.xlsx"
+SAMPLE_FORM = ROOT / "app/data/product_forms/TS-003.xlsx"
 
 
 class DealQuoteTest(ApiTestCase):
@@ -27,7 +27,10 @@ class DealQuoteTest(ApiTestCase):
 
     def _quote_with_item(self) -> tuple[dict, dict, dict]:
         customer, deal = self._deal()
-        product = self.client.get("/api/crm/products").json()[0]
+        product = next(
+            p for p in self.client.get("/api/crm/products").json()
+            if p["code"] == "TS-003"
+        )
         created_quote = self.client.post(
             f"/api/crm/deals/{deal['id']}/quotes",
             json={"title": "客厅天窗方案", "note": "客户先看这一版"},
@@ -38,14 +41,29 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(quote["items"], [])
 
         form_bytes = SAMPLE_FORM.read_bytes()
+        preview = self.client.post(
+            "/api/crm/quotes/form-preview",
+            data={"product_id": str(product["id"])},
+            files={
+                "form_file": (
+                    "客厅天窗下单表.xlsx",
+                    form_bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        preview_data = preview.json()
+        self.assertTrue(preview_data["a1_value"])
+        self.assertEqual(preview_data["recognized_total"], 20.0)
+        self.assertTrue(preview_data["image_url"])
+        self.assertEqual(preview_data["sheet_content"]["name"], "Sheet1")
+
         item = self.client.post(
             f"/api/crm/quotes/{quote['id']}/items",
             data={
                 "product_id": str(product["id"]),
-                "quantity": "2",
-                "unit_price": "5800",
-                "spec": "1200x2400",
-                "production_spec": "框 1180*2380；扇 1160*2360",
+                "preview_token": preview_data["preview_token"],
                 "note": "客户确认现场洞口",
             },
             files={
@@ -58,11 +76,12 @@ class DealQuoteTest(ApiTestCase):
         )
         self.assertEqual(item.status_code, 200, item.text)
         quote = item.json()
-        self.assertEqual(quote["amount"], 11600.0)
+        self.assertEqual(quote["amount"], 20.0)
         self.assertEqual(len(quote["items"]), 1)
         line = quote["items"][0]
-        self.assertEqual(line["spec"], "1200*2400")
+        self.assertEqual(line["recognized_total"], 20.0)
         self.assertTrue(line["form_available"])
+        self.assertTrue(line["form_preview_url"])
         self.assertGreater(len(line["form_content"]["sheets"]), 0)
         self.assertTrue(line["form_url"])
         self.assertTrue(line["template_url"])
@@ -92,6 +111,11 @@ class DealQuoteTest(ApiTestCase):
         self.assertIn("spreadsheetml", form_download.headers["content-type"])
         template_download = self.client.get(line["template_url"])
         self.assertEqual(template_download.status_code, 200)
+        image_download = self.client.get(line["form_preview_url"])
+        self.assertEqual(image_download.status_code, 200)
+        self.assertEqual(image_download.headers["content-type"], "image/png")
+        self.assertEqual(len(line["form_content"]["sheets"]), 1)
+        self.assertEqual(line["form_content"]["sheets"][0]["name"], "Sheet1")
 
         timeline = self.client.get(f"/api/crm/deals/{deal['id']}").json()["timeline"]
         self.assertTrue(any(item["type"] == "quote" for item in timeline))
@@ -130,7 +154,7 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(confirmed.json()["status"], "confirmed")
         deal_after = self.client.get(f"/api/crm/deals/{deal['id']}").json()
         self.assertEqual(deal_after["stage"], "won")
-        self.assertEqual(deal_after["amount"], 11600.0)
+        self.assertEqual(deal_after["amount"], 20.0)
 
         second_quote = self.client.post(
             f"/api/crm/deals/{deal['id']}/quotes",
@@ -142,9 +166,9 @@ class DealQuoteTest(ApiTestCase):
         ordered = self.client.post(
             f"/api/crm/quotes/{quote['id']}/orders",
             json={
-                "discount_amount": 600,
+                "discount_amount": 2,
                 "discount_reason": "整单优惠",
-                "deposit": 3000,
+                "deposit": 5,
                 "logistics_mode": "self",
             },
         )
@@ -152,16 +176,15 @@ class DealQuoteTest(ApiTestCase):
         data = ordered.json()
         self.assertEqual(data["order"]["quote_id"], quote["id"])
         self.assertEqual(data["order"]["status"], "pending_payment")
-        self.assertEqual(data["order"]["product_total"], 11600.0)
-        self.assertEqual(data["order"]["amount"], 11000.0)
-        self.assertEqual(data["order"]["balance_amount"], 8000.0)
+        self.assertEqual(data["order"]["product_total"], 20.0)
+        self.assertEqual(data["order"]["amount"], 18.0)
+        self.assertEqual(data["order"]["balance_amount"], 13.0)
 
         detail = self.client.get(f"/api/crm/orders/{data['order']['id']}").json()
         self.assertEqual(detail["quote"]["quote_no"], quote["quote_no"])
         self.assertEqual(len(detail["items"]), 1)
         self.assertIsNotNone(detail["customer_confirmed_at"])
         self.assertTrue(detail["product_name_snapshot"])
-        self.assertEqual(detail["items"][0]["production_spec"], "框 1180*2380；扇 1160*2360")
 
     def test_quote_requires_xlsx_form(self):
         _, deal = self._deal()
@@ -171,11 +194,34 @@ class DealQuoteTest(ApiTestCase):
         product = self.client.get("/api/crm/products").json()[0]
         resp = self.client.post(
             f"/api/crm/quotes/{quote['id']}/items",
-            data={"product_id": str(product["id"]), "quantity": "1", "unit_price": "100"},
+            data={"product_id": str(product["id"]), "preview_token": "0" * 64},
             files={"form_file": ("bad.xls", b"not-excel", "application/vnd.ms-excel")},
         )
         self.assertEqual(resp.status_code, 400, resp.text)
         self.assertEqual(resp.json()["code"], "quote_form_xlsx_required")
+
+    def test_preview_rejects_other_products_form_by_a1(self):
+        _, deal = self._deal()
+        quote = self.client.post(
+            f"/api/crm/deals/{deal['id']}/quotes", json={"title": "校验测试"}
+        ).json()
+        product = next(
+            p for p in self.client.get("/api/crm/products").json()
+            if p["code"] == "TS-004"
+        )
+        resp = self.client.post(
+            "/api/crm/quotes/form-preview",
+            data={"product_id": str(product["id"])},
+            files={
+                "form_file": (
+                    "错误产品.xlsx",
+                    SAMPLE_FORM.read_bytes(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["code"], "quote_form_product_mismatch")
 
 
 if __name__ == "__main__":

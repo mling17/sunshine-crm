@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_011"
-SCHEMA_USER_VERSION = 11
+MIGRATION_VERSION = "v2_012"
+SCHEMA_USER_VERSION = 12
 
 
 def default_db_path() -> Path:
@@ -950,7 +950,21 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_011", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_011', datetime('now'), '商机报价单、Excel下单表、履历关联与订单来源')"),
-    ("user_version v2_011", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 28. v2_012：下单表保存前识别、A1 校验与预览图片 ----------
+    ("quote_items.recognized_total", _col_guard("quote_items", "recognized_total"),
+     "ALTER TABLE quote_items ADD COLUMN recognized_total REAL NOT NULL DEFAULT 0"),
+    ("quote_items.a1_value", _col_guard("quote_items", "a1_value"),
+     "ALTER TABLE quote_items ADD COLUMN a1_value TEXT"),
+    ("quote_items.amount_cell", _col_guard("quote_items", "amount_cell"),
+     "ALTER TABLE quote_items ADD COLUMN amount_cell TEXT"),
+    ("quote_items.form_preview_storage_key", _col_guard("quote_items", "form_preview_storage_key"),
+     "ALTER TABLE quote_items ADD COLUMN form_preview_storage_key TEXT"),
+    ("quote_items.recognized_total_backfill", _once("v2_012", "quote_items"),
+     "UPDATE quote_items SET recognized_total = amount WHERE recognized_total = 0 AND amount > 0"),
+    ("schema_migrations v2_012", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_012', datetime('now'), '下单表Sheet1识别、A1产品校验、合计金额和预览图片')"),
+    ("user_version v2_012", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -1085,6 +1099,9 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
         ),
         "follow_ups": ("object_type", "object_id", "method", "quote_id"),
         "attachments": ("object_type", "object_id", "follow_up_id"),
+        "quote_items": (
+            "recognized_total", "a1_value", "amount_cell", "form_preview_storage_key",
+        ),
         "products": (
             "form_storage_key", "form_file_name", "form_file_size",
             "form_sha256", "form_uploaded_at",

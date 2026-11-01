@@ -25,9 +25,18 @@ class DealProductParameterUiTest(unittest.TestCase):
             "productPickerHtml(products || []",
             "下载 Excel 模板",
             'name="form_file"',
-            "form_file",
+            "quotes/form-preview",
+            "A1 校验通过",
+            "recognized_total",
         ):
             self.assertIn(marker, deals)
+        quote_form = deals[
+            deals.index("function openQuoteItemModal"):
+            deals.index("function openQuoteConfirmModal")
+        ]
+        self.assertNotIn('name="quantity"', quote_form)
+        self.assertNotIn('name="unit_price"', quote_form)
+        self.assertNotIn('name="spec"', quote_form)
         self.assertIn(".product-picker", css)
 
     def test_empty_product_state_is_distinct_and_focuses_search(self):

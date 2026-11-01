@@ -279,6 +279,7 @@ class ProductOut(BaseModel):
     source_template: str | None = None
     form_file_name: str | None = None
     form_file_size: int = 0
+    form_sha256: str | None = None
     form_available: bool = False
     description: str | None = None
     is_active: bool = True
@@ -378,9 +379,13 @@ class QuoteItemOut(BaseModel):
     form_file_name: str | None = None
     form_file_size: int = 0
     form_available: bool = False
+    recognized_total: float = 0.0
+    a1_value: str | None = None
+    amount_cell: str | None = None
     form_content: dict = Field(default_factory=dict)
     template_url: str | None = None
     form_url: str | None = None
+    form_preview_url: str | None = None
     sort: int = 0
     created_at: str
     updated_at: str

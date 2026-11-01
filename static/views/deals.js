@@ -86,6 +86,13 @@ function quoteStatusBadge(quote) {
 }
 
 function quoteFormPreviewHtml(item) {
+    if (item.form_preview_url) {
+        return '<details class="quote-form-sheet" open><summary>下单表数据区域</summary>' +
+            '<div class="quote-form-preview" style="overflow:auto;padding:10px">' +
+            '<img src="/crm' + esc(item.form_preview_url) + '" alt="下单表数据区域" ' +
+            'style="max-width:none;width:auto;min-width:min(100%,720px);display:block">' +
+            '</div></details>';
+    }
     var content = item.form_content || {};
     var sheets = content.sheets || [];
     if (!sheets.length) {
@@ -113,9 +120,8 @@ function quoteItemHtml(item, editable) {
             '<span class="badge muted">×' + esc(item.quantity || 1) + '</span>' +
             '<span style="margin-left:auto"><b>' + money(item.amount) + '</b></span></div>' +
         '<div class="item-sub small">' +
-            '洞口 ' + esc(item.spec || '—') +
-            ' · 生产参数 ' + esc(item.production_spec || '—') +
-            ' · 单价 ' + money(item.unit_price) + '</div>' +
+            '识别合计 ' + money(item.recognized_total || item.amount) +
+            ' · A1 ' + esc(item.a1_value || '—') + '</div>' +
         '<div class="small" style="margin:8px 0">' +
             (item.template_url
                 ? '<a class="btn btn-sm" href="/crm' + esc(item.template_url) + '">下载产品模板</a> '
@@ -297,63 +303,125 @@ function openQuoteItemModal(deal, quote, item, products, done) {
         '<div class="field field-wide"><label>关联产品 *</label>' +
         productPickerHtml(products || [], item && item.product_id, '搜索并选择产品') +
         '<div class="small" style="margin-top:8px" id="quoteTemplateHint">选择产品后可下载对应 Excel 模板。</div></div>' +
-        '<div class="row-3"><div class="field"><label>数量 *</label>' +
-        '<input name="quantity" type="number" min="1" max="999" step="1" required value="' +
-        Number(item && item.quantity || 1) + '"></div>' +
-        '<div class="field"><label>单价 *</label><input name="unit_price" type="number" min="0" ' +
-        'step="0.01" required value="' + Number(item && item.unit_price || 0) + '"></div>' +
-        '<div class="field"><label>明细金额</label><input name="amount" disabled value="0.00"></div></div>' +
-        '<div class="row-2"><div class="field"><label>洞口尺寸</label>' +
-        '<input name="spec" maxlength="200" placeholder="如 1200*2400" value="' +
-        esc(item && item.spec || '') + '"></div>' +
-        '<div class="field"><label>生产参数</label><input name="production_spec" maxlength="1000" ' +
-        'value="' + esc(item && item.production_spec || '') + '"></div></div>' +
-        '<div class="field"><label>明细备注</label><textarea name="note" maxlength="500">' +
-        esc(item && item.note || '') + '</textarea></div>' +
         '<div class="field"><label>对应下单表 * ' + (item && item.form_file_name
             ? '（当前：' + esc(item.form_file_name) + '，不选则保留）' : '') + '</label>' +
         '<input type="file" name="form_file" accept=".xlsx" ' + (item ? '' : 'required') + '></div>' +
-        '<p class="small muted">上传后会读取并保存工作簿内容，报价单页会直接展示；单个文件不超过 20MB。</p>' +
+        '<div class="row-2"><div class="field"><label>识别合计金额</label>' +
+        '<input name="recognized_total" readonly value="' +
+        (item && item.recognized_total ? Number(item.recognized_total).toFixed(2) : '待识别') + '"></div>' +
+        '<div class="field"><label>识别依据</label><input name="amount_cell" readonly value="' +
+        esc(item && item.amount_cell || '上传后识别 Sheet1 合计行') + '"></div></div>' +
+        '<div class="field"><label>备注</label><textarea name="note" maxlength="500" ' +
+        'placeholder="记录这版报价的沟通要点">' + esc(item && item.note || '') + '</textarea></div>' +
+        '<div class="card" id="quoteFormPreview" style="margin:0;display:none">' +
+        '<div class="card-head"><h3>下单表识别结果</h3>' +
+        '<span class="small muted" id="quoteFormPreviewStatus"></span></div>' +
+        '<div id="quoteFormPreviewBody"></div></div>' +
+        '<p class="small muted">只读取 Sheet1。保存前会用 A1 校验下单表是否属于当前产品，' +
+        '自动识别合计金额，并把数据区域生成图片保存。单个文件不超过 20MB。</p>' +
         '<div class="form-actions"><button type="button" class="btn modal-cancel">取消</button>' +
-        '<button type="submit" class="btn btn-primary">保存产品</button></div></form></div></div>';
+        '<button type="submit" class="btn btn-primary"' + (item ? '' : ' disabled') +
+        '>保存产品</button></div></form></div></div>';
     document.body.appendChild(modal);
     function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
     modal.querySelector('.modal-close').addEventListener('click', close);
     modal.querySelector('.modal-cancel').addEventListener('click', close);
     var form = modal.querySelector('form');
+    var submitBtn = form.querySelector('button[type="submit"]');
+    var fileInput = form.querySelector('[name="form_file"]');
+    var totalInput = form.querySelector('[name="recognized_total"]');
+    var cellInput = form.querySelector('[name="amount_cell"]');
+    var previewBox = form.querySelector('#quoteFormPreview');
+    var previewBody = form.querySelector('#quoteFormPreviewBody');
+    var previewStatus = form.querySelector('#quoteFormPreviewStatus');
+    var previewState = item && item.form_preview_url ? {
+        preview_token: item.form_sha256,
+        image_url: item.form_preview_url,
+        recognized_total: item.recognized_total,
+        a1_value: item.a1_value,
+        amount_cell: item.amount_cell
+    } : null;
+
+    function resetPreview() {
+        previewState = null;
+        previewBox.style.display = 'none';
+        previewBody.innerHTML = '';
+        totalInput.value = '待识别';
+        cellInput.value = '上传后识别 Sheet1 合计行';
+        submitBtn.disabled = true;
+    }
+
+    function renderPreview(data) {
+        previewState = data;
+        totalInput.value = Number(data.recognized_total || 0).toFixed(2);
+        cellInput.value = data.amount_cell || '已识别合计行';
+        previewStatus.textContent = 'A1 校验通过 · ' + (data.a1_value || '');
+        previewBody.innerHTML = '<div class="small muted" style="margin-bottom:8px">' +
+            'A1：' + esc(data.a1_value || '—') +
+            ' · 合计单元格：' + esc(data.amount_cell || '—') + '</div>' +
+            '<div style="overflow:auto;padding:8px;background:#fff">' +
+            '<img src="/crm' + esc(data.image_url) + '" alt="下单表数据区域" ' +
+            'style="max-width:none;width:auto;min-width:min(100%,720px);display:block"></div>';
+        previewBox.style.display = '';
+        submitBtn.disabled = false;
+    }
+
+    if (previewState) { renderPreview(previewState); }
+
     var picker = bindProductPicker(form.querySelector('[data-product-picker]'), products || [], {
         onChange: function (product) {
             var hint = form.querySelector('#quoteTemplateHint');
-            if (!product) { hint.textContent = '选择产品后可下载对应 Excel 模板。'; return; }
+            if (!product) {
+                hint.textContent = '选择产品后可下载对应 Excel 模板。';
+                resetPreview();
+                return;
+            }
             hint.innerHTML = '产品：' +
                 esc([product.code, product.name].filter(Boolean).join(' · ')) +
                 ' · <a href="' + API_BASE + '/products/' + product.id + '/form-file">下载 Excel 模板</a>';
+            if (!item || String(product.id) !== String(item.product_id)) {
+                resetPreview();
+            }
         }
     });
-    var qtyEl = form.querySelector('[name="quantity"]');
-    var priceEl = form.querySelector('[name="unit_price"]');
-    var amountEl = form.querySelector('[name="amount"]');
-    function refreshAmount() {
-        amountEl.value = ((Number(qtyEl.value) || 0) * (Number(priceEl.value) || 0)).toFixed(2);
-    }
-    qtyEl.addEventListener('input', refreshAmount);
-    priceEl.addEventListener('input', refreshAmount);
-    refreshAmount();
+
+    fileInput.addEventListener('change', function () {
+        var file = fileInput.files[0];
+        if (!file) { resetPreview(); return; }
+        var productId = picker.getValue();
+        if (!productId) { toast('请先选择关联产品', true); fileInput.value = ''; return; }
+        var fd = new FormData();
+        fd.append('product_id', productId);
+        fd.append('form_file', file);
+        submitBtn.disabled = true;
+        previewBox.style.display = '';
+        previewStatus.textContent = '正在识别 Sheet1…';
+        previewBody.innerHTML = '<p class="empty">正在校验 A1、识别合计金额并生成图片…</p>';
+        api('/quotes/form-preview', { method: 'POST', body: fd }).then(function (data) {
+            renderPreview(data);
+        }).catch(function (err) {
+            resetPreview();
+            previewBox.style.display = '';
+            previewStatus.textContent = '识别失败';
+            previewBody.innerHTML = '<p class="err">' + esc(err.message || '下单表识别失败') + '</p>';
+            toast(err.message || '下单表识别失败', true);
+        });
+    });
+
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         if (!picker.getValue()) { toast('请选择关联产品', true); return; }
-        var file = form.querySelector('[name="form_file"]').files[0];
+        var file = fileInput.files[0];
         if (!item && !file) { toast('请上传与产品对应的下单表', true); return; }
+        if (file && !previewState) { toast('请等待下单表识别完成', true); return; }
         var fd = new FormData();
         fd.append('product_id', picker.getValue());
-        fd.append('quantity', qtyEl.value);
-        fd.append('unit_price', priceEl.value);
-        fd.append('spec', String(form.querySelector('[name="spec"]').value || '').trim());
-        fd.append('production_spec', String(form.querySelector('[name="production_spec"]').value || '').trim());
         fd.append('note', String(form.querySelector('[name="note"]').value || '').trim());
-        if (file) { fd.append('form_file', file); }
-        var btn = form.querySelector('button[type="submit"]');
-        btn.disabled = true;
+        if (file) {
+            fd.append('form_file', file);
+            fd.append('preview_token', previewState.preview_token);
+        }
+        submitBtn.disabled = true;
         api(item ? '/quotes/items/' + item.id : '/quotes/' + quote.id + '/items', {
             method: item ? 'PUT' : 'POST',
             body: fd
@@ -363,7 +431,7 @@ function openQuoteItemModal(deal, quote, item, products, done) {
             if (done) { done(); }
         }).catch(function (err) {
             toast(err.message, true);
-            btn.disabled = false;
+            submitBtn.disabled = false;
         });
     });
 }

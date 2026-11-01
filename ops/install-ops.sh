@@ -14,10 +14,10 @@ echo "  ok: $CRM_HOME"
 
 echo "== 2/4 前置检查：系统 python 能否导入依赖 =="
 # 必须清掉继承来的 PYTHONPATH，否则会踩到别的 venv 的 pydantic_core（实测踩过）
-if ! env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -c 'import fastapi, uvicorn, minio' 2>/dev/null; then
+if ! env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -c 'import fastapi, uvicorn, minio, openpyxl, PIL' 2>/dev/null; then
     echo "  [FATAL] 系统 python3 依赖不全："
-    env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -c 'import fastapi, uvicorn, minio' || true
-    echo "  处理：/usr/bin/python3 -m pip install fastapi uvicorn minio python-multipart openpyxl"
+    env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -c 'import fastapi, uvicorn, minio, openpyxl, PIL' || true
+    echo "  处理：/usr/bin/python3 -m pip install fastapi uvicorn minio python-multipart openpyxl pillow"
     exit 1
 fi
 echo "  ok: fastapi/uvicorn/minio 均可导入"
