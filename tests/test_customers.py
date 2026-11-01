@@ -1,4 +1,4 @@
-"""T3：客户档案 CRUD + 搜索 + 分页 + 详情 + 级联删除。"""
+"""T3：客户档案新建/查询/修改 + 搜索 + 分页 + 详情 + 删除保护。"""
 
 from __future__ import annotations
 
@@ -153,35 +153,36 @@ class CustomersTest(ApiTestCase):
             {"首次上门量尺", "微信聊了一次"},
         )
 
-    # ---------- 删（级联） ----------
-    def test_delete_customer_cascades_deal_and_follow_up(self):
+    # ---------- 删（禁止） ----------
+    def test_delete_customer_is_forbidden_and_keeps_related_data(self):
         c = self.create_customer(name="张伟")
         deal_id = insert_deal(c["id"])
         fu_id = insert_follow_up(c["id"], content="带看现场", deal_id=deal_id)
 
         resp = self.client.delete(f"/api/crm/customers/{c['id']}")
-        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.status_code, 403, resp.text)
+        self.assertEqual(resp.json()["code"], "customer_delete_forbidden")
 
-        self.assertEqual(self.client.get(f"/api/crm/customers/{c['id']}").status_code, 404)
-        self.assertEqual(self.client.get("/api/crm/customers").json()["total"], 0)
+        self.assertEqual(self.client.get(f"/api/crm/customers/{c['id']}").status_code, 200)
+        self.assertEqual(self.client.get("/api/crm/customers").json()["total"], 1)
         with db_conn() as conn:
             self.assertEqual(
                 conn.execute("SELECT is_delete FROM deals WHERE id = ?", (deal_id,)).fetchone()[0],
-                1,
-                "客户的 deals 必须软删除",
+                0,
+                "禁止删客户时商机不能受影响",
             )
             self.assertEqual(
                 conn.execute(
                     "SELECT is_delete FROM follow_ups WHERE id = ?", (fu_id,)
                 ).fetchone()[0],
-                1,
-                "客户的 follow_ups 必须软删除",
+                0,
+                "禁止删客户时跟进记录不能受影响",
             )
             self.assertEqual(
                 conn.execute(
                     "SELECT is_delete FROM customers WHERE id = ?", (c["id"],)
                 ).fetchone()[0],
-                1,
+                0,
             )
 
     def test_update_null_name_rejected(self):
@@ -199,7 +200,7 @@ class CustomersTest(ApiTestCase):
         self.assertEqual(
             self.client.put("/api/crm/customers/9999", json={"name": "x"}).status_code, 404
         )
-        self.assertEqual(self.client.delete("/api/crm/customers/9999").status_code, 404)
+        self.assertEqual(self.client.delete("/api/crm/customers/9999").status_code, 403)
 
     def test_create_requires_non_blank_name(self):
         # 计划 §2.6：校验失败统一 400（不用 pydantic 默认 422）

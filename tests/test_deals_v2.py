@@ -186,15 +186,23 @@ class DealsTest(ApiTestCase):
         bad = self.client.get("/api/crm/deals", params={"stage": "bogus"})
         self.assertEqual(bad.status_code, 400, bad.text)
 
-    # ---------- 删客户 → deal 级联（走 API 全链路） ----------
-    def test_delete_customer_cascades_deals_via_api(self):
+    # ---------- 删客户被禁止 → deals 保留 ----------
+    def test_delete_customer_is_forbidden_and_keeps_deals(self):
         c = self.create_customer(name="张伟")
-        self.create_deal(c["id"], amount=100.0)
-        self.create_deal(c["id"], amount=200.0)
+        first = self.create_deal(c["id"], amount=100.0)
+        second = self.create_deal(c["id"], amount=200.0)
 
-        self.assertEqual(self.client.delete(f"/api/crm/customers/{c['id']}").status_code, 200)
+        resp = self.client.delete(f"/api/crm/customers/{c['id']}")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], "customer_delete_forbidden")
         self.assertEqual(
-            self.client.get("/api/crm/deals", params={"customer_id": c["id"]}).json(), []
+            {
+                d["id"]
+                for d in self.client.get(
+                    "/api/crm/deals", params={"customer_id": c["id"]}
+                ).json()
+            },
+            {first["id"], second["id"]},
         )
 
     def test_requires_auth(self):

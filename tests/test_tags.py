@@ -127,12 +127,14 @@ class TagsTest(ApiTestCase):
         resp = self.client.put(f"/api/crm/customers/{a['id']}", json={"phone": "13800000001"})
         self.assertEqual(resp.json()["tags"], ["重点"], "没传 tags 不许清空")
 
-    # ---------- 删客户 → customer_tags 级联清空 ----------
-    def test_delete_customer_cascades_customer_tags(self):
+    # ---------- 删客户被禁止 → customer_tags 保留 ----------
+    def test_delete_customer_is_forbidden_and_keeps_customer_tags(self):
         a = self.create_customer(name="客户A", tags=["重点"])
         self.create_customer(name="客户B", tags=["重点"])
 
-        self.assertEqual(self.client.delete(f"/api/crm/customers/{a['id']}").status_code, 200)
+        resp = self.client.delete(f"/api/crm/customers/{a['id']}")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], "customer_delete_forbidden")
         with db_conn() as conn:
             left = conn.execute(
                 "SELECT COUNT(*) AS n FROM customer_tags"
@@ -145,11 +147,11 @@ class TagsTest(ApiTestCase):
                 (a["id"],),
             ).fetchone()["n"]
             tag_rows = conn.execute("SELECT COUNT(*) AS n FROM tags").fetchone()["n"]
-        self.assertEqual(left, 0, "删客户必须级联清 customer_tags")
-        self.assertGreater(tombstones, 0, "删客户必须保留软删除标记")
-        self.assertEqual(tag_rows, 1, "标签字典不能被连带删掉")
+        self.assertGreater(left, 0, "禁止删客户时客户标签必须保留")
+        self.assertEqual(tombstones, 0, "禁止删客户时不能产生删除标记")
+        self.assertEqual(tag_rows, 1, "标签字典保持原样")
         self.assertEqual(
-            self.client.get("/api/crm/customers", params={"tag": "重点"}).json()["total"], 1
+            self.client.get("/api/crm/customers", params={"tag": "重点"}).json()["total"], 2
         )
 
     # ---------- 复购口径：deals_total / total_closed_amount ----------

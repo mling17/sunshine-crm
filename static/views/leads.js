@@ -1,7 +1,7 @@
 /* 线索列表页面逻辑 */
 /* ---------------- 线索列表（表格，对齐 demo 定稿） ----------------
  * 定稿口径：表格列 = 名称 / 来源 / 地区 / 微信号 / 联系方式 / 标签 / 意向 / 上次跟进 / 创建时间 / 操作
- *           操作 = 编辑（弹层）/ 跟进（详情页）/ 转商机（独立页面 #/deals/new?lead=）
+ *           操作 = 编辑（弹层）/ 跟进（详情页）；转商机只在跟进页发起
  */
 function viewLeads(root) {
     var st = state.filters;
@@ -155,11 +155,9 @@ function loadLeads(root) {
                 if (l.status === 'invalid') {
                     ops.push({ op: 'follow', arg: l.id, label: '查看' });
                     ops.push({ op: 'delete', arg: l.id, label: '删除', danger: true });
-                    ops.push({ op: 'toDeal', arg: l.id, label: '转商机', disabled: true, tip: '已失效线索不能转商机' });
                 } else {
                     ops.push({ op: 'edit', arg: l.id, label: '编辑' });
                     ops.push({ op: 'follow', arg: l.id, label: '跟进' });
-                    ops.push({ op: 'toDeal', arg: l.id, label: '转商机' });
                 }
                 return opButtons(ops);
             } }
@@ -177,11 +175,7 @@ function loadLeads(root) {
         bindOps(root, {
             edit: function (id) { return openLeadEdit(id, root); },
             follow: function (id) { navigate('#/leads/' + id + '/follow'); },
-            delete: function (id) { return openLeadDeleteConfirm(id); },
-            toDeal: function (id) {
-                api('/leads/' + id).then(function (l) { openLeadDealModal(l); })
-                    .catch(function (err) { toast(err.message, true); });
-            }
+            delete: function (id) { return openLeadDeleteConfirm(id); }
         });
     }).catch(function (err) {
         listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';

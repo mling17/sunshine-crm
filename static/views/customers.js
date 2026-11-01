@@ -87,8 +87,7 @@ function loadCustomers(root) {
             { title: '操作', nowrap: true, render: function (c) {
                 return opButtons([
                     { op: 'edit', arg: c.id, label: '编辑' },
-                    { op: 'follow', arg: c.id, label: '跟进' },
-                    { op: 'toDeal', arg: c.id, label: '转商机' }
+                    { op: 'follow', arg: c.id, label: '跟进' }
                 ]);
             } }
         ], items, st.q || st.tag ? '没有匹配的客户，换个条件试试'
@@ -104,12 +103,7 @@ function loadCustomers(root) {
 
         bindOps(root, {
             edit: function (id) { return openCustomerEdit(id, root); },
-            follow: function (id) { navigate('#/customers/' + id); },
-            toDeal: function (id) {
-                api('/customers/' + id).then(function (c) {
-                    openDealConvertModal(c, 'customer');
-                }).catch(function (err) { toast(err.message, true); });
-            }
+            follow: function (id) { navigate('#/customers/' + id); }
         });
     }).catch(function (err) {
         listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';
@@ -273,7 +267,7 @@ function viewCustomerDetail(root, rawId) {
         var dealsCard =
             '<div class=\"card\">' +
             '<div class=\"card-head\"><h2>商机（' + deals.length + '）</h2>' +
-            '<span class=\"small muted\">商机由本客户「转商机」产生</span></div>' +
+            '<span class=\"small muted\">商机从客户跟进页创建</span></div>' +
             dealHtml +
             '</div>';
 
@@ -281,8 +275,7 @@ function viewCustomerDetail(root, rawId) {
             c.primary_contact_wechat ? '微信 ' + c.primary_contact_wechat : ''].filter(Boolean);
         var actions =
             '<button type=\"button\" class=\"btn btn-sm\" id=\"toggleEditCustomer\">编辑客户</button>' +
-            '<button type=\"button\" class=\"btn btn-sm btn-primary\" id=\"custToDeal\">转商机</button>' +
-            '<button type=\"button\" class=\"btn btn-sm btn-danger\" id=\"deleteCustomer\">删除</button>';
+            '<button type=\"button\" class=\"btn btn-sm btn-primary\" id=\"custToDeal\">转商机</button>';
 
         renderEntityFollowPage(root, {
             backHash: '#/customers',
@@ -332,16 +325,6 @@ function viewCustomerDetail(root, rawId) {
         /* 转商机 → 与线索页共用同一弹层 */
         $('#custToDeal', root).addEventListener('click', function () {
             openCustomerDealModal(c);
-        });
-
-        /* 删除客户（级联删商机/跟进/标签） */
-        $('#deleteCustomer', root).addEventListener('click', function () {
-            if (!window.confirm('删除客户「' + c.name + '」？其商机、跟进记录会一起删掉，不可恢复。')) { return; }
-            api('/customers/' + c.id, { method: 'DELETE' }).then(function () {
-                invalidateCustomerIndex();
-                toast('已删除客户');
-                navigate('#/customers');
-            }).catch(function (err) { toast(err.message, true); });
         });
 
         bindDealStageSelects(root);

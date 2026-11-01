@@ -1,8 +1,7 @@
-"""客户档案：CRUD + 搜索分页 + 标签（多对多）+ 详情 + 级联删除。
+"""客户档案：查询/新建/修改 + 搜索分页 + 标签（多对多）+ 详情。
 
 - 全部接口要求登录（router 级 ``dependencies=[Depends(require_auth)]``）；
-- 删除客户靠 DDL 的 ``ON DELETE CASCADE`` 级联清 deals/follow_ups/customer_tags，
-  前提是连接上开了 ``PRAGMA foreign_keys=ON``（``app.db.connect`` 已处理）；
+- 客户档案不允许删除，DELETE 请求统一返回 403，以保留商机与跟进履历；
 - 列表里的 ``deals_total`` / ``total_closed_amount`` 用相关子查询算，避免 N+1；
 - 标签：``tags(name UNIQUE)`` 做字典，``customer_tags`` 做关联。写客户时按名字
   upsert 字典（同名永远复用同一个 tag_id），再整体替换该客户的关联行。
@@ -366,35 +365,12 @@ def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
 
 @router.delete("/customers/{customer_id}")
 def delete_customer(customer_id: int) -> dict:
-    """删客户。名下有订单/售后 → 409 customer_has_orders（计划 §2.6）。"""
-    with db_conn() as conn:
-        if conn.execute(
-            "SELECT 1 FROM customers WHERE id = ? AND is_delete = 0", (customer_id,)
-        ).fetchone() is None:
-            raise _not_found()
-        orders = conn.execute(
-            "SELECT COUNT(*) FROM orders WHERE customer_id = ? AND is_delete = 0",
-            (customer_id,),
-        ).fetchone()[0]
-        afters = conn.execute(
-            "SELECT COUNT(*) FROM aftersales WHERE customer_id = ? AND is_delete = 0",
-            (customer_id,),
-        ).fetchone()[0]
-        if orders or afters:
-            raise ApiError(status_code=409, code="customer_has_orders",
-                           message="客户名下存在订单或售后，不能删除")
-        now = now_iso()
-        conn.execute(
-            "UPDATE customers SET is_delete = 1, updated_at = ?, update_time = ?"
-            " WHERE id = ?",
-            (now, now, customer_id),
-        )
-        for table in ("deals", "follow_ups", "customer_tags", "customer_addresses", "customer_contacts"):
-            conn.execute(
-                f"UPDATE {table} SET is_delete = 1, update_time = ? WHERE customer_id = ?",
-                (now, customer_id),
-            )
-    return {"deleted": True}
+    """客户档案是长期业务主档，不允许删除。"""
+    raise ApiError(
+        status_code=403,
+        code="customer_delete_forbidden",
+        message="客户档案不允许删除",
+    )
 
 
 @router.get("/customers/{customer_id}/360", response_model=CustomerDetailOut)
