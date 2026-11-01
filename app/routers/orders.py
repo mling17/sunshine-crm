@@ -1,6 +1,6 @@
 """订单管理：CRUD + 状态流转。
 
-- 订单状态流：待支付 →(押金+截图)→ 已支付押金 →(财务确认点下一步)→ 生产中 →(尾款+截图)→ 已支付尾款 →(点下一步)→ 待发货 →(物流公司+运单号，自送填"无")→ 已发货 →(确认收货)→ 已完成
+- 订单状态流：待支付 →(定金+截图)→ 已支付定金 →(财务确认点下一步)→ 生产中 →(尾款+截图)→ 已支付尾款 →(点下一步)→ 待发货 →(物流公司+运单号，自送填"无")→ 已发货 →(确认收货)→ 已完成
 - 所有状态变更必须通过 transition() 函数，禁止直接修改 orders.status
 - 订单状态校验 + 字段校验 + 单事务 + 日志记录
 """
@@ -254,7 +254,7 @@ def upload_payment_screenshots(
     
     return OrderOut(**dict(row))
 
-# ---------------- 前端契约：押金 / 尾款支付（multipart） ----------------
+# ---------------- 前端契约：定金 / 尾款支付（multipart） ----------------
 async def _save_order_screenshots(conn, order_id: int, screenshots) -> list[int]:
     """存订单支付截图到 attachments（object_type=order_payment）。async：UploadFile.read 是协程。"""
     from app.storage import MAX_PHOTO_BYTES, ext_and_mime, new_storage_key, save_photo
@@ -287,7 +287,7 @@ async def _save_order_screenshots(conn, order_id: int, screenshots) -> list[int]
 @router.post("/orders/{order_id}/pay-deposit", response_model=OrderTransitionOut)
 async def pay_deposit(
     order_id: int,
-    amount: float = Form(..., description="押金金额"),
+    amount: float = Form(..., description="定金金额"),
     note: str | None = Form(default=None),
     screenshots: list[UploadFile] = File(default=[]),
 ) -> OrderTransitionOut:
@@ -303,7 +303,7 @@ async def pay_deposit(
 @router.post("/orders/{order_id}/pay-balance", response_model=OrderTransitionOut)
 async def pay_balance(
     order_id: int,
-    amount: float = Form(..., description="尾款金额（必须等于总额-已收押金）"),
+    amount: float = Form(..., description="尾款金额（必须等于总额-已收定金）"),
     note: str | None = Form(default=None),
     screenshots: list[UploadFile] = File(default=[]),
 ) -> OrderTransitionOut:

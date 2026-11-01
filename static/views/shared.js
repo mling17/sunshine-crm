@@ -25,31 +25,6 @@ function orderStatusLabel(status, statusLabel) {
   return statusLabel || ORDER_STATUS_LABEL[status] || status || '';
 }
 
-/* 新增商机表单（不含客户选择：客户由调用页面的 select 提供） */
-function dealFormHtml() {
-  return '<form id="newDealForm" class="form-grid" autocomplete="off">' +
-    '<div class="row-2">' +
-      '<div class="field"><label>产品类型</label>' +
-        '<input name="product_type" type="text" maxlength="32" placeholder="天窗 / 天幕"></div>' +
-      '<div class="field"><label>型号</label>' +
-        '<input name="model" type="text" maxlength="64" placeholder="如 XW-120"></div>' +
-    '</div>' +
-    '<div class="field"><label>尺寸/洞口尺寸</label>' +
-      '<input name="spec" type="text" maxlength="200" placeholder="如 1200*2400"></div>' +
-    '<div class="row-3">' +
-      '<div class="field"><label>报价金额 *</label>' +
-        '<input name="amount" type="number" min="0" step="0.01" inputmode="decimal" required></div>' +
-      '<div class="field"><label>定金</label>' +
-        '<input name="deposit" type="number" min="0" step="0.01" inputmode="decimal"></div>' +
-      '<div class="field"><label>尾款</label>' +
-        '<input name="balance" type="number" min="0" step="0.01" inputmode="decimal"></div>' +
-    '</div>' +
-    '<div class="field"><label>阶段</label>' +
-      '<select name="stage">' + stageOptions('confirm') + '</select></div>' +
-    '<div class="form-actions"><button type="submit" class="btn btn-primary">新增商机</button></div>' +
-  '</form>';
-}
-
 /* 列表内联改阶段（<select data-deal-stage="ID">） */
 function bindDealStageSelects(root) {
   $$('select[data-deal-stage]', root).forEach(function (sel) {
@@ -95,8 +70,6 @@ function dealItemHtml(deal) {
   var parts = [deal.product_name_snapshot, deal.product_code_snapshot || deal.model, deal.spec]
     .filter(Boolean).join(' / ') || [deal.product_type, deal.model, deal.spec].filter(Boolean).join(' / ') || '未填产品';
   var amounts = '报价 ' + money(deal.amount);
-  if (deal.deposit) { amounts += ' · 定金 ' + money(deal.deposit); }
-  if (deal.balance) { amounts += ' · 尾款 ' + money(deal.balance); }
   return '<div class="item">' +
     '<div class="item-main">' +
       '<div class="item-title">' + esc(parts) +
@@ -301,6 +274,32 @@ function collectFiles(records) {
     });
   });
   return out.sort(function (a, b) { return String(a.at) < String(b.at) ? 1 : -1; });
+}
+
+/* 跟进接口记录 → 通用跟进页时间线。线索、客户、商机统一使用同一套结构。 */
+function followupRecordsFromApi(records) {
+  var TYPE_MAP = {
+    follow: 'follow', create: 'create', change: 'change', update: 'change',
+    stage: 'stage', order: 'order', aftersale: 'aftersale', pay: 'pay', ship: 'ship'
+  };
+  return (records || []).map(function (r) {
+    var photos = (r.photos || []).map(function (ph) {
+      var url = ph.url ? '/crm' + ph.url : null;
+      return {
+        name: ph.file_name || ph.name || '附件',
+        url: url,
+        isImage: /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(ph.file_name || ph.name || '')
+      };
+    });
+    return {
+      at: r.created_at,
+      type: TYPE_MAP[r.kind] || 'follow',
+      content: r.content || '',
+      next_date: r.next_date,
+      method: r.method,
+      files: photos
+    };
+  });
 }
 
 function filesCardHtml(files, emptyText) {

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Optional, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from app import labels
 from app.enums import (
@@ -413,7 +413,9 @@ class CustomerDetailOut(CustomerOut):
 
 
 class DealIn(BaseModel):
-    """新建商机。``amount`` 必填，deposit/balance 先只写不用，默认 0。"""
+    """新建商机。``amount`` 是报价金额；定金/尾款只能在生成订单时填写。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     customer_id: int = Field(gt=0)
     product_id: int | None = Field(default=None, gt=0)
@@ -421,8 +423,6 @@ class DealIn(BaseModel):
     model: OptionalText = Field(default=None, max_length=64)
     spec: SpecText = Field(default=None, max_length=200)
     amount: float = Field(ge=0)
-    deposit: float = Field(default=0, ge=0)
-    balance: float = Field(default=0, ge=0)
     stage: str = Field(default=DEFAULT_STAGE, max_length=32)
     #: 手动/电动 —— 必填由路由层给业务错误码（drive_type_required），不在 pydantic 层拦
     drive_type: OptionalText = Field(default=None, max_length=32)
@@ -432,13 +432,13 @@ class DealIn(BaseModel):
 class DealUpdate(BaseModel):
     """改商机：只改传来的字段。``amount``/``stage`` 显式传 null 会在路由层被 400 拒绝。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     product_id: int | None = Field(default=None, gt=0)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
     spec: SpecText = Field(default=None, max_length=200)
     amount: float | None = Field(default=None, ge=0)
-    deposit: float | None = Field(default=None, ge=0)
-    balance: float | None = Field(default=None, ge=0)
     stage: str | None = Field(default=None, max_length=32)
     drive_type: str | None = Field(default=None, max_length=32)
     note: OptionalText = Field(default=None, max_length=500)

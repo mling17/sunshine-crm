@@ -254,80 +254,76 @@ function viewCustomerDetail(root, rawId) {
         api('/follow-ups?customer_id=' + id + '&include_system=true')
     ]).then(function (all) {
         var c = all[0];
-        var allRecords = all[1] || [];
-        var followups = allRecords.filter(function (r) {
-            return !r.kind || r.kind === 'follow';
-        });
-        var archiveRecords = allRecords.filter(function (r) {
-            return r.kind && r.kind !== 'follow' &&
-                r.object_type === 'customer' && String(r.object_id) === String(c.id);
-        }).map(function (r) {
-            return {
-                at: r.created_at,
-                type: r.kind === 'update' ? 'change' : r.kind,
-                content: r.content || '',
-                files: []
-            };
-        });
+        if (!c) {
+            root.innerHTML = '<div class="card">客户不存在，<a href="#/customers">回客户列表</a></div>';
+            return;
+        }
+        var records = followupRecordsFromApi(all[1] || []);
         var deals = c.deals || [];
 
         var dealHtml = deals.length
             ? '<div id=\"dealList\">' + deals.map(function (d) {
                 var item = dealItemHtml(d);
-                // 详情页的商机卡片里额外给一个“记跟进”入口（带 deal_id）
                 return item.replace('<div class=\"item-side\">',
-                    '<div class=\"item-side\"><a class=\"btn btn-sm\" href=\"#/followups?customer=' + c.id +
-                    '&deal=' + d.id + '\">记跟进</a>');
+                    '<div class=\"item-side\"><a class=\"btn btn-sm\" href=\"#/deals/' + d.id +
+                    '\">查看商机</a>');
             }).join('') + '</div>'
             : '<p class=\"empty\">还没有商机</p>';
 
-        var fuHtml = followups.length
-            ? followups.map(function (f) { return followupItemHtml(f, { withDelete: true }); }).join('')
-            : '<p class=\"empty\">还没有跟进记录</p>';
-
-        root.innerHTML =
-            '<div class=\"card\">' +
-            '<div class=\"card-head\">' +
-            '<h2><a href=\"#/customers\">‹ 客户</a> ' + esc(c.name) + '</h2>' +
-            '<div>' +
-            '<a class=\"btn btn-sm\" href=\"#/followups?customer=' + c.id + '\">记跟进</a> ' +
-            '<button type=\"button\" class=\"btn btn-sm\" id=\"toggleEditCustomer\">编辑客户</button> ' +
-            '<button type=\"button\" class=\"btn btn-sm btn-primary\" id=\"custToDeal\">转商机</button> ' +
-            '<button type=\"button\" class=\"btn btn-sm btn-danger\" id=\"deleteCustomer\">删除</button>' +
-            '</div>' +
-            '</div>' +
-            '<div class=\"tags\">' + (c.tags || []).map(function (t) { return '<span class=\"tag\">' + esc(t) + '</span>'; }).join('') + '</div>' +
-            '<div class=\"item-sub\" style=\"margin-top:8px\">' +
-            '类型：' + esc(dictLabel('customer_type', c.customer_type, c.customer_type || '—')) + '<br>' +
-            '电话：' + esc(c.phone || '—') + '<br>' +
-            '微信：' + esc(c.wechat || '—') + '<br>' +
-            '地区：' + esc(c.location || '—') + '<br>' +
-            '公司名：' + esc(c.company_name || '—') + '<br>' +
-            '联系人：' + esc(c.primary_contact_name || '—') +
-                (c.primary_contact_phone ? ' · ' + esc(c.primary_contact_phone) : '') +
-                (c.primary_contact_wechat ? ' · 微信 ' + esc(c.primary_contact_wechat) : '') + '<br>' +
-            '来源：' + (c.source ? esc(SOURCE_LABELS[c.source] || c.source) : '—') + '<br>' +
-            '意向：' + (c.intent_level ? esc(INTENT_LABELS[c.intent_level] || c.intent_level) : '—') + '<br>' +
-            '备注：' + esc(c.note || '—') + '<br>' +
-            '<span class=\"muted small\">建档 ' + fmtDateTime(c.created_at) + ' · 最近更新 ' + fmtDateTime(c.updated_at) + '</span>' +
-            '</div>' +
-            '</div>' +
-            '<div class=\"card\">' +
-            '<div class=\"card-head\"><h2>档案履历（' + archiveRecords.length + '）</h2>' +
-            '<span class=\"small muted\">编辑客户后的字段变更会自动留痕</span></div>' +
-            (archiveRecords.length ? timelineHtml(archiveRecords)
-                : '<p class=\"empty\">还没有档案变更记录</p>') +
-            '</div>' +
+        var dealsCard =
             '<div class=\"card\">' +
             '<div class=\"card-head\"><h2>商机（' + deals.length + '）</h2>' +
             '<span class=\"small muted\">商机由本客户「转商机」产生</span></div>' +
             dealHtml +
-            '</div>' +
-            '<div class=\"card\">' +
-            '<div class=\"card-head\"><h2>跟进记录（' + followups.length + '）</h2>' +
-            '<a class=\"btn btn-sm\" href=\"#/followups?customer=' + c.id + '\">+ 记一条</a></div>' +
-            fuHtml +
             '</div>';
+
+        var contactParts = [c.primary_contact_name, c.primary_contact_phone,
+            c.primary_contact_wechat ? '微信 ' + c.primary_contact_wechat : ''].filter(Boolean);
+        var actions =
+            '<button type=\"button\" class=\"btn btn-sm\" id=\"toggleEditCustomer\">编辑客户</button>' +
+            '<button type=\"button\" class=\"btn btn-sm btn-primary\" id=\"custToDeal\">转商机</button>' +
+            '<button type=\"button\" class=\"btn btn-sm btn-danger\" id=\"deleteCustomer\">删除</button>';
+
+        renderEntityFollowPage(root, {
+            backHash: '#/customers',
+            backLabel: '客户',
+            title: c.name,
+            titleHtml:
+                '<div class=\"entity-title-main\"><h2><a class=\"crumb\" href=\"#/customers\">‹ 客户</a> / ' +
+                esc(c.name) + '</h2><div class=\"detail-title-tags\">' +
+                (c.tags || []).map(function (t) { return '<span class=\"tag\">' + esc(t) + '</span>'; }).join('') +
+                '</div></div>',
+            badgesHtml: '<span class=\"badge muted\">' +
+                esc(dictLabel('customer_type', c.customer_type, c.customer_type || '—')) + '</span>',
+            infoHtml: infoGrid([
+                ['电话', c.phone || '—'],
+                ['微信', c.wechat || '—'],
+                ['地区', c.location || '—'],
+                ['公司名', c.company_name || '—'],
+                ['联系人', contactParts.join(' · ') || '—'],
+                ['来源', c.source ? (SOURCE_LABELS[c.source] || c.source) : '—'],
+                ['意向', c.intent_level ? (INTENT_LABELS[c.intent_level] || c.intent_level) : '—'],
+                ['备注', c.note || '—'],
+                ['时间', '建档 ' + fmtDateTime(c.created_at) + ' · 最近更新 ' + fmtDateTime(c.updated_at)]
+            ]),
+            actionsHtml: actions,
+            placeholder: '这次沟通聊了什么？客户是什么态度？下一步做什么？',
+            records: records,
+            extraHtml: filesCardHtml(collectFiles(records), '这个客户还没有上传图纸 / 报价单 / 现场照片') + dealsCard,
+            onSubmit: function (p) {
+                var fd = new FormData();
+                fd.append('object_type', 'customer');
+                fd.append('object_id', String(c.id));
+                fd.append('content', p.content);
+                fd.append('method', p.method || 'wechat');
+                if (p.next_date) { fd.append('next_date', p.next_date); }
+                (p.files || []).forEach(function (f) { if (f.file) { fd.append('files', f.file); } });
+                api('/follow-ups', { method: 'POST', body: fd }).then(function () {
+                    toast('已记录跟进');
+                    return render();
+                }).catch(function (err) { toast(err.message, true); });
+            }
+        });
 
         /* 编辑客户 → 弹层（与列表页同一套逻辑） */
         $('#toggleEditCustomer', root).addEventListener('click', function () {
@@ -348,14 +344,6 @@ function viewCustomerDetail(root, rawId) {
             }).catch(function (err) { toast(err.message, true); });
         });
 
-        /* 新增商机 */
-        $$('button[data-del-followup]', root).forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                if (!window.confirm('删除这条跟进？照片也会一并无法查看（文件留存于备份）。')) { return; }
-                api('/follow-ups/' + btn.getAttribute('data-del-followup'), { method: 'DELETE' })
-                    .then(function () { toast('已删除'); return render(); })
-                    .catch(function (err) { toast(err.message, true); });
-            });
-        });
+        bindDealStageSelects(root);
     });
 }

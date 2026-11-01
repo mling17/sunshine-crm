@@ -97,7 +97,7 @@ ORDER_STATUS_ORDER = (
 
 ORDER_STATUS_LABELS: Dict[str, str] = {
     "pending_payment": "待支付",
-    "deposit_paid": "已支付押金",
+    "deposit_paid": "已支付定金",
     "producing": "生产中",
     "balance_paid": "已支付尾款",
     "ready_to_ship": "待发货",

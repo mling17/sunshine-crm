@@ -36,8 +36,6 @@ class DealsTest(ApiTestCase):
             model="TM-300",
             spec="跨度 4m × 3m",
             amount=12000.0,
-            deposit=3000.0,
-            balance=9000.0,
             stage="quote",
         )
         self.assertEqual(deal["product_type"], "天幕")
@@ -45,9 +43,23 @@ class DealsTest(ApiTestCase):
         self.assertEqual(deal["spec"], "跨度 4m * 3m")
         self.assertEqual(deal["stage"], "quote")
         self.assertEqual(deal["stage_label"], "报价")
-        self.assertEqual(deal["deposit"], 3000.0)
-        self.assertEqual(deal["balance"], 9000.0)
+        self.assertEqual(deal["deposit"], 0.0)
+        self.assertEqual(deal["balance"], 0.0)
         self.assertIsNone(deal["closed_at"], "只有 won 才写 closed_at")
+
+    def test_deposit_and_balance_cannot_be_set_on_deal(self):
+        c = self.create_customer(name="张伟")
+        resp = self.client.post(
+            "/api/crm/deals",
+            json={
+                "customer_id": c["id"],
+                "amount": 12000.0,
+                "deposit": 3000.0,
+                "balance": 9000.0,
+            },
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertIn("deposit", resp.text)
 
     def test_create_for_unknown_customer_404(self):
         resp = self.client.post("/api/crm/deals", json={"customer_id": 9999, "amount": 100.0})

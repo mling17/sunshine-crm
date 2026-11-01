@@ -10,13 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class EditHistoryUiTest(unittest.TestCase):
-    def test_customer_detail_loads_and_renders_archive_history(self):
+    def test_customer_detail_loads_and_renders_shared_followup_history(self):
         view = (ROOT / "static/views/customers.js").read_text(encoding="utf-8")
         shared = (ROOT / "static/views/shared.js").read_text(encoding="utf-8")
 
         self.assertIn("include_system=true", view)
-        self.assertIn("档案履历", view)
-        self.assertIn("timelineHtml(archiveRecords)", view)
+        self.assertIn("followupRecordsFromApi(", view)
+        self.assertIn("renderEntityFollowPage(root", view)
         self.assertIn("change: { label: '编辑'", shared)
 
 

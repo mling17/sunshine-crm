@@ -366,25 +366,7 @@ function viewLeadDetail(root, rawId) {
             return;
         }
 
-        /* 后端记录 → 时间线记录（kind → RECORD_META 的 type） */
-        var TYPE_MAP = {
-            follow: 'follow', create: 'create', change: 'change', update: 'change',
-            stage: 'stage', order: 'order', aftersale: 'aftersale', pay: 'pay', ship: 'ship'
-        };
-        var records = raw.map(function (r) {
-            var photos = (r.photos || []).map(function (ph) {
-                var url = '/crm' + ph.url;
-                return { name: ph.file_name || '照片', url: url, isImage: /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(ph.file_name || '') };
-            });
-            return {
-                at: r.created_at,
-                type: TYPE_MAP[r.kind] || 'follow',
-                content: r.content || '',
-                next_date: r.next_date,
-                method: r.method,
-                files: photos
-            };
-        });
+        var records = followupRecordsFromApi(raw);
 
         var name = l.name || (l.lead_type === 'company' ? l.company_name : '') || ('线索 #' + l.id);
         var converted = l.status === 'converted';

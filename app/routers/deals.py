@@ -3,7 +3,7 @@
 职责边界：
 - 这里只做「取参 + 校验 + 错误映射 + 事务编排」；
 - 订单号生成走 ``app.services.next_no``，履历写入走 ``app.timeline.add_entry``；
-- 金额一律 ``round(x, 2)``；"押金 + 尾款 = 订单金额" 是服务端强制（Q-D 决议）。
+- 金额一律 ``round(x, 2)``；订单总额只取商机报价，定金 + 尾款 = 报价金额。
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ STAGES = DEAL_STAGE_ORDER
 _CHANGE_TRACKED = (
     "product_id", "product_code_snapshot", "product_name_snapshot",
     "product_config_snapshot", "product_type", "model", "spec", "drive_type",
-    "amount", "deposit", "balance", "note",
+    "amount", "note",
 )
 _UPDATABLE = _CHANGE_TRACKED + ("stage",)
 #: 锁定（已生成订单）后唯一允许改的字段
@@ -250,8 +250,8 @@ def create_deal(payload: DealIn) -> DealOut:
                 model,
                 spec,
                 amount,
-                round(float(payload.deposit or 0), 2),
-                round(float(payload.balance or 0), 2),
+                0,
+                0,
                 now_iso(),
                 now_iso(),
                 drive,
@@ -365,7 +365,7 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
                 updates["model"] = _model(updates["model"])
         if "amount" in updates and updates["amount"] is None:
             raise ApiError(status_code=400, code="amount_required", message="金额不能为空")
-        for key in ("amount", "deposit", "balance"):
+        for key in ("amount",):
             if updates.get(key) is not None:
                 updates[key] = round(float(updates[key]), 2)
 
@@ -434,19 +434,20 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
             status_code=409, code="deal_not_won", message="先把阶段推进到「成交」，再生成订单"
         )
 
-    amount = round(float(payload.get("amount") or deal["amount"] or 0), 2)
+    # 订单总额必须沿用商机报价，不允许在生成订单时另填一个金额。
+    amount = round(float(deal["amount"] or 0), 2)
     if amount <= 0:
         raise ApiError(status_code=400, code="invalid_amount", message="订单金额必须大于 0")
 
     raw_deposit = payload.get("deposit")
     if raw_deposit is None:
-        raise ApiError(status_code=400, code="deposit_required", message="请填写押金金额")
+        raise ApiError(status_code=400, code="deposit_required", message="请填写定金金额")
     deposit = round(float(raw_deposit), 2)
     if deposit < 0 or deposit > amount:
         raise ApiError(
             status_code=400,
             code="invalid_deposit",
-            message=f"押金必须在 0 到订单金额（¥{amount:,.2f}）之间",
+            message=f"定金必须在 0 到报价金额（¥{amount:,.2f}）之间",
         )
     # Q-D：尾款服务端强制算，不采信前端
     balance = round(amount - deposit, 2)
@@ -583,7 +584,7 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
         customer_id=deal["customer_id"],
         deal_id=deal_id,
         content=(
-            f"生成订单 {order_no}，押金 ¥{deposit:,.2f}，尾款 ¥{balance:,.2f}，物流 {logistics_text}"
+            f"生成订单 {order_no}，定金 ¥{deposit:,.2f}，尾款 ¥{balance:,.2f}，物流 {logistics_text}"
         ),
         detail={"order_id": order_id, "order_no": order_no, "deposit": deposit, "balance": balance},
     )
@@ -592,7 +593,7 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
         " created_at) VALUES (?, NULL, 'pending_payment', 'order', ?, ?, ?)",
         (
             order_id,
-            f"生成订单 {order_no}：总额 ¥{amount:,.2f}，押金 ¥{deposit:,.2f}，尾款 ¥{balance:,.2f}",
+            f"生成订单 {order_no}：报价 ¥{amount:,.2f}，定金 ¥{deposit:,.2f}，尾款 ¥{balance:,.2f}",
             '{"order_no": "%s"}' % order_no,
             now,
         ),
@@ -623,9 +624,9 @@ def create_order(deal_id: int, payload: dict) -> dict:
 
 @router.post("/deals/{deal_id}/win", response_model=dict)
 def win_deal(deal_id: int) -> dict:
-    """兼容旧前端：无参成交并生成订单（押金=全额、自提、运费 0）。
+    """兼容旧前端：无参成交并生成订单（定金=全额、自提、运费 0）。
 
-    定稿后的正路是 ``POST /deals/{id}/orders``（带押金 / 物流 / 收货信息）。
+    定稿后的正路是 ``POST /deals/{id}/orders``（带定金 / 物流 / 收货信息）。
     """
     with db_conn() as conn:
         deal = _deal_row(conn, deal_id)

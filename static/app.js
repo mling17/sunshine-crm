@@ -37,7 +37,7 @@
   /* 订单状态：与后端 enums.py::ORDER_STATUS_LABELS 一致（顺序=状态机推进顺序） */
   var ORDER_STATUS = [
     ['pending_payment', '待支付'],
-    ['deposit_paid', '已付押金'],
+    ['deposit_paid', '已付定金'],
     ['producing', '生产中'],
     ['balance_paid', '已付尾款'],
     ['ready_to_ship', '待发货'],

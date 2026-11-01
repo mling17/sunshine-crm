@@ -68,7 +68,7 @@ function viewDeals(root, route) {
             '</div>' +
             '<div class="card"><div class="table-wrap"><table><thead><tr>' +
             '<th>客户</th><th>产品</th><th>型号</th><th>手动/电动</th><th>尺寸</th>' +
-            '<th style="text-align:right">金额</th><th>阶段</th><th>更新时间</th><th>操作</th>' +
+            '<th style="text-align:right">报价金额</th><th>阶段</th><th>更新时间</th><th>操作</th>' +
             '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
 
         $('#dealTabs', root).addEventListener('click', function (ev) {
@@ -106,11 +106,8 @@ function viewDealDetail(root, rawId) {
         }
 
         var customerName = index[d.customer_id] || ('客户 #' + d.customer_id);
-        var recordsHtml = records.length
-            ? records.map(function (it) {
-                return followupItemHtml(it, { withDelete: false, showCustomer: false });
-            }).join('')
-            : '<p class="empty">还没有跟进记录，点右上「记跟进」写一条</p>';
+        var timelineRecords = followupRecordsFromApi(records);
+        var canFollow = !d.order_id && d.stage !== 'won' && d.stage !== 'lost';
 
         var orderLink = d.order_id
             ? '<a class="badge ok" href="#/orders/' + d.order_id + '">已生成订单 ›</a>' : '';
@@ -133,36 +130,56 @@ function viewDealDetail(root, rawId) {
                 (d.stage === 'won' ? '已成交，可以生成订单' : '阶段推进到「成交」后才能生成订单') + '</span>';
         }
 
-        root.innerHTML =
-            '<div class="card">' +
-            '<div class="card-head">' +
-            '<h2><a href="#/deals">‹ 商机</a> ' + esc(customerName) + ' · ' + esc(dealProductText(d)) + '</h2>' +
-            '<div>' + dealStageBadge(d.stage, d.stage_label) + ' ' + orderLink +
-            ' <a class="btn btn-sm" href="#/followups?object=deal&id=' + d.id + '">+ 记跟进</a></div>' +
-            '</div>' +
-            '<div class="item-sub" style="line-height:1.9">' +
-            '客户：<a href="#/customers/' + d.customer_id + '">' + esc(customerName) + '</a><br>' +
-            '关联产品：' + (d.product_id
-                ? '<a href="#/products/' + d.product_id + '">' + esc(d.product_name_snapshot || ('产品 #' + d.product_id)) + '</a>'
-                : '<span class="muted">未关联产品</span>') +
-            '　编码：' + esc(d.product_code_snapshot || d.model || '—') + '<br>' +
-            (d.product_config_snapshot ? '产品配置：' + esc(d.product_config_snapshot) + '<br>' : '') +
-            '产品类型：' + esc(d.product_type || '—') + '　型号：' + esc(d.model || '—') + '<br>' +
-            '手动/电动：' + driveBadge(d) + '　尺寸：' + esc(d.spec || '—') + '<br>' +
-            '金额：' + money(d.amount) + '　定金：' + money(d.deposit) + '　尾款：' + money(d.balance) + '<br>' +
-            '阶段：' + dealStageBadge(d.stage, d.stage_label) + '<br>' +
-            (d.note ? '备注：' + esc(d.note) + '<br>' : '') +
-            '<span class="muted small">创建 ' + fmtDateTime(d.created_at) +
-            ' · 更新 ' + fmtDateTime(d.updated_at) +
-            (d.closed_at ? ' · 成交 ' + fmtDateTime(d.closed_at) : '') + '</span>' +
-            '</div>' +
-            '<div class="form-actions" style="margin-top:10px">' + actionHtml + '</div>' +
-            '</div>' +
-            '<div class="card">' +
-            '<div class="card-head"><h2>跟进履历（' + records.length + '）</h2>' +
-            '<a class="btn btn-sm" href="#/followups?object=deal&id=' + d.id + '">+ 记一条</a></div>' +
-            recordsHtml +
-            '</div>';
+        var productHtml = d.product_id
+            ? '<a href="#/products/' + d.product_id + '">' +
+              esc(d.product_name_snapshot || ('产品 #' + d.product_id)) + '</a>'
+            : '<span class="muted">未关联产品</span>';
+
+        renderEntityFollowPage(root, {
+            backHash: '#/deals',
+            backLabel: '商机',
+            title: customerName + ' · ' + dealProductText(d),
+            titleHtml:
+                '<div class="entity-title-main"><h2><a class="crumb" href="#/deals">‹ 商机</a> / ' +
+                esc(customerName) + '</h2><div class="small muted">' + esc(dealProductText(d)) + '</div></div>',
+            badgesHtml: dealStageBadge(d.stage, d.stage_label) + ' ' + orderLink,
+            infoHtml: infoGrid([
+                ['客户', '<a href="#/customers/' + d.customer_id + '">' + esc(customerName) + '</a>', true],
+                ['关联产品', productHtml, true],
+                ['编码', d.product_code_snapshot || d.model || '—'],
+                ['产品类型', d.product_type || '—'],
+                ['型号', d.model || '—'],
+                ['手动/电动', driveBadge(d), true],
+                ['尺寸/洞口尺寸', d.spec || '—'],
+                ['报价金额', money(d.amount)],
+                ['阶段', dealStageBadge(d.stage, d.stage_label), true],
+                ['产品配置', d.product_config_snapshot || '—'],
+                ['备注', d.note || '—'],
+                ['时间', '创建 ' + fmtDateTime(d.created_at) + ' · 更新 ' + fmtDateTime(d.updated_at) +
+                    (d.closed_at ? ' · 成交 ' + fmtDateTime(d.closed_at) : '')]
+            ]),
+            actionsHtml: actionHtml,
+            placeholder: '这次沟通聊了什么？客户对报价和参数是什么态度？下一步做什么？',
+            canFollow: canFollow,
+            lockedText: d.order_id
+                ? '商机已生成订单，请到订单中继续处理'
+                : (d.stage === 'lost' ? '已流失的商机不能再添加跟进' : '已成交商机不能再添加跟进'),
+            records: timelineRecords,
+            extraHtml: filesCardHtml(collectFiles(timelineRecords), '这个商机还没有上传图纸 / 报价单 / 现场照片'),
+            onSubmit: function (p) {
+                var fd = new FormData();
+                fd.append('object_type', 'deal');
+                fd.append('object_id', String(d.id));
+                fd.append('content', p.content);
+                fd.append('method', p.method || 'wechat');
+                if (p.next_date) { fd.append('next_date', p.next_date); }
+                (p.files || []).forEach(function (f) { if (f.file) { fd.append('files', f.file); } });
+                api('/follow-ups', { method: 'POST', body: fd }).then(function () {
+                    toast('已记录跟进');
+                    return render();
+                }).catch(function (err) { toast(err.message, true); });
+            }
+        });
 
         var editBtn = $('#dealEdit', root);
         if (editBtn) {
@@ -226,16 +243,12 @@ function openDealEdit(deal, products, done) {
         '<div class="field"><label>尺寸/洞口尺寸</label>' +
         '<input name="spec" maxlength="200" placeholder="如 1200*2400" value="' + esc(deal.spec || '') + '"></div>' +
         '</div>' +
-        '<div class="row-3">' +
+        '<div class="row-2">' +
         '<div class="field"><label>报价金额 *</label>' +
         '<input name="amount" type="number" min="0" step="0.01" inputmode="decimal" required value="' + (deal.amount || 0) + '"></div>' +
-        '<div class="field"><label>定金</label>' +
-        '<input name="deposit" type="number" min="0" step="0.01" inputmode="decimal" value="' + (deal.deposit || 0) + '"></div>' +
-        '<div class="field"><label>尾款</label>' +
-        '<input name="balance" type="number" min="0" step="0.01" inputmode="decimal" value="' + (deal.balance || 0) + '"></div>' +
-        '</div>' +
         '<div class="field"><label>阶段</label>' +
         '<select name="stage">' + stageOptions(deal.stage) + '</select></div>' +
+        '</div>' +
         '<div class="field"><label>备注</label>' +
         '<textarea name="note" maxlength="500">' + esc(deal.note || '') + '</textarea></div>' +
         '<div class="form-actions">' +
@@ -292,7 +305,7 @@ function openDealEdit(deal, products, done) {
         ev.preventDefault();
         var btn = form.querySelector('button[type="submit"]');
         var amount = numOrNull(form.querySelector('[name="amount"]').value);
-        if (amount === null || amount < 0) { toast('报价金额必填且 ≥0', true); return; }
+        if (amount === null || !(amount > 0)) { toast('报价金额必须大于 0', true); return; }
 
         function val(name) {
             var el = form.querySelector('[name="' + name + '"]');
@@ -305,8 +318,6 @@ function openDealEdit(deal, products, done) {
                 val('drive_type') || null,
             spec: val('spec') || null,
             amount: amount,
-            deposit: numOrNull(form.querySelector('[name="deposit"]').value) || 0,
-            balance: numOrNull(form.querySelector('[name="balance"]').value) || 0,
             stage: val('stage'),
             note: val('note') || null
         };
@@ -449,10 +460,10 @@ function viewDealNew(root, route) {
     });
 }
 
-/* ---------------- 生成订单（成交 → 建订单；收款就是押金 + 尾款两笔） ----------------
- * 定稿口径：押金由业务填，**尾款 = 订单金额 - 押金**（前端只展示，服务端强制再算一遍）；
+/* ---------------- 生成订单（成交 → 建订单；收款就是定金 + 尾款两笔） ----------------
+ * 定稿口径：订单总额固定取商机报价；定金由业务填，尾款 = 报价金额 - 定金；
  *          自提不需要收货信息，包邮/代办必须选物流公司 + 填全收货人。
- * 走 POST /deals/{id}/orders（正路），不再用 /win（那是押金=全额的兼容端点）。
+ * 走 POST /deals/{id}/orders（正路），不再用 /win（那是定金=全额的兼容端点）。
  */
 function openDealOrderModal(deal, customerName) {
     var amount0 = Number(deal.amount) || 0;
@@ -469,11 +480,11 @@ function openDealOrderModal(deal, customerName) {
         '<p class="small muted" style="margin-top:0">' +
         esc(customerName) + ' · ' + esc(dealProductText(deal)) + '　成交后商机会锁定。</p>' +
         '<div class="row-3">' +
-        '<div class="field"><label>订单金额 *</label>' +
-        '<input name="amount" type="number" min="0" step="0.01" inputmode="decimal" required value="' + amount0 + '"></div>' +
-        '<div class="field"><label>押金（第一笔）*</label>' +
+        '<div class="field"><label>报价金额（订单总额）</label>' +
+        '<input name="amount" type="number" value="' + amount0 + '" readonly title="订单总额固定取商机报价"></div>' +
+        '<div class="field"><label>定金（第一笔）*</label>' +
         '<input name="deposit" type="number" min="0" step="0.01" inputmode="decimal" required ' +
-        'placeholder="按合同填押金"></div>' +
+        'placeholder="按合同填定金"></div>' +
         '<div class="field"><label>尾款（自动算）</label>' +
         '<input name="balance" value="" disabled></div>' +
         '</div>' +
@@ -494,7 +505,7 @@ function openDealOrderModal(deal, customerName) {
         '<div class="field"><label>收货电话 *</label><input name="receiver_phone" maxlength="32" inputmode="tel"></div>' +
         '<div class="field field-wide"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
         '</div>' +
-        '<p class="small muted">收款只走两笔：先「收押金」，生产阶段再「收尾款」。押金 + 尾款 = 订单金额。</p>' +
+        '<p class="small muted">收款只走两笔：先「收定金」，生产阶段再「收尾款」。定金 + 尾款 = 报价金额。</p>' +
         '<div class="form-actions">' +
         '<button type="button" class="btn modal-cancel">取消</button>' +
         '<button type="submit" class="btn btn-primary">生成订单</button>' +
@@ -520,7 +531,6 @@ function openDealOrderModal(deal, customerName) {
         var dep = Number(depositEl.value) || 0;
         balanceEl.value = (Math.round((a - dep) * 100) / 100).toFixed(2);
     }
-    amountEl.addEventListener('input', refreshBalance);
     depositEl.addEventListener('input', refreshBalance);
     refreshBalance();
 
@@ -542,16 +552,15 @@ function openDealOrderModal(deal, customerName) {
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var btn = form.querySelector('button[type="submit"]');
-        var amount = numOrNull(amountEl.value);
+        var amount = amount0;
         var deposit = numOrNull(depositEl.value);
         var mode = modeEl.value;
-        if (amount === null || !(amount > 0)) { toast('订单金额必须大于 0', true); return; }
+        if (!(amount > 0)) { toast('商机报价金额必须大于 0', true); return; }
         if (deposit === null || deposit < 0 || deposit > amount) {
-            toast('押金必须在 0 到订单金额之间', true);
+            toast('定金必须在 0 到报价金额之间', true);
             return;
         }
         var payload = {
-            amount: amount,
             deposit: deposit,
             logistics_mode: mode,
             logistics_fee: numOrNull(form.querySelector('[name="logistics_fee"]').value) || 0

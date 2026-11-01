@@ -140,7 +140,7 @@ DICT_SEEDS = {
     ],
     "order_status": [
         {"key": "pending_payment", "label": "待支付", "sort": 1, "enabled": True, "used": 0},
-        {"key": "deposit_paid", "label": "已支付押金", "sort": 2, "enabled": True, "used": 0},
+        {"key": "deposit_paid", "label": "已支付定金", "sort": 2, "enabled": True, "used": 0},
         {"key": "producing", "label": "生产中", "sort": 3, "enabled": True, "used": 0},
         {"key": "balance_paid", "label": "已支付尾款", "sort": 4, "enabled": True, "used": 0},
         {"key": "ready_to_ship", "label": "待发货", "sort": 5, "enabled": True, "used": 0},

@@ -507,44 +507,44 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
         
         # 根据目标状态执行相应的逻辑
         if to_status == "deposit_paid":
-            # 支付押金逻辑（Q-D：必须等于应收押金，且只能收一次）
+            # 支付定金逻辑（Q-D：必须等于应收定金，且只能收一次）
             deposit = round(float(payload.get("deposit") or 0), 2)
             due = order_row["deposit_amount"]
             if float(order_row["deposit_paid"] or 0) > 0:
                 raise ApiError(
                     status_code=409,
                     code="already_paid",
-                    message="押金已经收过了",
+                    message="定金已经收过了",
                 )
             if due is None:
                 if deposit <= 0 or deposit > float(order_row["amount"] or 0):
                     raise ApiError(
                         status_code=400,
                         code="invalid_deposit",
-                        message="押金金额必须大于 0 且不超过订单总额",
+                        message="定金金额必须大于 0 且不超过订单总额",
                     )
             elif deposit != round(float(due), 2):
                 raise ApiError(
                     status_code=400,
                     code="amount_mismatch",
-                    message=f"押金应收 ¥{float(due):,.2f}，实收 ¥{deposit:,.2f}",
+                    message=f"定金应收 ¥{float(due):,.2f}，实收 ¥{deposit:,.2f}",
                 )
             
-            # 押金落库（DDL 列：deposit_paid）
+            # 定金落库（DDL 列：deposit_paid）
             conn.execute(
                 "UPDATE orders SET deposit_paid = ?, status = ?, updated_at = ? WHERE id = ?",
                 (deposit, to_status, now_iso(), order_id)
             )
             
         elif to_status == "balance_paid":
-            # 支付尾款（Q-D：押金未收齐不许收尾款；尾款必须等于应收尾款）
+            # 支付尾款（Q-D：定金未收齐不许收尾款；尾款必须等于应收尾款）
             balance = round(float(payload.get("balance") or 0), 2)
             due_deposit = order_row["deposit_amount"]
             if due_deposit is not None and round(float(order_row["deposit_paid"] or 0), 2) < round(float(due_deposit), 2):
                 raise ApiError(
                     status_code=409,
                     code="deposit_unpaid",
-                    message="押金还没收齐，不能收尾款",
+                    message="定金还没收齐，不能收尾款",
                 )
             due = order_row["balance_amount"]
             if due is None:
@@ -650,7 +650,7 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
         }.get(to_status, "stage")
         if event_type == "pay":
             money = payload.get("deposit") if to_status == "deposit_paid" else payload.get("balance")
-            note = note or f"收{'押金' if to_status == 'deposit_paid' else '尾款'} ¥{float(money or 0):,.2f}"
+            note = note or f"收{'定金' if to_status == 'deposit_paid' else '尾款'} ¥{float(money or 0):,.2f}"
             detail = _json.dumps({"amount": float(money or 0)}, ensure_ascii=False)
         elif event_type == "ship":
             note = note or f"已发货，运单号 {order_row['tracking_no'] or '—'}"

@@ -102,7 +102,7 @@ class WorkbenchTest(ApiTestCase):
 
         acts = self.dashboard()["stats"]["recent_activities"]
         self.assertIn("pay", [a["type"] for a in acts])
-        self.assertTrue(any("押金" in a["text"] for a in acts))
+        self.assertTrue(any("定金" in a["text"] for a in acts))
 
 
 class LeadDerivedTest(ApiTestCase):

@@ -3,14 +3,14 @@
  * 定稿口径：
  *   · 列表用表格 + 状态 Tab；订单由商机「生成订单」产生，页面不新建
  *   · 详情 = 信息卡（含关联商机，可点回）+ 状态进度条 + 收款 + 收货/配送 + 当前操作 + 售后单 + 状态历史
- *   · 状态推进统一走 POST /orders/{id}/transition；押金/尾款走 /pay-deposit /pay-balance（要传截图）
+ *   · 状态推进统一走 POST /orders/{id}/transition；定金/尾款走 /pay-deposit /pay-balance（要传截图）
  */
 
 var LOGISTICS_MODE_OPTIONS = [['free', '包邮'], ['agent', '代办'], ['self', '自提']];
 
 /* 下一步动作：状态 → [目标状态, 按钮文案] */
 var ORDER_NEXT_STEP = {
-    pending_payment: ['deposit_paid', '收押金'],
+    pending_payment: ['deposit_paid', '收定金'],
     deposit_paid: ['producing', '开始生产'],
     producing: ['balance_paid', '收尾款'],
     balance_paid: ['ready_to_ship', '备货完成'],
@@ -217,8 +217,8 @@ function viewOrderDetail(root, rawId) {
         } else {
             actionBtns += '<button type="button" class="btn" disabled title="订单完成后才能申请售后">添加售后</button>';
         }
-        /* 收款只有两笔：押金（待支付 → 已付押金）、尾款（生产中 → 已付尾款）。
-           入口就一个 —— 上面「下一步」按钮在对应状态就是「收押金 / 收尾款」，不再重复放快捷按钮。 */
+        /* 收款只有两笔：定金（待支付 → 已付定金）、尾款（生产中 → 已付尾款）。
+           入口就一个 —— 上面「下一步」按钮在对应状态就是「收定金 / 收尾款」，不再重复放快捷按钮。 */
 
         root.innerHTML =
             '<div class="card">' +
@@ -242,11 +242,11 @@ function viewOrderDetail(root, rawId) {
                 }
                 return '<div class="card">' +
                     '<div class="card-head"><h2>收款</h2>' +
-                    '<span class="small muted">只收两笔：押金 + 尾款，合计 ' + money(totalAmount) + '</span></div>' +
+                    '<span class="small muted">只收两笔：定金 + 尾款，合计 ' + money(totalAmount) + '</span></div>' +
                     '<div class="grid-kpi">' +
-                    '<div class="kpi"><div class="label">押金应收</div><div class="value">' + money(depositDue) + '</div>' +
+                    '<div class="kpi"><div class="label">定金应收</div><div class="value">' + money(depositDue) + '</div>' +
                     '<div class="sub">' + paidBadge(depositPaid, depositDue) + '</div></div>' +
-                    '<div class="kpi"><div class="label">押金已收</div><div class="value">' + money(depositPaid) + '</div>' +
+                    '<div class="kpi"><div class="label">定金已收</div><div class="value">' + money(depositPaid) + '</div>' +
                     '<div class="sub">第一笔</div></div>' +
                     '<div class="kpi"><div class="label">尾款应收</div><div class="value">' + money(balanceDue) + '</div>' +
                     '<div class="sub">' + paidBadge(balancePaid, balanceDue) + '</div></div>' +
@@ -377,13 +377,13 @@ function showShipModal(order) {
     document.body.appendChild(modal);
 }
 
-/* ---------------- 押金 / 尾款（要传截图） ---------------- */
+/* ---------------- 定金 / 尾款（要传截图） ---------------- */
 function showDepositPayment(order) {
-    var modal = createOrderModal('支付押金');
+    var modal = createOrderModal('支付定金');
     modal.querySelector('.modal-body').innerHTML = '<form id="depositForm" class="form-modal form-grid">' +
-        '<div class="field"><label>押金金额 *</label>' +
+        '<div class="field"><label>定金金额 *</label>' +
         '<input type="number" id="depositAmount" name="amount" min="0" step="0.01" required ' +
-        'placeholder="应收押金 ' + money(order.deposit_amount || order.amount) + '"></div>' +
+        'placeholder="应收定金 ' + money(order.deposit_amount || order.amount) + '"></div>' +
         '<div class="field"><label>备注</label><textarea name="note"></textarea></div>' +
         '<div class="field"><label>支付截图（最多 3 张）</label>' +
         '<input type="file" name="screenshots" accept="image/*" multiple></div>' +
@@ -394,8 +394,8 @@ function showDepositPayment(order) {
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var amount = parseFloat(form.querySelector('[name="amount"]').value);
-        if (isNaN(amount) || amount <= 0) { toast('请输入有效的押金金额', true); return; }
-        if (amount > Number(order.amount)) { toast('押金金额不能超过总额', true); return; }
+        if (isNaN(amount) || amount <= 0) { toast('请输入有效的定金金额', true); return; }
+        if (amount > Number(order.amount)) { toast('定金金额不能超过总额', true); return; }
         var fd = new FormData();
         fd.append('amount', String(amount));
         var note = String(form.querySelector('[name="note"]').value || '').trim();
@@ -403,7 +403,7 @@ function showDepositPayment(order) {
         var files = form.querySelector('[name="screenshots"]').files;
         for (var i = 0; i < files.length && i < 3; i++) { fd.append('screenshots', files[i]); }
         api('/orders/' + order.id + '/pay-deposit', { method: 'POST', body: fd }).then(function () {
-            toast('押金已记录');
+            toast('定金已记录');
             document.body.removeChild(modal);
             return render();
         }).catch(function (err) { toast(err.message, true); });

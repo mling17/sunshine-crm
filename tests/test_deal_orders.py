@@ -39,8 +39,6 @@ class DealOrdersTest(ApiTestCase):
             model="TM-300",
             spec="跨度 4m × 3m",
             amount=12000.0,
-            deposit=3000.0,
-            balance=9000.0,
             stage="quote",
             drive_type="manual"
         )
@@ -49,8 +47,8 @@ class DealOrdersTest(ApiTestCase):
         self.assertEqual(deal["spec"], "跨度 4m * 3m")
         self.assertEqual(deal["stage"], "quote")
         self.assertEqual(deal["stage_label"], "报价")
-        self.assertEqual(deal["deposit"], 3000.0)
-        self.assertEqual(deal["balance"], 9000.0)
+        self.assertEqual(deal["deposit"], 0.0)
+        self.assertEqual(deal["balance"], 0.0)
         self.assertIsNone(deal["closed_at"], "只有 won 才写 closed_at")
         self.assertEqual(deal["drive_type"], "manual")
 
@@ -240,7 +238,7 @@ class DealOrdersTest(ApiTestCase):
         self.assertEqual(resp.json()["stage"], "confirm")
 
     def test_update_deal_note_records_old_and_new_value(self):
-        """备注和定金也是可编辑业务字段，必须写清原值与新值。"""
+        """备注是可编辑业务字段，必须写清原值与新值。"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(
             c["id"],
@@ -251,7 +249,7 @@ class DealOrdersTest(ApiTestCase):
 
         resp = self.client.put(
             f"/api/crm/deals/{deal['id']}",
-            json={"note": "客户要求周五安装", "deposit": 300},
+            json={"note": "客户要求周五安装"},
         )
         self.assertEqual(resp.status_code, 200, resp.text)
 
@@ -259,7 +257,6 @@ class DealOrdersTest(ApiTestCase):
         change = next(item for item in data["timeline"] if item["type"] == "change")
         self.assertEqual(
             change["content"],
-            "定金由「¥0.00」改为「¥300.00」；"
             "备注由「旧备注」改为「客户要求周五安装」",
         )
         self.assertEqual(change["detail"]["note"]["from"], "旧备注")
@@ -369,6 +366,37 @@ class DealOrdersTest(ApiTestCase):
         self.assertIsNotNone(deal_data["closed_at"])
         self.assertIsNotNone(deal_data["order_id"])
         self.assertIsNotNone(deal_data["locked_at"])
+
+    def test_order_total_always_uses_deal_quote(self):
+        """生成订单时的总额固定取商机报价，不能被请求中的 amount 改写。"""
+        c = self.create_customer(name="张伟")
+        deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+
+        resp = self.client.post(
+            f"/api/crm/deals/{deal['id']}/orders",
+            json={
+                "amount": 1.0,
+                "deposit": 3600,
+                "logistics_mode": "self",
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        order = resp.json()["order"]
+        self.assertEqual(order["amount"], 12000.0)
+        self.assertEqual(order["deposit_amount"], 3600.0)
+        self.assertEqual(order["balance_amount"], 8400.0)
+
+    def test_deposit_and_balance_cannot_be_edited_on_deal(self):
+        c = self.create_customer(name="张伟")
+        deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
+        for field in ("deposit", "balance"):
+            with self.subTest(field=field):
+                resp = self.client.put(
+                    f"/api/crm/deals/{deal['id']}",
+                    json={field: 3000},
+                )
+                self.assertEqual(resp.status_code, 400, resp.text)
 
     def test_create_order_balance_calculation(self):
         """测试订单余额计算正确"""
