@@ -160,6 +160,8 @@ function quoteCardsHtml(deal, quotes) {
         if (quote.status === 'pending') {
             actions += '<button type="button" class="btn btn-sm btn-success" data-quote-confirm="' +
                 quote.id + '">客户已确认</button> ';
+            actions += '<button type="button" class="btn btn-sm" data-quote-requote="' +
+                quote.id + '">重新报价</button> ';
         }
         if (quote.order_id) {
             actions += '<a class="btn btn-sm btn-primary" href="#/orders/' + quote.order_id + '">查看订单</a> ';
@@ -302,6 +304,15 @@ function bindQuoteActions(root, deal, customerName, quotes, products) {
             btn.disabled = true;
             api('/quotes/' + btn.getAttribute('data-quote-send') + '/send', { method: 'POST' })
                 .then(function () { toast('报价单已发客户确认'); return render(); })
+                .catch(function (err) { toast(err.message, true); btn.disabled = false; });
+        });
+    });
+    $$('[data-quote-requote]', root).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!window.confirm('确认将报价单退回「报价」状态并重新修改？')) { return; }
+            btn.disabled = true;
+            api('/quotes/' + btn.getAttribute('data-quote-requote') + '/requote', { method: 'POST' })
+                .then(function () { toast('报价单已恢复为报价状态，可继续修改'); return render(); })
                 .catch(function (err) { toast(err.message, true); btn.disabled = false; });
         });
     });

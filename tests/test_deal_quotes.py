@@ -197,6 +197,48 @@ class DealQuoteTest(ApiTestCase):
         self.assertIsNotNone(detail["customer_confirmed_at"])
         self.assertTrue(detail["product_name_snapshot"])
 
+    def test_pending_quote_can_return_to_draft_for_requote(self):
+        _, deal, quote = self._quote_with_item()
+        self.assertEqual(
+            self.client.post(f"/api/crm/quotes/{quote['id']}/requote").json()["status"],
+            "draft",
+            "报价状态重复提交应保持幂等",
+        )
+
+        sent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        self.assertEqual(sent.status_code, 200, sent.text)
+        self.assertEqual(sent.json()["status"], "pending")
+
+        requoted = self.client.post(f"/api/crm/quotes/{quote['id']}/requote")
+        self.assertEqual(requoted.status_code, 200, requoted.text)
+        requoted_quote = requoted.json()
+        self.assertEqual(requoted_quote["status"], "draft")
+        self.assertEqual(requoted_quote["status_label"], "报价")
+        self.assertEqual(
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
+            "quote",
+        )
+
+        item_id = requoted_quote["items"][0]["id"]
+        changed = self.client.put(
+            f"/api/crm/quotes/items/{item_id}",
+            data={"amount": "30.00", "note": "客户要求重新核算"},
+        )
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["amount"], 30.0)
+
+        timeline = self.client.get(f"/api/crm/deals/{deal['id']}").json()["timeline"]
+        self.assertTrue(any("退回重新报价" in entry["content"] for entry in timeline))
+
+        resent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        self.assertEqual(resent.status_code, 200, resent.text)
+        confirmed = self.client.post(f"/api/crm/quotes/{quote['id']}/confirm")
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+
+        blocked = self.client.post(f"/api/crm/quotes/{quote['id']}/requote")
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertEqual(blocked.json()["code"], "quote_requote_not_allowed")
+
     def test_quote_requires_xlsx_form(self):
         _, deal = self._deal()
         quote = self.client.post(

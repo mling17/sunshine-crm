@@ -96,6 +96,7 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             "下载产品模板",
             "data-quote-confirm",
             "data-quote-send",
+            "data-quote-requote",
             "data-quote-void",
             "data-quote-delete",
             "data-quote-order",
@@ -106,6 +107,8 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         ):
             self.assertIn(marker, self.deals)
         self.assertIn("opts.followExtraHtml", self.shared)
+        self.assertIn("重新报价", self.deals)
+        self.assertIn("/requote", self.deals)
         self.assertIn("payload.quote_id", self.shared)
         self.assertIn('name="quote_id"', self.deals)
         quote_form = self.deals[

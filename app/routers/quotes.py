@@ -643,6 +643,42 @@ def send_quote_to_customer(quote_id: int) -> QuoteOut:
         return _quote_out(conn, _quote(conn, quote_id))
 
 
+@router.post("/quotes/{quote_id}/requote", response_model=QuoteOut)
+def return_quote_for_requote(quote_id: int) -> QuoteOut:
+    """把已发客户的报价单退回「报价」，恢复修改后再次发送。"""
+    with db_conn() as conn:
+        quote = _quote(conn, quote_id)
+        deal = _deal(conn, quote["deal_id"])
+        if deal["order_id"] is not None:
+            raise ApiError(409, "deal_locked", "商机已生成订单，不能重新报价")
+        if quote["status"] == "draft":
+            return _quote_out(conn, quote)
+        if quote["status"] != "pending":
+            raise ApiError(
+                409,
+                "quote_requote_not_allowed",
+                "只有「待客户确认」的报价单可以重新报价",
+            )
+        conn.execute(
+            "UPDATE deal_quotes SET status = 'draft', confirmed_at = NULL,"
+            " confirmation_note = NULL, updated_at = ? WHERE id = ?",
+            (now_iso(), quote_id),
+        )
+        add_entry(
+            conn,
+            object_type="deal",
+            object_id=quote["deal_id"],
+            kind="quote",
+            customer_id=quote["customer_id"],
+            deal_id=quote["deal_id"],
+            quote_id=quote_id,
+            content=f"报价单 {quote['quote_no']} 已退回重新报价",
+            detail={"quote_id": quote_id, "from": "pending", "to": "draft"},
+        )
+        _sync_deal_quote_status(conn, quote["deal_id"])
+        return _quote_out(conn, _quote(conn, quote_id))
+
+
 @router.post("/quotes/{quote_id}/void", response_model=QuoteOut)
 def void_quote(quote_id: int) -> QuoteOut:
     with db_conn() as conn:
