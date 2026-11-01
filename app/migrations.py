@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_012"
-SCHEMA_USER_VERSION = 12
+MIGRATION_VERSION = "v2_013"
+SCHEMA_USER_VERSION = 13
 
 
 def default_db_path() -> Path:
@@ -964,7 +964,43 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_012", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_012', datetime('now'), '下单表Sheet1识别、A1产品校验、合计金额和预览图片')"),
-    ("user_version v2_012", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 29. v2_013：报价单状态与商机展示口径 ----------
+    ("dict_deal_stage_won_label_v2_013", None,
+     "UPDATE dict_items SET label = '客户已确认', updated_at = datetime('now')"
+     " WHERE dict_code = 'deal_stage' AND key = 'won' AND label = '成交'"),
+    ("dict_deal_stage_lost_label_v2_013", None,
+     "UPDATE dict_items SET label = '作废', updated_at = datetime('now')"
+     " WHERE dict_code = 'deal_stage' AND key = 'lost' AND label IN ('流失', '作废')"),
+    ("deals.quote_stage_priority_v2_013",
+     _once("v2_013", "deals", "deal_quotes"), """
+    UPDATE deals
+    SET stage = CASE
+          WHEN EXISTS (SELECT 1 FROM deal_quotes q WHERE q.deal_id = deals.id
+                       AND q.is_delete = 0 AND q.status = 'confirmed') THEN 'won'
+          WHEN EXISTS (SELECT 1 FROM deal_quotes q WHERE q.deal_id = deals.id
+                       AND q.is_delete = 0 AND q.status = 'pending') THEN 'confirm'
+          WHEN EXISTS (SELECT 1 FROM deal_quotes q WHERE q.deal_id = deals.id
+                       AND q.is_delete = 0 AND q.status = 'draft') THEN 'quote'
+          WHEN EXISTS (SELECT 1 FROM deal_quotes q WHERE q.deal_id = deals.id
+                       AND q.is_delete = 0) THEN 'lost'
+          ELSE stage END,
+        amount = COALESCE((
+          SELECT q.amount FROM deal_quotes q WHERE q.deal_id = deals.id
+          AND q.is_delete = 0 AND q.status = 'confirmed'
+          ORDER BY q.id DESC LIMIT 1
+        ), 0),
+        closed_at = (
+          SELECT q.confirmed_at FROM deal_quotes q WHERE q.deal_id = deals.id
+          AND q.is_delete = 0 AND q.status = 'confirmed'
+          ORDER BY q.id DESC LIMIT 1
+        )
+    WHERE EXISTS (SELECT 1 FROM deal_quotes q WHERE q.deal_id = deals.id
+                  AND q.is_delete = 0)
+    """),
+    ("schema_migrations v2_013", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_013', datetime('now'), '报价单报价/待确认/客户已确认/作废状态与管理动作')"),
+    ("user_version v2_013", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 

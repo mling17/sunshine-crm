@@ -135,8 +135,8 @@ DICT_SEEDS = {
     "deal_stage": [
         {"key": "quote", "label": "报价", "sort": 1, "enabled": True, "used": 0},
         {"key": "confirm", "label": "待客户确认", "sort": 2, "enabled": True, "used": 0},
-        {"key": "won", "label": "成交", "sort": 3, "enabled": True, "used": 0},
-        {"key": "lost", "label": "流失", "sort": 4, "enabled": True, "used": 0},
+        {"key": "won", "label": "客户已确认", "sort": 3, "enabled": True, "used": 0},
+        {"key": "lost", "label": "作废", "sort": 4, "enabled": True, "used": 0},
     ],
     "order_status": [
         {"key": "pending_confirmation", "label": "待客户确认", "sort": 1, "enabled": True, "used": 0},

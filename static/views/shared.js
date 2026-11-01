@@ -448,6 +448,7 @@ function renderEntityFollowPage(root, opts) {
     (opts.infoHtml || '') +
     (opts.actionsHtml ? '<div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">' + opts.actionsHtml + '</div>' : '') +
     '</div>' +
+    (opts.beforeTimelineHtml || '') +
     '<div class="card">' +
     '<div class="card-head"><h2>跟进履历 <span class="badge muted">' + (opts.records || []).length + '</span></h2>' +
     (opts.canFollow === false

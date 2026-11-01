@@ -65,15 +65,16 @@ DEAL_STAGE_ORDER = ("quote", "confirm", "won", "lost")
 DEAL_STAGE_LABELS: Dict[str, str] = {
     "quote": "报价",
     "confirm": "待客户确认",
-    "won": "成交",
-    "lost": "流失",
+    "won": "客户已确认",
+    "lost": "作废",
 }
 
 # ---------------- 报价单状态 ----------------
-QUOTE_STATUS = Literal["draft", "confirmed", "void"]
-QUOTE_STATUS_ORDER = ("draft", "confirmed", "void")
+QUOTE_STATUS = Literal["draft", "pending", "confirmed", "void"]
+QUOTE_STATUS_ORDER = ("draft", "pending", "confirmed", "void")
 QUOTE_STATUS_LABELS: Dict[str, str] = {
-    "draft": "待客户确认",
+    "draft": "报价",
+    "pending": "待客户确认",
     "confirmed": "客户已确认",
     "void": "已作废",
 }

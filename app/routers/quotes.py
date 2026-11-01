@@ -156,6 +156,47 @@ def _sync_amount(conn, quote_id: int) -> float:
     return total
 
 
+def _sync_deal_quote_status(conn, deal_id: int) -> None:
+    """商机阶段按报价单状态汇总：已确认 > 待确认 > 报价 > 作废。"""
+    rows = conn.execute(
+        "SELECT status, amount, confirmed_at FROM deal_quotes"
+        " WHERE deal_id = ? AND is_delete = 0",
+        (deal_id,),
+    ).fetchall()
+    statuses = {row["status"] for row in rows}
+    if "confirmed" in statuses:
+        confirmed = next(row for row in rows if row["status"] == "confirmed")
+        conn.execute(
+            "UPDATE deals SET stage = 'won', closed_at = COALESCE(?, closed_at),"
+            " amount = ?, updated_at = ? WHERE id = ?",
+            (confirmed["confirmed_at"], confirmed["amount"], now_iso(), deal_id),
+        )
+    elif "pending" in statuses:
+        conn.execute(
+            "UPDATE deals SET stage = 'confirm', closed_at = NULL, amount = 0,"
+            " updated_at = ? WHERE id = ?",
+            (now_iso(), deal_id),
+        )
+    elif "draft" in statuses:
+        conn.execute(
+            "UPDATE deals SET stage = 'quote', closed_at = NULL, amount = 0,"
+            " updated_at = ? WHERE id = ?",
+            (now_iso(), deal_id),
+        )
+    elif rows:
+        conn.execute(
+            "UPDATE deals SET stage = 'lost', closed_at = NULL, amount = 0,"
+            " updated_at = ? WHERE id = ?",
+            (now_iso(), deal_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE deals SET stage = 'quote', closed_at = NULL, amount = 0,"
+            " updated_at = ? WHERE id = ?",
+            (now_iso(), deal_id),
+        )
+
+
 async def _read_xlsx(upload: UploadFile) -> tuple[str, bytes]:
     filename = Path(upload.filename or "").name
     if Path(filename).suffix.lower() != ".xlsx":
@@ -259,7 +300,9 @@ def create_quote(deal_id: int, payload: QuoteIn) -> QuoteOut:
         quote_no = next_no(
             conn, "deal_quotes", "quote_no", "QT", now_local_iso()[:8]
         )
-        title = (payload.title or "").strip() or quote_no
+        title = (payload.title or "").strip()
+        if not title:
+            raise ApiError(400, "quote_title_required", "请填写报价单名称")
         now = now_iso()
         cur = conn.execute(
             "INSERT INTO deal_quotes (quote_no, deal_id, customer_id, title, note,"
@@ -279,6 +322,7 @@ def create_quote(deal_id: int, payload: QuoteIn) -> QuoteOut:
             content=f"创建报价单 {quote_no}",
             detail={"quote_id": quote_id, "quote_no": quote_no},
         )
+        _sync_deal_quote_status(conn, deal_id)
         return _quote_out(conn, _quote(conn, quote_id))
 
 
@@ -569,6 +613,94 @@ def delete_quote_item(item_id: int) -> QuoteOut:
         return _quote_out(conn, _quote(conn, old["quote_id"]))
 
 
+@router.post("/quotes/{quote_id}/send", response_model=QuoteOut)
+def send_quote_to_customer(quote_id: int) -> QuoteOut:
+    with db_conn() as conn:
+        quote = _quote(conn, quote_id)
+        deal = _deal(conn, quote["deal_id"])
+        if deal["order_id"] is not None:
+            raise ApiError(409, "deal_locked", "商机已生成订单，不能修改报价单状态")
+        if quote["status"] != "draft":
+            raise ApiError(409, "quote_not_draft", "只有「报价」状态的报价单可以发客户确认")
+        if not _quote_items(conn, quote_id):
+            raise ApiError(409, "quote_item_required", "报价单没有产品，不能发客户确认")
+        conn.execute(
+            "UPDATE deal_quotes SET status = 'pending', updated_at = ? WHERE id = ?",
+            (now_iso(), quote_id),
+        )
+        add_entry(
+            conn,
+            object_type="deal",
+            object_id=quote["deal_id"],
+            kind="quote",
+            customer_id=quote["customer_id"],
+            deal_id=quote["deal_id"],
+            quote_id=quote_id,
+            content=f"报价单 {quote['quote_no']} 已发客户确认",
+            detail={"quote_id": quote_id, "from": "draft", "to": "pending"},
+        )
+        _sync_deal_quote_status(conn, quote["deal_id"])
+        return _quote_out(conn, _quote(conn, quote_id))
+
+
+@router.post("/quotes/{quote_id}/void", response_model=QuoteOut)
+def void_quote(quote_id: int) -> QuoteOut:
+    with db_conn() as conn:
+        quote = _quote(conn, quote_id)
+        deal = _deal(conn, quote["deal_id"])
+        if deal["order_id"] is not None:
+            raise ApiError(409, "deal_locked", "商机已生成订单，不能作废报价单")
+        if quote["status"] == "void":
+            return _quote_out(conn, quote)
+        conn.execute(
+            "UPDATE deal_quotes SET status = 'void', updated_at = ? WHERE id = ?",
+            (now_iso(), quote_id),
+        )
+        add_entry(
+            conn,
+            object_type="deal",
+            object_id=quote["deal_id"],
+            kind="quote",
+            customer_id=quote["customer_id"],
+            deal_id=quote["deal_id"],
+            quote_id=quote_id,
+            content=f"报价单 {quote['quote_no']} 已作废",
+            detail={"quote_id": quote_id, "to": "void"},
+        )
+        _sync_deal_quote_status(conn, quote["deal_id"])
+        return _quote_out(conn, _quote(conn, quote_id))
+
+
+@router.delete("/quotes/{quote_id}")
+def delete_quote(quote_id: int) -> dict:
+    with db_conn() as conn:
+        quote = _quote(conn, quote_id)
+        deal = _deal(conn, quote["deal_id"])
+        if deal["order_id"] is not None:
+            raise ApiError(409, "deal_locked", "商机已生成订单，不能删除报价单")
+        now = now_iso()
+        conn.execute(
+            "UPDATE quote_items SET is_delete = 1, updated_at = ? WHERE quote_id = ?",
+            (now, quote_id),
+        )
+        conn.execute(
+            "UPDATE deal_quotes SET is_delete = 1, updated_at = ? WHERE id = ?",
+            (now, quote_id),
+        )
+        add_entry(
+            conn,
+            object_type="deal",
+            object_id=quote["deal_id"],
+            kind="quote",
+            customer_id=quote["customer_id"],
+            deal_id=quote["deal_id"],
+            content=f"删除报价单 {quote['quote_no']}",
+            detail={"quote_id": quote_id},
+        )
+        _sync_deal_quote_status(conn, quote["deal_id"])
+    return {"ok": True}
+
+
 async def _save_confirmation_files(conn, quote_id: int, screenshots) -> list[int]:
     ids: list[int] = []
     for upload in screenshots or []:
@@ -598,7 +730,12 @@ async def confirm_quote(
     screenshots: list[UploadFile] = File(default=[]),
 ) -> QuoteOut:
     with db_conn() as conn:
-        quote, deal = _assert_editable(conn, quote_id)
+        quote = _quote(conn, quote_id)
+        deal = _deal(conn, quote["deal_id"])
+        if deal["order_id"] is not None:
+            raise ApiError(409, "deal_locked", "商机已生成订单，不能修改报价单")
+        if quote["status"] != "pending":
+            raise ApiError(409, "quote_not_pending", "先把报价单发客户确认，再记录客户已确认")
         items = _quote_items(conn, quote_id)
         if not items:
             raise ApiError(409, "quote_item_required", "报价单没有产品，不能确认")
@@ -629,11 +766,7 @@ async def confirm_quote(
             " confirmation_note = ?, updated_at = ? WHERE id = ?",
             (now, (note or "").strip() or None, now, quote_id),
         )
-        conn.execute(
-            "UPDATE deals SET stage = 'won', closed_at = COALESCE(closed_at, ?),"
-            " amount = ?, updated_at = ? WHERE id = ?",
-            (now_local_iso(), amount, now, deal["id"]),
-        )
+        _sync_deal_quote_status(conn, deal["id"])
         add_entry(
             conn,
             object_type="deal",

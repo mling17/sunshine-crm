@@ -149,6 +149,14 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(blocked.status_code, 409, blocked.text)
         self.assertEqual(blocked.json()["code"], "quote_not_confirmed")
 
+        sent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        self.assertEqual(sent.status_code, 200, sent.text)
+        self.assertEqual(sent.json()["status"], "pending")
+        self.assertEqual(
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
+            "confirm",
+        )
+
         confirmed = self.client.post(
             f"/api/crm/quotes/{quote['id']}/confirm",
             data={"note": "客户已微信确认报价单"},
@@ -239,6 +247,64 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(changed_quote["items"][0]["amount"], 88.88)
         self.assertEqual(changed_quote["items"][0]["recognized_total"], 20.0)
         self.assertTrue(changed_quote["items"][0]["form_preview_url"])
+
+    def test_quote_priority_void_and_delete_refresh_deal_status(self):
+        _, deal, quote = self._quote_with_item()
+        second = self.client.post(
+            f"/api/crm/deals/{deal['id']}/quotes",
+            json={"title": "备选报价单"},
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        second = second.json()
+        self.assertEqual(
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
+            "quote",
+        )
+
+        sent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        self.assertEqual(sent.status_code, 200, sent.text)
+        self.assertEqual(
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
+            "confirm",
+        )
+
+        confirmed = self.client.post(f"/api/crm/quotes/{quote['id']}/confirm")
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertEqual(
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
+            "won",
+        )
+
+        voided = self.client.post(f"/api/crm/quotes/{second['id']}/void")
+        self.assertEqual(voided.status_code, 200, voided.text)
+        self.assertEqual(voided.json()["status"], "void")
+        self.assertEqual(
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
+            "won",
+        )
+
+        voided_confirmed = self.client.post(f"/api/crm/quotes/{quote['id']}/void")
+        self.assertEqual(voided_confirmed.status_code, 200, voided_confirmed.text)
+        self.assertEqual(
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
+            "lost",
+        )
+
+        removed = self.client.delete(f"/api/crm/quotes/{second['id']}")
+        self.assertEqual(removed.status_code, 200, removed.text)
+        removed_confirmed = self.client.delete(f"/api/crm/quotes/{quote['id']}")
+        self.assertEqual(removed_confirmed.status_code, 200, removed_confirmed.text)
+        deal_after = self.client.get(f"/api/crm/deals/{deal['id']}").json()
+        self.assertEqual(deal_after["stage"], "quote")
+        self.assertEqual(deal_after["amount"], 0.0)
+
+    def test_quote_name_is_required(self):
+        _, deal = self._deal()
+        response = self.client.post(
+            f"/api/crm/deals/{deal['id']}/quotes", json={"title": "  "}
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(response.json()["code"], "quote_title_required")
 
 
 if __name__ == "__main__":

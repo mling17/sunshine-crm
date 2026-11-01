@@ -436,6 +436,45 @@
   border-color: #c82333;
 }
 
+.btn-success {
+  background: #157a55;
+  border-color: #157a55;
+  color: #fff;
+}
+.btn-success:hover { background: #0f6545; border-color: #0f6545; }
+.btn-warning {
+  background: #b66a12;
+  border-color: #b66a12;
+  color: #fff;
+}
+.btn-warning:hover { background: #97550a; border-color: #97550a; }
+.btn-outline-danger {
+  background: #fff;
+  border-color: #bd3c4c;
+  color: #a52a3a;
+}
+.btn-outline-danger:hover { background: #fff3f5; border-color: #9b2030; }
+
+.quote-stack { margin-top: 16px; }
+.quote-card {
+  margin: 12px 0;
+  padding: 16px;
+  border: 1px solid var(--line, #dfe6ef);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(30, 50, 80, .06);
+}
+.deal-note-under-quotes {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f5f8fc;
+  color: #536174;
+}
+.deal-note-under-quotes b { color: #1d2939; white-space: nowrap; }
+
 /* 报价单 Excel 预览：保留表格密度，内容在卡片内滚动 */
 .quote-form-sheet {
   margin-top: 10px;
@@ -1977,12 +2016,15 @@ body {
   border-color: var(--accent-strong);
   background: linear-gradient(180deg, #2868e8, var(--accent-strong));
 }
-.btn:not(.btn-primary):not(.btn-danger) {
+.btn:not(.btn-primary):not(.btn-danger):not(.btn-success):not(.btn-warning):not(.btn-outline-danger) {
   border-color: var(--line);
   background: #fff;
   color: #334155;
 }
-.btn:not(.btn-primary):not(.btn-danger):hover { border-color: #b8c8dd; background: #f8faff; }
+.btn:not(.btn-primary):not(.btn-danger):not(.btn-success):not(.btn-warning):not(.btn-outline-danger):hover {
+  border-color: #b8c8dd;
+  background: #f8faff;
+}
 .btn-sm { min-height: 30px; padding: 5px 10px; font-size: 12px; border-radius: 8px; }
 .btn-link { color: var(--accent); font-weight: 600; }
 
@@ -2024,6 +2066,7 @@ table.data-table a:hover { text-decoration: underline; }
 .badge.warn { background: #fff5e8; color: #a85c06; border-color: #f7e2c7; }
 .badge.danger { background: #fff0f0; color: #c73838; border-color: #f8dada; }
 .badge.muted { background: #f2f5f9; color: #687386; border-color: #e7ecf3; }
+.badge.quote { background: #edf4ff; color: #285a99; border-color: #d8e7fb; }
 
 .pager {
   margin-top: 14px;

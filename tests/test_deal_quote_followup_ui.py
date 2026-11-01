@@ -17,6 +17,7 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.customers = (views / "customers.js").read_text(encoding="utf-8")
         self.deals = (views / "deals.js").read_text(encoding="utf-8")
         self.orders = (views / "orders.js").read_text(encoding="utf-8")
+        self.css = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
 
     def test_leads_customers_and_deals_share_followup_timeline_adapter(self):
         self.assertIn("function followupRecordsFromApi(records)", self.shared)
@@ -94,7 +95,12 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             "quote-form-thumbnail",
             "下载产品模板",
             "data-quote-confirm",
+            "data-quote-send",
+            "data-quote-void",
+            "data-quote-delete",
             "data-quote-order",
+            "quote-card",
+            "deal-note-under-quotes",
             "/quotes/items/",
         ):
             self.assertIn(marker, self.deals)
@@ -106,6 +112,29 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             self.deals.index("function openQuoteConfirmModal")
         ]
         self.assertNotIn("识别依据", quote_form)
+
+    def test_deal_page_uses_quote_cards_and_priority_actions(self):
+        detail = self.deals[
+            self.deals.index("function viewDealDetail"):
+            self.deals.index("function openDealNoteEdit")
+        ]
+        self.assertNotIn("infoHtml: infoGrid([", detail)
+        self.assertIn("beforeTimelineHtml: quoteCardsHtml", detail)
+        self.assertLess(detail.index("headerCreateQuote"), detail.index("id=\"dealEdit\""))
+        self.assertIn("报价单名称 *", self.deals)
+
+    def test_quote_action_colors_are_not_overridden_by_neutral_buttons(self):
+        neutral = (
+            ".btn:not(.btn-primary):not(.btn-danger):not(.btn-success)"
+            ":not(.btn-warning):not(.btn-outline-danger)"
+        )
+        for marker in (
+            ".btn-success {",
+            ".btn-warning {",
+            ".btn-outline-danger {",
+            neutral,
+        ):
+            self.assertIn(marker, self.css)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,8 @@
 
 /* 阶段徽标：成交绿、流失红、其余黄 */
 function dealStageBadge(stage, label) {
-    var cls = stage === 'won' ? 'ok' : (stage === 'lost' ? 'danger' : 'warn');
+    var cls = stage === 'won' ? 'ok' : (stage === 'lost' ? 'muted' :
+        (stage === 'confirm' ? 'warn' : 'quote'));
     return '<span class="badge ' + cls + '">' + esc(label || STAGE_LABEL[stage] || stage || '—') + '</span>';
 }
 
@@ -80,7 +81,8 @@ function dealItemsCardHtml(items, editable, total) {
 }
 
 function quoteStatusBadge(quote) {
-    var cls = quote.status === 'confirmed' ? 'ok' : (quote.status === 'void' ? 'muted' : 'warn');
+    var cls = quote.status === 'confirmed' ? 'ok' : (quote.status === 'void' ? 'muted' :
+        (quote.status === 'pending' ? 'warn' : 'quote'));
     return '<span class="badge ' + cls + '">' +
         esc(quote.status_label || quote.status) + '</span>';
 }
@@ -139,9 +141,9 @@ function quoteItemHtml(item, editable) {
         '</div></div>';
 }
 
-function quoteCardsHtml(deal, quotes, canCreateQuote) {
+function quoteCardsHtml(deal, quotes) {
     var body = (quotes || []).map(function (quote) {
-        var editable = canCreateQuote && quote.status === 'draft';
+        var editable = !deal.order_id && quote.status === 'draft';
         var itemHtml = quote.items && quote.items.length
             ? quote.items.map(function (item) { return quoteItemHtml(item, editable); }).join('')
             : '<p class="empty" style="padding:16px">还没有关联产品，请先添加产品并上传对应下单表。</p>';
@@ -151,18 +153,30 @@ function quoteCardsHtml(deal, quotes, canCreateQuote) {
                 quote.items.every(function (item) { return item.form_available; });
             actions += '<button type="button" class="btn btn-sm btn-primary" data-quote-add-item="' +
                 quote.id + '">＋ 添加产品</button> ';
-            actions += '<button type="button" class="btn btn-sm" data-quote-confirm="' +
+            actions += '<button type="button" class="btn btn-sm btn-warning" data-quote-send="' +
                 quote.id + '"' + (canConfirm ? '' : ' disabled title="每个产品都必须上传对应下单表"') +
-                '>记录客户确认</button>';
+                '>发客户确认</button> ';
+        }
+        if (quote.status === 'pending') {
+            actions += '<button type="button" class="btn btn-sm btn-success" data-quote-confirm="' +
+                quote.id + '">客户已确认</button> ';
         }
         if (quote.status === 'confirmed' && !quote.order_id && !deal.order_id) {
             actions += '<button type="button" class="btn btn-sm btn-primary" data-quote-order="' +
-                quote.id + '">以此报价单生成订单</button>';
+                quote.id + '">生成订单</button> ';
         }
         if (quote.order_id) {
-            actions += '<a class="btn btn-sm" href="#/orders/' + quote.order_id + '">查看订单</a>';
+            actions += '<a class="btn btn-sm btn-primary" href="#/orders/' + quote.order_id + '">查看订单</a> ';
         }
-        return '<div class="item" style="display:block;padding:14px 0">' +
+        if (!quote.order_id && quote.status !== 'void' && !deal.order_id) {
+            actions += '<button type="button" class="btn btn-sm btn-outline-danger" data-quote-void="' +
+                quote.id + '">作废</button> ';
+        }
+        if (!quote.order_id && !deal.order_id) {
+            actions += '<button type="button" class="btn btn-sm btn-danger" data-quote-delete="' +
+                quote.id + '">删除报价单</button>';
+        }
+        return '<div class="quote-card">' +
             '<div class="item-main" style="width:100%">' +
             '<div class="item-title"><b>' + esc(quote.quote_no) + '</b> ' + quoteStatusBadge(quote) +
                 '<span style="margin-left:auto"><b>' + money(quote.amount) + '</b></span></div>' +
@@ -185,25 +199,16 @@ function quoteCardsHtml(deal, quotes, canCreateQuote) {
                 actions + '</div>' : '') +
             '</div></div>';
     }).join('');
-    return '<div class="card" id="dealQuotesCard">' +
+    return '<div id="dealQuotesCard" class="quote-stack">' +
         '<div class="card-head"><h2>报价单 <span class="badge muted">' +
-        (quotes || []).length + '</span></h2>' +
-        (canCreateQuote && !(quotes || []).some(function (q) { return q.status === 'confirmed'; })
-            ? '<button type="button" class="btn btn-sm btn-primary" id="btnCreateQuote">' +
-              '＋ 创建报价单</button>'
-            : '') +
-        '</div>' +
+        (quotes || []).length + '</span></h2></div>' +
         (body || '<p class="empty">还没有报价单。商机只记录需求，产品、金额和下单表都放在报价单中。</p>') +
+        '<div class="deal-note-under-quotes"><b>备注</b><span>' +
+        esc(deal.note || '未填写') + '</span></div>' +
         '</div>';
 }
 
 function bindQuoteActions(root, deal, customerName, quotes, products) {
-    var createBtn = $('#btnCreateQuote', root);
-    if (createBtn) {
-        createBtn.addEventListener('click', function () {
-            openCreateQuoteModal(deal, function () { return render(); });
-        });
-    }
     $$('[data-quote-add-item]', root).forEach(function (btn) {
         btn.addEventListener('click', function () {
             var quote = quotes.filter(function (q) {
@@ -243,6 +248,32 @@ function bindQuoteActions(root, deal, customerName, quotes, products) {
             if (quote) { openQuoteConfirmModal(quote, function () { return render(); }); }
         });
     });
+    $$('[data-quote-send]', root).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            api('/quotes/' + btn.getAttribute('data-quote-send') + '/send', { method: 'POST' })
+                .then(function () { toast('报价单已发客户确认'); return render(); })
+                .catch(function (err) { toast(err.message, true); btn.disabled = false; });
+        });
+    });
+    $$('[data-quote-void]', root).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!window.confirm('确认作废这张报价单？')) { return; }
+            btn.disabled = true;
+            api('/quotes/' + btn.getAttribute('data-quote-void') + '/void', { method: 'POST' })
+                .then(function () { toast('报价单已作废'); return render(); })
+                .catch(function (err) { toast(err.message, true); btn.disabled = false; });
+        });
+    });
+    $$('[data-quote-delete]', root).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!window.confirm('确认删除这张报价单及其所有产品明细？')) { return; }
+            btn.disabled = true;
+            api('/quotes/' + btn.getAttribute('data-quote-delete'), { method: 'DELETE' })
+                .then(function () { toast('报价单已删除'); return render(); })
+                .catch(function (err) { toast(err.message, true); btn.disabled = false; });
+        });
+    });
     $$('[data-quote-order]', root).forEach(function (btn) {
         btn.addEventListener('click', function () {
             var quote = quotes.filter(function (q) {
@@ -260,8 +291,8 @@ function openCreateQuoteModal(deal, done) {
         '<div class="modal-header"><h3>创建报价单</h3>' +
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body"><form id="quoteCreateForm" class="form-grid">' +
-        '<div class="field"><label>报价单名称</label><input name="title" maxlength="120" ' +
-        'placeholder="留空则使用自动编号"></div>' +
+        '<div class="field"><label>报价单名称 *</label><input name="title" maxlength="120" required ' +
+        'placeholder="例如：客厅天窗方案 A"></div>' +
         '<div class="field"><label>报价备注</label><textarea name="note" maxlength="1000"></textarea></div>' +
         '<p class="small muted">创建后逐项添加产品和对应下单表。同一商机只能有一张客户确认的报价单。</p>' +
         '<div class="form-actions"><button type="button" class="btn modal-cancel">取消</button>' +
@@ -274,11 +305,13 @@ function openCreateQuoteModal(deal, done) {
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var btn = form.querySelector('button[type="submit"]');
+        var title = String(form.querySelector('[name="title"]').value || '').trim();
+        if (!title) { toast('请填写报价单名称', true); return; }
         btn.disabled = true;
         api('/deals/' + deal.id + '/quotes', {
             method: 'POST',
             body: {
-                title: String(form.querySelector('[name="title"]').value || '').trim() || null,
+                title: title,
                 note: String(form.querySelector('[name="note"]').value || '').trim() || null
             }
         }).then(function () {
@@ -575,23 +608,23 @@ function viewDealDetail(root, rawId) {
 
         var orderLink = d.order_id
             ? '<a class="badge ok" href="#/orders/' + d.order_id + '">已生成订单 ›</a>' : '';
-        var actionHtml;
+        var actionHtml = '';
         if (d.order_id) {
             actionHtml = '<button type="button" class="btn btn-sm" disabled title="已生成订单，商机不可修改">编辑商机</button>' +
-                '<a class="btn btn-sm" href="#/orders/' + d.order_id + '">查看订单</a>' +
+                '<a class="btn btn-sm btn-primary" href="#/orders/' + d.order_id + '">查看订单</a>' +
                 '<span class="small muted">已生成订单，商机锁定</span>';
         } else if (d.stage === 'lost') {
-            actionHtml = '<button type="button" class="btn btn-sm" disabled title="已判流失，不可修改">编辑商机</button>' +
-                '<span class="small muted">已判流失' +
-                (d.lost_reason_label ? '（' + esc(d.lost_reason_label) + '）' : '') + '</span>';
-        } else if (confirmedQuote) {
-            actionHtml = '<button type="button" class="btn btn-sm" id="dealEdit">编辑备注</button>' +
-                '<span class="small muted">客户已确认报价单，请到下方生成订单</span>';
+            actionHtml = '<button type="button" class="btn btn-sm" disabled title="商机已作废，不可修改">编辑备注</button>' +
+                '<span class="small muted">所有报价单均已作废</span>';
         } else {
-            actionHtml = '<button type="button" class="btn btn-sm" id="dealEdit">编辑备注</button>' +
-                '<button type="button" class="btn btn-sm" id="dealLose">判流失</button>' +
-                '<span class="small muted">' +
-                '产品与报价在下方报价单中维护</span>';
+            if (!confirmedQuote) {
+                actionHtml += '<button type="button" class="btn btn-sm btn-primary" id="headerCreateQuote">' +
+                    '＋ 创建报价单</button>';
+            }
+            actionHtml += '<button type="button" class="btn btn-sm" id="dealEdit">编辑备注</button>';
+            if (!confirmedQuote) {
+                actionHtml += '<button type="button" class="btn btn-sm btn-danger" id="dealLose">作废商机</button>';
+            }
         }
 
         renderEntityFollowPage(root, {
@@ -602,21 +635,13 @@ function viewDealDetail(root, rawId) {
                 '<div class="entity-title-main"><h2><a class="crumb" href="#/deals">‹ 商机</a> / ' +
                 esc(customerName) + '</h2><div class="small muted">' + esc(dealProductText(d)) + '</div></div>',
             badgesHtml: dealStageBadge(d.stage, d.stage_label) + ' ' + orderLink,
-            infoHtml: infoGrid([
-                ['客户', '<a href="#/customers/' + d.customer_id + '">' + esc(customerName) + '</a>', true],
-                ['报价单', String(quotes.length) + ' 张'],
-                ['成交报价', money(d.amount)],
-                ['阶段', dealStageBadge(d.stage, d.stage_label), true],
-                ['备注', d.note || '—'],
-                ['时间', '创建 ' + fmtDateTime(d.created_at) + ' · 更新 ' + fmtDateTime(d.updated_at) +
-                    (d.closed_at ? ' · 成交 ' + fmtDateTime(d.closed_at) : '')]
-            ]),
+            infoHtml: '',
             actionsHtml: actionHtml,
             placeholder: '这次沟通聊了什么？客户对报价和参数是什么态度？下一步做什么？',
             canFollow: canFollow,
             lockedText: d.order_id
                 ? '商机已生成订单，请到订单中继续处理'
-                : (d.stage === 'lost' ? '已流失的商机不能再添加跟进' : '已转订单的商机请到订单中继续跟进'),
+                : (d.stage === 'lost' ? '已作废的商机不能再添加跟进' : '已转订单的商机请到订单中继续跟进'),
             records: timelineRecords,
             followExtraHtml: quotes.length
                 ? '<div class="field"><label>关联报价单</label><select name="quote_id">' +
@@ -626,9 +651,10 @@ function viewDealDetail(root, rawId) {
                           ' · ' + esc(quote.status_label || quote.status) + '</option>';
                   }).join('') + '</select></div>'
                 : '',
-            extraHtml: quoteCardsHtml(d, quotes, canCreateQuote) +
+            beforeTimelineHtml: quoteCardsHtml(d, quotes, false) +
                 ((!quotes.length && items.length)
-                    ? dealItemsCardHtml(items, false, d.amount) : '') +
+                    ? dealItemsCardHtml(items, false, d.amount) : ''),
+            extraHtml:
                 filesCardHtml(collectFiles(timelineRecords), '这个商机还没有上传图纸 / 报价单 / 现场照片'),
             onSubmit: function (p) {
                 var fd = new FormData();
@@ -650,6 +676,13 @@ function viewDealDetail(root, rawId) {
         if (editBtn) {
             editBtn.addEventListener('click', function () {
                 openDealNoteEdit(d, function () { return render(); });
+            });
+        }
+
+        var headerCreateQuote = $('#headerCreateQuote', root);
+        if (headerCreateQuote) {
+            headerCreateQuote.addEventListener('click', function () {
+                openCreateQuoteModal(d, function () { return render(); });
             });
         }
 
