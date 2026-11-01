@@ -2690,6 +2690,15 @@ table.data-table a:hover { text-decoration: underline; }
   margin-top: 4px;
 }
 
+.form-grid > .followup-primary-row,
+.form-grid > .followup-attachment-field {
+  grid-column: 1 / -1;
+}
+
+.form-grid > .followup-schedule-field {
+  grid-column: 1 / span 1;
+}
+
 @media (max-width: 640px) {
   .form-grid,
   .form-grid > .row-2,

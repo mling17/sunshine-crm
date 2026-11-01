@@ -40,7 +40,20 @@ class FollowupModalUiTest(unittest.TestCase):
         next_followup = self.modal.index("下次跟进时间")
         self.assertLess(self.modal.index('name="method"'), extra_html)
         self.assertLess(extra_html, next_followup)
+        self.assertIn('class="row-2 followup-primary-row"', self.modal)
         self.assertIn('class="field followup-schedule-field"', self.modal)
+        self.assertIn('class="field followup-attachment-field"', self.modal)
+
+    def test_followup_structure_uses_explicit_grid_placement(self):
+        css = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
+        for marker in (
+            ".form-grid > .followup-primary-row",
+            ".form-grid > .followup-schedule-field",
+            "grid-column: 1 / span 1;",
+            ".form-grid > .followup-attachment-field",
+            "grid-column: 1 / -1;",
+        ):
+            self.assertIn(marker, css)
 
 
 if __name__ == "__main__":
