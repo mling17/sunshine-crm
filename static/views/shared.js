@@ -785,7 +785,7 @@ function dealConvertSourceHtml(sourceName, sourceType) {
   return '<div class="deal-convert-source">' +
     '<span class="deal-convert-source-mark">' + (isCustomer ? '客' : '线') + '</span>' +
     '<div><span class="deal-convert-source-label">' +
-      (isCustomer ? '从客户档案转商机' : '从线索池转商机') + '</span>' +
+      (isCustomer ? '从客户跟进转商机' : '从线索跟进转商机') + '</span>' +
       '<strong>' + esc(sourceName) + '</strong></div>' +
     '<span class="deal-convert-source-note">' +
       (isCustomer ? '商机将归入当前客户' : '将自动建立客户档案') + '</span>' +

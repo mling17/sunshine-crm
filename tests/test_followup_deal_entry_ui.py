@@ -13,6 +13,8 @@ class FollowupDealEntryUiTest(unittest.TestCase):
     def setUp(self):
         self.leads = (ROOT / "static/views/leads.js").read_text(encoding="utf-8")
         self.customers = (ROOT / "static/views/customers.js").read_text(encoding="utf-8")
+        self.deals = (ROOT / "static/views/deals.js").read_text(encoding="utf-8")
+        self.shared = (ROOT / "static/views/shared.js").read_text(encoding="utf-8")
 
     @staticmethod
     def section(source: str, start: str, end: str) -> str:
@@ -35,6 +37,12 @@ class FollowupDealEntryUiTest(unittest.TestCase):
     def test_customer_ui_has_no_delete_action(self):
         self.assertNotIn('id="deleteCustomer"', self.customers)
         self.assertNotIn("method: 'DELETE'", self.customers)
+
+    def test_deal_guidance_uses_follow_up_entry(self):
+        self.assertNotIn("请到线索或客户里点「转商机」", self.deals)
+        self.assertIn("请进入线索或客户跟进页转商机", self.deals)
+        self.assertIn("从客户跟进转商机", self.shared)
+        self.assertIn("从线索跟进转商机", self.shared)
 
 
 if __name__ == "__main__":

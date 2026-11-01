@@ -58,7 +58,7 @@ function viewDeals(root, route) {
                 '<td style="white-space:nowrap">' + fmtDateTime(d.updated_at || d.created_at).slice(0, 10) + '</td>' +
                 '<td style="white-space:nowrap"><a class="btn btn-sm" href="#/deals/' + d.id + '">跟进</a></td>' +
                 '</tr>';
-        }).join('') : '<tr><td colspan="9" class="empty">还没有商机：请到线索或客户里点「转商机」</td></tr>';
+        }).join('') : '<tr><td colspan="9" class="empty">还没有商机：请进入线索或客户跟进页转商机</td></tr>';
 
         root.innerHTML =
             '<div class="card">' +
@@ -394,7 +394,7 @@ function viewDealNew(root, route) {
     var custId = Number((route && route.query.get('customer')) || 0);
 
     if (!leadId && !custId) {
-        root.innerHTML = '<div class="card">缺少来源：请从「线索」或「客户」里点「转商机」，' +
+        root.innerHTML = '<div class="card">缺少来源：请进入「线索」或「客户」跟进页转商机，' +
             '<a href="#/leads">回线索池</a> · <a href="#/customers">回客户档案</a></div>';
         return Promise.resolve();
     }
