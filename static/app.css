@@ -582,10 +582,11 @@
   box-shadow: 0 8px 24px rgba(30, 70, 120, .1);
 }
 .deal-quote-card-head {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 9px 12px;
-  padding: 15px 16px;
+  padding: 15px 48px 15px 16px;
   cursor: pointer;
   list-style: none;
 }
@@ -617,23 +618,58 @@
 }
 .deal-quote-card-side b { color: #173b67; font-size: 15px; }
 .deal-quote-card-delete {
-  height: 26px;
-  padding: 0 8px;
-  border-radius: 7px;
-  background: #fff;
-  color: #a52a3a;
-  font-size: 11px;
-  font-weight: 650;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #dbe3ed;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 2px 7px rgba(31, 52, 78, .08);
+  color: #79889b;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity .15s ease, transform .15s ease, color .15s ease,
+    background .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
 .deal-quote-card-delete:hover {
-  border-color: #d89aa4;
-  background: #fff7f8;
+  border-color: #d84a5c;
+  background: #d84a5c;
+  box-shadow: 0 3px 9px rgba(180, 38, 55, .22);
+  color: #fff;
+}
+.deal-quote-card-delete:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.deal-quote-card:hover .deal-quote-card-delete,
+.deal-quote-card:focus-within .deal-quote-card-delete {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 .deal-quote-card-meta {
   grid-column: 1 / -1;
   color: #7a8799;
   font-size: 11px;
   line-height: 1.4;
+}
+@media (hover: none) {
+  .deal-quote-card-delete {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
 }
 .deal-quote-card-body {
   padding: 0 16px 16px;
@@ -3731,3 +3767,4 @@ table.data-table a:hover { text-decoration: underline; }
     white-space: normal;
   }
 }
+

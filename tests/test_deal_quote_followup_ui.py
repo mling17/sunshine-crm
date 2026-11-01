@@ -124,6 +124,9 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             quote_cards.index("</summary>"),
             "删除按钮应位于报价单卡片标题层级，而不是卡片明细操作区",
         )
+        self.assertIn('class="deal-quote-card-delete"', quote_cards)
+        self.assertIn('aria-label="删除报价单 ', quote_cards)
+        self.assertIn('<span aria-hidden="true">×</span>', quote_cards)
         self.assertIn(
             "quote.status === 'draft' || quote.status === 'void'",
             quote_cards,
@@ -179,6 +182,12 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             "display: flex;",
             ".deal-quote-empty {",
             ".deal-overview-actions {",
+            ".deal-quote-card-delete {",
+            "opacity: 0;",
+            "pointer-events: none;",
+            ".deal-quote-card:hover .deal-quote-card-delete,",
+            ".deal-quote-card:focus-within .deal-quote-card-delete {",
+            "@media (hover: none) {",
         ):
             self.assertIn(marker, self.css)
         self.assertIn("线索将移出线索池", self.shared)

@@ -172,19 +172,22 @@ function quoteCardsHtml(deal, quotes) {
         }
         var canDeleteQuote = !quote.order_id && !deal.order_id &&
             (quote.status === 'draft' || quote.status === 'void');
-        var deleteCardAction = canDeleteQuote
-            ? '<button type="button" class="btn btn-sm btn-outline-danger deal-quote-card-delete" ' +
-              'data-quote-delete="' + quote.id + '" title="删除这张报价单卡片">删除</button>'
-            : '';
         var quoteTitle = quote.title || quote.quote_no;
+        var deleteCardAction = canDeleteQuote
+            ? '<button type="button" class="deal-quote-card-delete" ' +
+              'data-quote-delete="' + quote.id + '" title="删除报价单" ' +
+              'aria-label="删除报价单 ' + esc(quoteTitle) + '">' +
+              '<span aria-hidden="true">×</span></button>'
+            : '';
         var itemCount = (quote.items || []).length;
         return '<details class="deal-quote-card">' +
             '<summary class="deal-quote-card-head">' +
                 '<span class="deal-quote-card-title">' + esc(quoteTitle) + '</span>' +
                 '<span class="deal-quote-card-side">' + quoteStatusBadge(quote) +
-                    '<b>' + money(quote.amount) + '</b>' + deleteCardAction + '</span>' +
+                    '<b>' + money(quote.amount) + '</b></span>' +
                 '<span class="deal-quote-card-meta">' + esc(quote.quote_no) +
                     ' · ' + itemCount + ' 项产品</span>' +
+                deleteCardAction +
             '</summary>' +
             '<div class="deal-quote-card-body">' +
                 '<div class="small muted">创建 ' + fmtDateTime(quote.created_at) +
