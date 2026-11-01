@@ -321,7 +321,7 @@ class DealOrdersTest(ApiTestCase):
             "logistics_mode": "self"
         })
         self.assertEqual(resp.status_code, 409)
-        self.assertEqual(resp.json()["code"], "deal_not_won")
+        self.assertEqual(resp.json()["code"], "deal_not_ready")
 
     def test_create_order_success(self):
         """测试生成订单成功"""
@@ -330,7 +330,7 @@ class DealOrdersTest(ApiTestCase):
         deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
         
         # 先推进阶段
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         
         resp = self.client.post(f"/api/crm/deals/{deal['id']}/orders", json={
             "deposit": 3600,
@@ -349,10 +349,12 @@ class DealOrdersTest(ApiTestCase):
         order = data["order"]
         self.assertIsNotNone(order["order_no"])
         self.assertRegex(order["order_no"], r"^SO-\d{8}-\d{3}$")
-        self.assertEqual(order["amount"], 12000.0)
+        self.assertEqual(order["product_total"], 12000.0)
+        self.assertEqual(order["product_payable"], 12000.0)
+        self.assertEqual(order["amount"], 12800.0)
         self.assertEqual(order["deposit_amount"], 3600.0)
-        self.assertEqual(order["balance_amount"], 8400.0)
-        self.assertEqual(order["status"], "pending_payment")
+        self.assertEqual(order["balance_amount"], 9200.0)
+        self.assertEqual(order["status"], "pending_confirmation")
         self.assertEqual(order["receiver_name"], "张三")
         self.assertEqual(order["receiver_phone"], "13800000000")
         self.assertEqual(order["receiver_address"], "济南")
@@ -362,8 +364,8 @@ class DealOrdersTest(ApiTestCase):
         # 检查商机信息
         self.assertIn("deal", data)
         deal_data = data["deal"]
-        self.assertEqual(deal_data["stage"], "won")
-        self.assertIsNotNone(deal_data["closed_at"])
+        self.assertEqual(deal_data["stage"], "confirm")
+        self.assertIsNone(deal_data["closed_at"])
         self.assertIsNotNone(deal_data["order_id"])
         self.assertIsNotNone(deal_data["locked_at"])
 
@@ -371,7 +373,7 @@ class DealOrdersTest(ApiTestCase):
         """生成订单时的总额固定取商机报价，不能被请求中的 amount 改写。"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
 
         resp = self.client.post(
             f"/api/crm/deals/{deal['id']}/orders",
@@ -404,7 +406,7 @@ class DealOrdersTest(ApiTestCase):
         deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
         
         # 先推进阶段
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         
         # 测试 deposit=0 情况（全款尾款）
         resp = self.client.post(f"/api/crm/deals/{deal['id']}/orders", json={
@@ -418,7 +420,7 @@ class DealOrdersTest(ApiTestCase):
 
         # 测试 deposit=amount 情况（一次付清）→ 必须另开一单商机，订单与商机 1:1
         deal2 = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
-        self.client.put(f"/api/crm/deals/{deal2['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal2['id']}", json={"stage": "confirm"})
         resp = self.client.post(f"/api/crm/deals/{deal2['id']}/orders", json={
             "deposit": 12000.0,
             "logistics_mode": "self"
@@ -432,7 +434,7 @@ class DealOrdersTest(ApiTestCase):
         """测试订单押金超出范围失败"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         
         # 测试 deposit > amount
         resp = self.client.post(f"/api/crm/deals/{deal['id']}/orders", json={
@@ -446,7 +448,7 @@ class DealOrdersTest(ApiTestCase):
         """测试缺少物流公司ID失败"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         
         # 测试 logistics_mode=agent 但没有 carrier_id
         resp = self.client.post(f"/api/crm/deals/{deal['id']}/orders", json={
@@ -465,7 +467,7 @@ class DealOrdersTest(ApiTestCase):
         carrier = self.create_carrier()
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         
         resp = self.client.post(f"/api/crm/deals/{deal['id']}/orders", json={
             "deposit": 3600,
@@ -491,7 +493,7 @@ class DealOrdersTest(ApiTestCase):
         """测试已有订单的商机生成订单失败"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=12000.0, drive_type="electric")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         
         # 第一次生成订单
         self.client.post(f"/api/crm/deals/{deal['id']}/orders", json={
@@ -520,12 +522,12 @@ class DealOrdersTest(ApiTestCase):
         # 检查返回格式
         self.assertIn("deal", data)
         self.assertIn("order", data)
-        self.assertEqual(data["deal"]["stage"], "won")
+        self.assertEqual(data["deal"]["stage"], "confirm")
         self.assertIsNotNone(data["deal"]["order_id"])
         self.assertIsNotNone(data["order"]["order_no"])
         self.assertEqual(data["order"]["amount"], 12000.0)
         self.assertEqual(data["order"]["deposit_amount"], 12000.0)
-        self.assertEqual(data["order"]["status"], "pending_payment")
+        self.assertEqual(data["order"]["status"], "pending_confirmation")
         self.assertEqual(data["order"]["logistics_mode"], "self")
 
 

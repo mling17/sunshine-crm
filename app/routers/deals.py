@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import sqlite3
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app import dicts as dict_svc
@@ -19,7 +21,16 @@ from app.enums import (
     LOGISTICS_MODE_LABELS,
 )
 from app.errors import ApiError
-from app.models import DealDetailOut, DealIn, DealOut, DealUpdate, normalize_spec
+from app.models import (
+    DealDetailOut,
+    DealIn,
+    DealItemIn,
+    DealItemOut,
+    DealItemUpdate,
+    DealOut,
+    DealUpdate,
+    normalize_spec,
+)
 from app.product_catalog import config_summary, get_product, product_snapshot
 from app.routers.auth import require_auth
 from app.security import now_iso, now_local_iso
@@ -135,6 +146,114 @@ def _out(row) -> DealOut:
     return DealOut(**data)
 
 
+def _deal_items(conn, deal_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM deal_items WHERE deal_id = ? AND is_delete = 0"
+        " ORDER BY sort, id",
+        (deal_id,),
+    ).fetchall()
+
+
+def _sync_deal_summary(conn, deal_id: int, *, touch: bool = True) -> None:
+    """用产品明细同步商机列表所展示的首项摘要与合计金额。"""
+    items = _deal_items(conn, deal_id)
+    if not items:
+        raise ApiError(
+            status_code=409,
+            code="deal_item_required",
+            message="商机至少保留一条产品明细",
+        )
+    first = items[0]
+    total = round(sum(float(row["amount"] or 0) for row in items), 2)
+    conn.execute(
+        "UPDATE deals SET product_id = ?, product_code_snapshot = ?,"
+        " product_name_snapshot = ?, product_config_snapshot = ?,"
+        " product_type = ?, model = ?, drive_type = ?, spec = ?, amount = ?,"
+        " updated_at = ? WHERE id = ?",
+        (
+            first["product_id"],
+            first["product_code_snapshot"],
+            first["product_name_snapshot"],
+            first["product_config_snapshot"],
+            first["product_type"],
+            first["model"],
+            first["drive_type"],
+            first["spec"],
+            total,
+            now_iso() if touch else first["updated_at"],
+            deal_id,
+        ),
+    )
+
+
+def _ensure_deal_editable(old) -> None:
+    if old["order_id"] is not None:
+        raise _deal_locked()
+    if old["stage"] == "lost":
+        raise ApiError(
+            status_code=409,
+            code="deal_frozen",
+            message="该商机已判流失，不能修改产品明细",
+        )
+
+
+def _item_values(conn, payload: DealItemIn | DealItemUpdate, old=None) -> dict:
+    product_id = payload.product_id if getattr(payload, "product_id", None) is not None else (
+        old["product_id"] if old is not None else None
+    )
+    if not product_id:
+        raise ApiError(
+            status_code=400,
+            code="product_required",
+            message="产品明细必须选择产品",
+        )
+    product = _product(conn, int(product_id))
+    snapshot = product_snapshot(product)
+    requested_drive = (
+        product.get("drive_type")
+        or (getattr(payload, "drive_type", None) if getattr(payload, "drive_type", None) is not None else None)
+        or (old["drive_type"] if old is not None else None)
+    )
+    drive = _drive_type(requested_drive) if requested_drive else None
+    quantity = (
+        payload.quantity
+        if getattr(payload, "quantity", None) is not None
+        else (old["quantity"] if old is not None else 1)
+    )
+    unit_price = (
+        payload.unit_price
+        if getattr(payload, "unit_price", None) is not None
+        else (old["unit_price"] if old is not None else 0)
+    )
+    spec = (
+        payload.spec
+        if "spec" in getattr(payload, "model_fields_set", set())
+        else (old["spec"] if old is not None else None)
+    )
+    production_spec = (
+        payload.production_spec
+        if "production_spec" in getattr(payload, "model_fields_set", set())
+        else (old["production_spec"] if old is not None else None)
+    )
+    note = (
+        payload.note
+        if "note" in getattr(payload, "model_fields_set", set())
+        else (old["note"] if old is not None else None)
+    )
+    return {
+        **snapshot,
+        "product_type": product.get("category"),
+        "model": product.get("code"),
+        "drive_type": drive,
+        "quantity": int(quantity),
+        "spec": spec,
+        "production_spec": production_spec,
+        "unit_price": round(float(unit_price), 2),
+        "amount": round(float(unit_price) * int(quantity), 2),
+        "note": note,
+    }
+
+
 # ---------------- 列表 / 详情 ----------------
 
 
@@ -192,6 +311,7 @@ def get_deal(deal_id: int) -> DealDetailOut:
             "SELECT * FROM orders WHERE deal_id = ? AND is_delete = 0", (deal_id,)
         ).fetchone()
         data["order"] = dict(order_row) if order_row else None
+        data["items"] = [dict(item) for item in _deal_items(conn, deal_id)]
     return DealDetailOut(**data)
 
 
@@ -259,6 +379,30 @@ def create_deal(payload: DealIn) -> DealOut:
             ),
         )
         deal_id = int(cur.lastrowid or 0)
+        now = now_iso()
+        conn.execute(
+            "INSERT INTO deal_items (deal_id, product_id, product_code_snapshot,"
+            " product_name_snapshot, product_config_snapshot, product_type, model,"
+            " drive_type, quantity, spec, production_spec, unit_price, amount, note,"
+            " sort, created_at, updated_at, create_time, update_time, is_delete)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?, 0, ?, ?, '', '', 0)",
+            (
+                deal_id,
+                snapshot["product_id"],
+                snapshot["product_code_snapshot"],
+                snapshot["product_name_snapshot"],
+                snapshot["product_config_snapshot"],
+                product_type,
+                model,
+                drive,
+                spec,
+                amount,
+                amount,
+                payload.note,
+                now,
+                now,
+            ),
+        )
         add_entry(
             conn,
             object_type="deal",
@@ -275,6 +419,116 @@ def create_deal(payload: DealIn) -> DealOut:
         )
         row = _deal_row(conn, deal_id)
     return _out(row)
+
+
+@router.post("/deals/{deal_id}/items", response_model=DealItemOut)
+def add_deal_item(deal_id: int, payload: DealItemIn) -> DealItemOut:
+    with db_conn() as conn:
+        old = _deal_row(conn, deal_id)
+        _ensure_deal_editable(old)
+        values = _item_values(conn, payload)
+        sort_row = conn.execute(
+            "SELECT COALESCE(MAX(sort), -1) + 1 AS next_sort FROM deal_items"
+            " WHERE deal_id = ? AND is_delete = 0",
+            (deal_id,),
+        ).fetchone()
+        now = now_iso()
+        cur = conn.execute(
+            "INSERT INTO deal_items (deal_id, product_id, product_code_snapshot,"
+            " product_name_snapshot, product_config_snapshot, product_type, model,"
+            " drive_type, quantity, spec, production_spec, unit_price, amount, note,"
+            " sort, created_at, updated_at, create_time, update_time, is_delete)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0)",
+            (
+                deal_id,
+                values["product_id"],
+                values["product_code_snapshot"],
+                values["product_name_snapshot"],
+                values["product_config_snapshot"],
+                values["product_type"],
+                values["model"],
+                values["drive_type"],
+                values["quantity"],
+                values["spec"],
+                values["production_spec"],
+                values["unit_price"],
+                values["amount"],
+                values["note"],
+                int(sort_row["next_sort"]),
+                now,
+                now,
+            ),
+        )
+        item_id = int(cur.lastrowid or 0)
+        _sync_deal_summary(conn, deal_id)
+        row = conn.execute(
+            "SELECT * FROM deal_items WHERE id = ? AND is_delete = 0", (item_id,)
+        ).fetchone()
+    return DealItemOut(**dict(row))
+
+
+@router.put("/deals/{deal_id}/items/{item_id}", response_model=DealItemOut)
+def update_deal_item(
+    deal_id: int, item_id: int, payload: DealItemUpdate
+) -> DealItemOut:
+    with db_conn() as conn:
+        deal = _deal_row(conn, deal_id)
+        _ensure_deal_editable(deal)
+        old = conn.execute(
+            "SELECT * FROM deal_items WHERE id = ? AND deal_id = ? AND is_delete = 0",
+            (item_id, deal_id),
+        ).fetchone()
+        if old is None:
+            raise HTTPException(status_code=404, detail="产品明细不存在")
+        values = _item_values(conn, payload, old)
+        conn.execute(
+            "UPDATE deal_items SET product_id = ?, product_code_snapshot = ?,"
+            " product_name_snapshot = ?, product_config_snapshot = ?, product_type = ?,"
+            " model = ?, drive_type = ?, quantity = ?, spec = ?, production_spec = ?,"
+            " unit_price = ?, amount = ?, note = ?, updated_at = ? WHERE id = ?",
+            (
+                values["product_id"],
+                values["product_code_snapshot"],
+                values["product_name_snapshot"],
+                values["product_config_snapshot"],
+                values["product_type"],
+                values["model"],
+                values["drive_type"],
+                values["quantity"],
+                values["spec"],
+                values["production_spec"],
+                values["unit_price"],
+                values["amount"],
+                values["note"],
+                now_iso(),
+                item_id,
+            ),
+        )
+        _sync_deal_summary(conn, deal_id)
+        row = conn.execute("SELECT * FROM deal_items WHERE id = ?", (item_id,)).fetchone()
+    return DealItemOut(**dict(row))
+
+
+@router.delete("/deals/{deal_id}/items/{item_id}")
+def delete_deal_item(deal_id: int, item_id: int) -> dict:
+    with db_conn() as conn:
+        deal = _deal_row(conn, deal_id)
+        _ensure_deal_editable(deal)
+        items = _deal_items(conn, deal_id)
+        if not any(int(row["id"]) == item_id for row in items):
+            raise HTTPException(status_code=404, detail="产品明细不存在")
+        if len(items) <= 1:
+            raise ApiError(
+                status_code=409,
+                code="last_deal_item",
+                message="商机至少保留一条产品明细，不能全部删除",
+            )
+        conn.execute(
+            "UPDATE deal_items SET is_delete = 1, updated_at = ? WHERE id = ?",
+            (now_iso(), item_id),
+        )
+        _sync_deal_summary(conn, deal_id)
+    return {"ok": True}
 
 
 @router.put("/deals/{deal_id}", response_model=DealOut)
@@ -346,6 +600,12 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
                 code="stage_via_action",
                 message="判流失请用「判流失」操作并填写流失原因",
             )
+        if updates.get("stage") == "won":
+            raise ApiError(
+                status_code=400,
+                code="stage_via_customer_confirmation",
+                message="生成订单并记录客户确认后，商机才会进入「成交」",
+            )
         if updates.get("stage") is not None:
             value = str(updates["stage"]).strip()
             if value not in STAGES:
@@ -368,6 +628,43 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
         for key in ("amount",):
             if updates.get(key) is not None:
                 updates[key] = round(float(updates[key]), 2)
+
+        # 兼容旧页面：单产品商机仍可通过商机编辑改产品/金额；多产品必须走明细接口。
+        legacy_fields = {
+            key for key in (
+                "product_id", "product_type", "model", "spec", "drive_type", "amount"
+            ) if key in updates
+        }
+        if legacy_fields and any(key in fields for key in legacy_fields):
+            items = _deal_items(conn, deal_id)
+            if len(items) > 1:
+                raise ApiError(
+                    status_code=400,
+                    code="use_deal_item_api",
+                    message="多产品商机请在产品明细中修改，不能直接覆盖商机总额",
+                )
+            if items:
+                first = items[0]
+                conn.execute(
+                    "UPDATE deal_items SET product_id = ?, product_code_snapshot = ?,"
+                    " product_name_snapshot = ?, product_config_snapshot = ?,"
+                    " product_type = ?, model = ?, drive_type = ?, spec = ?,"
+                    " unit_price = ?, amount = ?, updated_at = ? WHERE id = ?",
+                    (
+                        updates.get("product_id", first["product_id"]),
+                        updates.get("product_code_snapshot", first["product_code_snapshot"]),
+                        updates.get("product_name_snapshot", first["product_name_snapshot"]),
+                        updates.get("product_config_snapshot", first["product_config_snapshot"]),
+                        updates.get("product_type", first["product_type"]),
+                        updates.get("model", first["model"]),
+                        updates.get("drive_type", first["drive_type"]),
+                        updates.get("spec", first["spec"]),
+                        updates.get("amount", first["unit_price"]),
+                        updates.get("amount", first["amount"]),
+                        now_iso(),
+                        first["id"],
+                    ),
+                )
 
         if not updates:
             return _out(old)
@@ -426,31 +723,46 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
 def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool = True) -> tuple[dict, dict]:
     """生成订单的唯一实现；`/win` 兼容端点也走这里。"""
     deal = _deal_row(conn, deal_id)
+    items = _deal_items(conn, deal_id)
 
     if conn.execute("SELECT 1 FROM orders WHERE deal_id = ?", (deal_id,)).fetchone():
         raise ApiError(status_code=409, code="order_exists", message="该商机已有订单")
-    if deal["stage"] != "won":
+    if not items:
         raise ApiError(
-            status_code=409, code="deal_not_won", message="先把阶段推进到「成交」，再生成订单"
+            status_code=409,
+            code="deal_item_required",
+            message="商机没有产品明细，不能生成订单",
+        )
+    if deal["stage"] not in ("confirm", "won"):
+        raise ApiError(
+            status_code=409,
+            code="deal_not_ready",
+            message="先把阶段推进到「待客户确认」，再生成订单",
         )
 
-    # 订单总额必须沿用商机报价，不允许在生成订单时另填一个金额。
-    amount = round(float(deal["amount"] or 0), 2)
-    if amount <= 0:
-        raise ApiError(status_code=400, code="invalid_amount", message="订单金额必须大于 0")
+    # 商品金额取明细合计；优惠是整单数据，运费独立记录。
+    product_total = round(sum(float(row["amount"] or 0) for row in items), 2)
+    if product_total <= 0:
+        raise ApiError(status_code=400, code="invalid_amount", message="产品明细合计必须大于 0")
+    discount = round(float(payload.get("discount_amount") or 0), 2)
+    if discount < 0 or discount > product_total:
+        raise ApiError(
+            status_code=400,
+            code="invalid_discount",
+            message=f"优惠必须在 0 到产品合计（¥{product_total:,.2f}）之间",
+        )
+    product_payable = round(product_total - discount, 2)
 
     raw_deposit = payload.get("deposit")
     if raw_deposit is None:
         raise ApiError(status_code=400, code="deposit_required", message="请填写定金金额")
     deposit = round(float(raw_deposit), 2)
-    if deposit < 0 or deposit > amount:
+    if deposit < 0:
         raise ApiError(
             status_code=400,
             code="invalid_deposit",
-            message=f"定金必须在 0 到报价金额（¥{amount:,.2f}）之间",
+            message="定金不能为负",
         )
-    # Q-D：尾款服务端强制算，不采信前端
-    balance = round(amount - deposit, 2)
 
     mode = str(payload.get("logistics_mode") or "").strip()
     if mode not in LOGISTICS_MODE_LABELS:
@@ -475,6 +787,15 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
     fee = round(float(payload.get("logistics_fee") or 0), 2) if mode != "self" else 0.0
     if fee < 0:
         raise ApiError(status_code=400, code="invalid_logistics_fee", message="物流费用不能为负")
+    amount = round(product_payable + fee, 2)
+    if deposit > amount:
+        raise ApiError(
+            status_code=400,
+            code="invalid_deposit",
+            message=f"定金不能超过订单应收（¥{amount:,.2f}）",
+        )
+    # Q-D：尾款服务端强制算，不采信前端
+    balance = round(amount - deposit, 2)
 
     # 收货：优先地址簿；手填的回存地址簿（复购可直接选）
     address_id = payload.get("address_id")
@@ -526,12 +847,13 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
     cur = conn.execute(
         "INSERT INTO orders (order_no, customer_id, deal_id, product_id,"
         " product_code_snapshot, product_name_snapshot, product_config_snapshot,"
-        " product_type, model, spec, amount,"
+        " product_type, model, spec, amount, product_total, discount_amount,"
+        " discount_reason, product_payable,"
         " deposit_amount, balance_amount, deposit_paid, balance_paid, logistics_mode, carrier_id,"
         " logistics_fee, tracking_no, address_id, receiver_name, receiver_phone, receiver_address,"
         " status, note, owner, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?,"
-        " 'pending_payment', ?, ?, ?, ?)",
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?,"
+        " 'pending_confirmation', ?, ?, ?, ?)",
         (
             order_no,
             deal["customer_id"],
@@ -544,6 +866,10 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
             deal["model"],
             deal["spec"],
             amount,
+            product_total,
+            discount,
+            payload.get("discount_reason") or None,
+            product_payable,
             deposit,
             balance,
             mode,
@@ -562,10 +888,41 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
     )
     order_id = int(cur.lastrowid or 0)
 
+    now_item = now_iso()
+    for sort, item in enumerate(items):
+        conn.execute(
+            "INSERT INTO order_items (order_id, source_deal_item_id, product_id,"
+            " product_code_snapshot, product_name_snapshot, product_config_snapshot,"
+            " product_type, model, drive_type, quantity, spec, production_spec,"
+            " unit_price, amount, note, sort, created_at, updated_at,"
+            " create_time, update_time, is_delete)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0)",
+            (
+                order_id,
+                item["id"],
+                item["product_id"],
+                item["product_code_snapshot"],
+                item["product_name_snapshot"],
+                item["product_config_snapshot"],
+                item["product_type"],
+                item["model"],
+                item["drive_type"],
+                item["quantity"],
+                item["spec"],
+                item["production_spec"],
+                item["unit_price"],
+                item["amount"],
+                item["note"],
+                sort,
+                now_item,
+                now_item,
+            ),
+        )
+
     conn.execute(
-        "UPDATE deals SET stage = 'won', closed_at = COALESCE(closed_at, ?), order_id = ?,"
+        "UPDATE deals SET stage = 'confirm', closed_at = NULL, order_id = ?,"
         " locked_at = ?, updated_at = ? WHERE id = ?",
-        (now_local_iso(), order_id, now_local_iso(), now, deal_id),
+        (order_id, now_local_iso(), now, deal_id),
     )
 
     carrier_name = None
@@ -584,16 +941,27 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
         customer_id=deal["customer_id"],
         deal_id=deal_id,
         content=(
-            f"生成订单 {order_no}，定金 ¥{deposit:,.2f}，尾款 ¥{balance:,.2f}，物流 {logistics_text}"
+            f"生成订单 {order_no}：产品 {product_total:,.2f}，优惠 {discount:,.2f}，"
+            f"运费 {fee:,.2f}，应收 {amount:,.2f}；待客户确认"
         ),
-        detail={"order_id": order_id, "order_no": order_no, "deposit": deposit, "balance": balance},
+        detail={
+            "order_id": order_id,
+            "order_no": order_no,
+            "product_total": product_total,
+            "discount_amount": discount,
+            "logistics_fee": fee,
+            "amount": amount,
+            "deposit": deposit,
+            "balance": balance,
+        },
     )
     conn.execute(
         "INSERT INTO order_status_log (order_id, from_status, to_status, event_type, note, detail,"
-        " created_at) VALUES (?, NULL, 'pending_payment', 'order', ?, ?, ?)",
+        " created_at) VALUES (?, NULL, 'pending_confirmation', 'order', ?, ?, ?)",
         (
             order_id,
-            f"生成订单 {order_no}：报价 ¥{amount:,.2f}，定金 ¥{deposit:,.2f}，尾款 ¥{balance:,.2f}",
+            f"生成订单 {order_no}：产品 ¥{product_total:,.2f}，优惠 ¥{discount:,.2f}，"
+            f"运费 ¥{fee:,.2f}，应收 ¥{amount:,.2f}；等待客户确认",
             '{"order_no": "%s"}' % order_no,
             now,
         ),
@@ -606,7 +974,7 @@ def _create_order(conn, deal_id: int, payload: dict, *, require_receiver: bool =
 
 @router.post("/deals/{deal_id}/orders", response_model=dict)
 def create_order(deal_id: int, payload: dict) -> dict:
-    """生成订单（只有「成交」阶段可生成；生成后商机锁定）。"""
+    """生成订单（商机须到「待客户确认」；生成后等待客户确认）。"""
     with db_conn() as conn:
         deal_row, order_row = _create_order(conn, deal_id, payload)
         timeline = entries_for(
@@ -624,18 +992,18 @@ def create_order(deal_id: int, payload: dict) -> dict:
 
 @router.post("/deals/{deal_id}/win", response_model=dict)
 def win_deal(deal_id: int) -> dict:
-    """兼容旧前端：无参成交并生成订单（定金=全额、自提、运费 0）。
+    """兼容旧前端：无参生成待确认订单（定金=全额、自提、运费 0）。
 
     定稿后的正路是 ``POST /deals/{id}/orders``（带定金 / 物流 / 收货信息）。
     """
     with db_conn() as conn:
         deal = _deal_row(conn, deal_id)
-        if deal["stage"] != "won":
-            if deal["order_id"] is not None:
-                raise _deal_locked()
+        if deal["order_id"] is not None:
+            raise ApiError(status_code=409, code="order_exists", message="该商机已有订单")
+        if deal["stage"] == "quote":
             conn.execute(
-                "UPDATE deals SET stage = 'won', closed_at = ?, updated_at = ? WHERE id = ?",
-                (now_local_iso(), now_iso(), deal_id),
+                "UPDATE deals SET stage = 'confirm', updated_at = ? WHERE id = ?",
+                (now_iso(), deal_id),
             )
             add_entry(
                 conn,
@@ -644,8 +1012,8 @@ def win_deal(deal_id: int) -> dict:
                 kind="stage",
                 customer_id=deal["customer_id"],
                 deal_id=deal_id,
-                content=f"阶段推进：{DEAL_STAGE_LABELS.get(deal['stage'], deal['stage'])} → 成交",
-                detail={"stage": {"from": deal["stage"], "to": "won"}},
+                content=f"阶段推进：{DEAL_STAGE_LABELS.get(deal['stage'], deal['stage'])} → 待客户确认",
+                detail={"stage": {"from": deal["stage"], "to": "confirm"}},
             )
             deal = _deal_row(conn, deal_id)
         payload = {

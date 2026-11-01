@@ -293,6 +293,62 @@ class ProductDetailOut(ProductOut):
     deals: list[dict] = Field(default_factory=list)
 
 
+class DealItemIn(BaseModel):
+    """商机产品明细：同产品同参数用 quantity，参数不同必须拆行。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: int = Field(gt=0)
+    quantity: int = Field(default=1, ge=1, le=999)
+    spec: SpecText = Field(default=None, max_length=200)
+    production_spec: OptionalText = Field(default=None, max_length=1000)
+    unit_price: float = Field(ge=0)
+    drive_type: OptionalText = Field(default=None, max_length=32)
+    note: OptionalText = Field(default=None, max_length=500)
+
+
+class DealItemUpdate(BaseModel):
+    """修改一条商机产品明细；未传字段保持原值。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: int | None = Field(default=None, gt=0)
+    quantity: int | None = Field(default=None, ge=1, le=999)
+    spec: SpecText = Field(default=None, max_length=200)
+    production_spec: OptionalText = Field(default=None, max_length=1000)
+    unit_price: float | None = Field(default=None, ge=0)
+    drive_type: OptionalText = Field(default=None, max_length=32)
+    note: OptionalText = Field(default=None, max_length=500)
+
+
+class DealItemOut(BaseModel):
+    id: int
+    deal_id: int
+    product_id: int | None = None
+    product_code_snapshot: str | None = None
+    product_name_snapshot: str | None = None
+    product_config_snapshot: str | None = None
+    product_type: str | None = None
+    model: str | None = None
+    drive_type: str | None = None
+    drive_type_label: str | None = None
+    quantity: int = 1
+    spec: str | None = None
+    production_spec: str | None = None
+    unit_price: float = 0.0
+    amount: float = 0.0
+    note: str | None = None
+    sort: int = 0
+    created_at: str
+    updated_at: str
+
+    @model_validator(mode="after")
+    def _fill_drive_label(self) -> "DealItemOut":
+        if self.drive_type_label is None and self.drive_type:
+            self.drive_type_label = labels.drive_type(self.drive_type)
+        return self
+
+
 class DealOut(BaseModel):
     id: int
     customer_id: int
@@ -353,6 +409,7 @@ class DealDetailOut(DealOut):
     #: 资料汇总卡：所有跟进附件
     materials: list[dict] = Field(default_factory=list)
     order: dict | None = None
+    items: list[DealItemOut] = Field(default_factory=list)
 
 
 # ---------------- 跟进 ----------------
@@ -723,6 +780,14 @@ class OrderOut(BaseModel):
     product_config_snapshot: str | None = None
     spec: str | None = None
     amount: float = 0.0
+    product_total: float = 0.0
+    discount_amount: float = 0.0
+    discount_reason: str | None = None
+    product_payable: float = 0.0
+    logistics_fee: float = 0.0
+    logistics_mode: str | None = None
+    logistics_mode_label: str | None = None
+    item_count: int = 0
     status: str
     status_label: str | None = None
     owner: str | None = None
@@ -738,6 +803,16 @@ class OrderOut(BaseModel):
         if isinstance(data, dict):
             data = dict(data)
             data.setdefault("paid_amount", (data.get("deposit_paid") or 0.0) + (data.get("balance_paid") or 0.0))
+            if not data.get("product_total"):
+                data["product_total"] = data.get("amount") or 0.0
+            if not data.get("product_payable"):
+                data["product_payable"] = max(
+                    0.0,
+                    float(data.get("product_total") or 0.0)
+                    - float(data.get("discount_amount") or 0.0),
+                )
+            if not data.get("freight_amount"):
+                data["freight_amount"] = data.get("logistics_fee") or 0.0
             if data.get("tracking_number") is None and data.get("tracking_no") is not None:
                 data["tracking_number"] = data.get("tracking_no")
         return data
@@ -746,6 +821,8 @@ class OrderOut(BaseModel):
     def _fill_status_label(self) -> "OrderOut":
         if self.status_label is None:
             self.status_label = labels.order_status(self.status)
+        if self.logistics_mode_label is None and self.logistics_mode:
+            self.logistics_mode_label = labels.logistics_mode(self.logistics_mode)
         return self
 
 
@@ -764,6 +841,13 @@ class OrderDetailOut(BaseModel):
     product_config_snapshot: str | None = None
     spec: str | None = None
     amount: float = 0.0
+    product_total: float = 0.0
+    discount_amount: float = 0.0
+    discount_reason: str | None = None
+    product_payable: float = 0.0
+    item_count: int = 0
+    customer_confirmed_at: str | None = None
+    customer_confirmation_note: str | None = None
     status: str
     status_label: str | None = None
     owner: str | None = None
@@ -784,6 +868,7 @@ class OrderDetailOut(BaseModel):
     logistics_mode: str | None = None
     logistics_mode_label: str | None = None
     logistics_fee: float = 0.0
+    freight_amount: float = 0.0
     address_id: int | None = None
     receiver_name: str | None = None
     receiver_phone: str | None = None
@@ -793,6 +878,8 @@ class OrderDetailOut(BaseModel):
     aftersales: list[dict] = Field(default_factory=list)
     deal: dict | None = None
     timeline: list[dict] = Field(default_factory=list)
+    items: list[dict] = Field(default_factory=list)
+    confirmation_files: list[AttachmentOut] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -800,6 +887,16 @@ class OrderDetailOut(BaseModel):
         if isinstance(data, dict):
             data = dict(data)
             data.setdefault("paid_amount", (data.get("deposit_paid") or 0.0) + (data.get("balance_paid") or 0.0))
+            if not data.get("product_total"):
+                data["product_total"] = data.get("amount") or 0.0
+            if not data.get("product_payable"):
+                data["product_payable"] = max(
+                    0.0,
+                    float(data.get("product_total") or 0.0)
+                    - float(data.get("discount_amount") or 0.0),
+                )
+            if not data.get("freight_amount"):
+                data["freight_amount"] = data.get("logistics_fee") or 0.0
             if data.get("tracking_number") is None and data.get("tracking_no") is not None:
                 data["tracking_number"] = data.get("tracking_no")
         return data
@@ -808,6 +905,8 @@ class OrderDetailOut(BaseModel):
     def _fill_status_label(self) -> "OrderDetailOut":
         if self.status_label is None:
             self.status_label = labels.order_status(self.status)
+        if self.logistics_mode_label is None and self.logistics_mode:
+            self.logistics_mode_label = labels.logistics_mode(self.logistics_mode)
         return self
 
 
@@ -817,9 +916,20 @@ class OrderStatusLogOut(BaseModel):
     id: int
     order_id: int
     from_status: str | None = None
+    from_status_label: str | None = None
     to_status: str
+    to_status_label: str | None = None
+    event_type: str | None = None
     note: str | None = None
     created_at: str
+
+    @model_validator(mode="after")
+    def _fill_status_labels(self) -> "OrderStatusLogOut":
+        if self.from_status and self.from_status_label is None:
+            self.from_status_label = labels.order_status(self.from_status)
+        if self.to_status_label is None:
+            self.to_status_label = labels.order_status(self.to_status)
+        return self
 
 
 # ---------------- 物流公司 ----------------

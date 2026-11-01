@@ -276,7 +276,7 @@ class TestProducts(ApiTestCase):
         self.assertEqual(fresh_deal["product_name_snapshot"], "55型2扇联排测试产品")
 
         won = self.client.put(
-            f"/api/crm/deals/{deal['id']}", json={"stage": "won"}
+            f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"}
         )
         self.assertEqual(won.status_code, 200, won.text)
         ordered = self.client.post(
@@ -332,7 +332,7 @@ class TestProducts(ApiTestCase):
         self.assertTrue(any(item["type"] == "change" for item in timeline))
 
         won = self.client.put(
-            f"/api/crm/deals/{deal['id']}", json={"stage": "won"}
+            f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"}
         )
         self.assertEqual(won.status_code, 200, won.text)
         ordered = self.client.post(

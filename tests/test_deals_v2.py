@@ -75,29 +75,22 @@ class DealsTest(ApiTestCase):
         self.assertEqual(resp.status_code, 400, "amount 必填")
 
     # ---------- 阶段流转 ----------
-    def test_stage_won_sets_and_clears_closed_at(self):
+    def test_manual_stage_won_requires_customer_confirmation(self):
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=1000.0)
 
-        # 定稿（§7.6）：阶段可在编辑里推进到「成交」，之后再生成订单
+        # 新口径：生成订单不等于成交，必须客户确认后才能进入成交。
         bad = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
-        self.assertEqual(bad.status_code, 200, bad.text)
-        self.assertEqual(bad.json()["stage"], "won")
-        self.assertTrue(bad.json()["closed_at"], "进成交必须写 closed_at")
-
-        # 退回报价：closed_at 要清空，避免统计虚高
-        back = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "quote"})
-        self.assertEqual(back.status_code, 200, back.text)
-        self.assertIsNone(back.json()["closed_at"])
+        self.assertEqual(bad.status_code, 400, bad.text)
+        self.assertEqual(bad.json()["code"], "stage_via_customer_confirmation")
 
         won = self.client.post(f"/api/crm/deals/{deal['id']}/win")
         self.assertEqual(won.status_code, 200, won.text)
         body = won.json()["deal"]
-        self.assertEqual(body["stage"], "won")
-        self.assertTrue(body["closed_at"], "赢单必须置 closed_at")
-        self.assertEqual(body["closed_at"][:10], __import__("datetime").datetime.now().strftime("%Y-%m-%d"))
+        self.assertEqual(body["stage"], "confirm")
+        self.assertIsNone(body["closed_at"], "客户确认前不能计为成交")
 
-        # 赢单后冻结：PUT 改阶段 → 409
+        # 生成订单后冻结：PUT 改阶段 → 409
         frozen = self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "quote"})
         self.assertEqual(frozen.status_code, 409, frozen.text)
 
@@ -172,8 +165,8 @@ class DealsTest(ApiTestCase):
         self.assertEqual(only_a.status_code, 200, only_a.text)
         self.assertEqual({d["id"] for d in only_a.json()}, {d1["id"], d2["id"]})
 
-        won = self.client.get("/api/crm/deals", params={"stage": "won"}).json()
-        self.assertEqual([d["id"] for d in won], [d3["id"]])
+        confirm = self.client.get("/api/crm/deals", params={"stage": "confirm"}).json()
+        self.assertEqual([d["id"] for d in confirm], [d3["id"]])
 
         combined = self.client.get(
             "/api/crm/deals", params={"customer_id": a["id"], "stage": "won"}
@@ -238,11 +231,11 @@ class DealsTest(ApiTestCase):
         # 检查返回结果
         self.assertIn("deal", data)
         self.assertIn("order", data)
-        self.assertEqual(data["deal"]["stage"], "won")
+        self.assertEqual(data["deal"]["stage"], "confirm")
         self.assertIsNotNone(data["deal"]["order_id"])
         self.assertIsNotNone(data["order"]["order_no"])
         self.assertEqual(data["order"]["amount"], 1000.0)
-        self.assertEqual(data["order"]["status"], "pending_payment")
+        self.assertEqual(data["order"]["status"], "pending_confirmation")
         
         # 检查订单状态日志
         order_id = data["deal"]["order_id"]
@@ -250,7 +243,7 @@ class DealsTest(ApiTestCase):
         self.assertEqual(order_resp.status_code, 200)
         order_data = order_resp.json()
         self.assertEqual(len(order_data["status_log"]), 1)
-        self.assertEqual(order_data["status_log"][0]["to_status"], "pending_payment")
+        self.assertEqual(order_data["status_log"][0]["to_status"], "pending_confirmation")
 
     def test_win_deal_already_won_creates_order(self):
         """已成交但没有订单（异常态）→ /win 补生成订单（不再报错）"""

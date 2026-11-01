@@ -113,11 +113,15 @@ class AftersaleFollowFlowTest(ApiTestCase):
     def test_aftersale_lifecycle_with_timeline(self):
         c = self.create_customer(name="售后客户")
         deal = self.create_deal(c["id"], amount=9000.0, drive_type="manual")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         order = self.client.post(
             f"/api/crm/deals/{deal['id']}/orders",
             json={"deposit": 9000, "logistics_mode": "self"},
         ).json()["order"]
+        self.client.post(
+            f"/api/crm/orders/{order['id']}/confirm",
+            data={"note": "售后流程测试客户已确认"},
+        )
         # 走完 7 态
         self.client.post(f"/api/crm/orders/{order['id']}/pay-deposit", data={"amount": "9000"})
         for target in ("producing",):
@@ -159,7 +163,7 @@ class AftersaleFollowFlowTest(ApiTestCase):
     def test_aftersale_requires_completed_order(self):
         c = self.create_customer(name="售后客户")
         deal = self.create_deal(c["id"], amount=1000.0, drive_type="manual")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         order = self.client.post(
             f"/api/crm/deals/{deal['id']}/orders",
             json={"deposit": 1000, "logistics_mode": "self"},

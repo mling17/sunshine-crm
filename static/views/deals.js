@@ -21,9 +21,53 @@ function driveBadge(deal) {
 }
 
 function dealProductText(deal) {
+    if (deal.items && deal.items.length > 1) {
+        return (deal.product_name_snapshot || deal.product_type || '多产品') +
+            ' 等 ' + deal.items.length + ' 项产品';
+    }
     var parts = [deal.product_name_snapshot, deal.product_type, deal.model, deal.spec].filter(Boolean);
     parts = parts.filter(function (value, index) { return parts.indexOf(value) === index; });
     return parts.length ? parts.join(' / ') : '未填产品';
+}
+
+function dealItemName(item) {
+    return [item.product_code_snapshot, item.product_name_snapshot].filter(Boolean).join(' · ') ||
+        [item.product_type, item.model].filter(Boolean).join(' · ') || '未关联产品';
+}
+
+function dealItemsCardHtml(items, editable, total) {
+    var rows = (items || []).map(function (item, index) {
+        return '<tr>' +
+            '<td>' + (index + 1) + '</td>' +
+            '<td><b>' + esc(dealItemName(item)) + '</b>' +
+                (item.product_config_snapshot ? '<div class="small muted">' +
+                    esc(item.product_config_snapshot) + '</div>' : '') + '</td>' +
+            '<td>' + esc(item.quantity || 1) + '</td>' +
+            '<td>' + esc(item.spec || '—') + '</td>' +
+            '<td>' + esc(item.production_spec || '—') + '</td>' +
+            '<td style="text-align:right;white-space:nowrap">' + money(item.unit_price) + '</td>' +
+            '<td style="text-align:right;white-space:nowrap"><b>' + money(item.amount) + '</b></td>' +
+            (editable ? '<td style="white-space:nowrap">' +
+                '<button type="button" class="btn btn-sm" data-edit-item="' + item.id + '">编辑</button> ' +
+                '<button type="button" class="btn btn-sm btn-danger" data-delete-item="' + item.id + '">删除</button>' +
+                '</td>' : '') +
+            '</tr>';
+    }).join('');
+    var empty = '<tr><td colspan="' + (editable ? 8 : 7) +
+        '" class="empty">还没有产品明细</td></tr>';
+    return '<div class="card" id="dealItemsCard">' +
+        '<div class="card-head"><h2>产品明细 <span class="badge muted">' +
+        (items || []).length + '</span></h2>' +
+        (editable ? '<button type="button" class="btn btn-sm btn-primary" id="btnAddDealItem">' +
+            '＋ 添加产品</button>' :
+            '<span class="small muted">商机已锁定，产品明细为快照</span>') +
+        '</div><div class="table-wrap"><table><thead><tr>' +
+        '<th>#</th><th>产品</th><th>数量</th><th>洞口尺寸</th><th>生产参数</th>' +
+        '<th style="text-align:right">单价</th><th style="text-align:right">金额</th>' +
+        (editable ? '<th>操作</th>' : '') +
+        '</tr></thead><tbody>' + (rows || empty) + '</tbody></table></div>' +
+        '<p class="small muted" style="margin:10px 0 0;text-align:right">' +
+        '产品合计 <b>' + money(total) + '</b>；优惠和运费在生成订单时单独填写</p></div>';
 }
 
 /* ---------------- 商机列表（表格） ---------------- */
@@ -108,6 +152,8 @@ function viewDealDetail(root, rawId) {
         var customerName = index[d.customer_id] || ('客户 #' + d.customer_id);
         var timelineRecords = followupRecordsFromApi(records);
         var canFollow = !d.order_id && d.stage !== 'won' && d.stage !== 'lost';
+        var canEditItems = !d.order_id && d.stage !== 'lost';
+        var items = d.items || [];
 
         var orderLink = d.order_id
             ? '<a class="badge ok" href="#/orders/' + d.order_id + '">已生成订单 ›</a>' : '';
@@ -122,12 +168,14 @@ function viewDealDetail(root, rawId) {
                 (d.lost_reason_label ? '（' + esc(d.lost_reason_label) + '）' : '') + '</span>';
         } else {
             actionHtml = '<button type="button" class="btn btn-sm" id="dealEdit">编辑商机</button>' +
-                (d.stage === 'won'
+                ((d.stage === 'confirm' || d.stage === 'won')
                     ? '<button type="button" class="btn btn-sm btn-primary" id="dealToOrder">生成订单</button>'
-                    : '<button type="button" class="btn btn-sm" disabled title="先把阶段推进到「成交」">生成订单</button>') +
+                    : '<button type="button" class="btn btn-sm" disabled title="先把阶段推进到「待客户确认」">生成订单</button>') +
                 '<button type="button" class="btn btn-sm" id="dealLose">判流失</button>' +
                 '<span class="small muted">' +
-                (d.stage === 'won' ? '已成交，可以生成订单' : '阶段推进到「成交」后才能生成订单') + '</span>';
+                ((d.stage === 'confirm' || d.stage === 'won')
+                    ? '生成订单后先等待客户确认，客户确认后再进入收款'
+                    : '阶段推进到「待客户确认」后才能生成订单') + '</span>';
         }
 
         var productHtml = d.product_id
@@ -151,7 +199,8 @@ function viewDealDetail(root, rawId) {
                 ['型号', d.model || '—'],
                 ['手动/电动', driveBadge(d), true],
                 ['尺寸/洞口尺寸', d.spec || '—'],
-                ['报价金额', money(d.amount)],
+                ['产品明细', String(items.length) + ' 项'],
+                ['产品合计', money(d.amount)],
                 ['阶段', dealStageBadge(d.stage, d.stage_label), true],
                 ['产品配置', d.product_config_snapshot || '—'],
                 ['备注', d.note || '—'],
@@ -165,7 +214,8 @@ function viewDealDetail(root, rawId) {
                 ? '商机已生成订单，请到订单中继续处理'
                 : (d.stage === 'lost' ? '已流失的商机不能再添加跟进' : '已成交商机不能再添加跟进'),
             records: timelineRecords,
-            extraHtml: filesCardHtml(collectFiles(timelineRecords), '这个商机还没有上传图纸 / 报价单 / 现场照片'),
+            extraHtml: dealItemsCardHtml(items, canEditItems, d.amount) +
+                filesCardHtml(collectFiles(timelineRecords), '这个商机还没有上传图纸 / 报价单 / 现场照片'),
             onSubmit: function (p) {
                 var fd = new FormData();
                 fd.append('object_type', 'deal');
@@ -191,9 +241,39 @@ function viewDealDetail(root, rawId) {
         var orderBtn = $('#dealToOrder', root);
         if (orderBtn) {
             orderBtn.addEventListener('click', function () {
-                openDealOrderModal(d, customerName);
+                openDealOrderModal(d, customerName, items);
             });
         }
+
+        var addItemBtn = $('#btnAddDealItem', root);
+        if (addItemBtn) {
+            addItemBtn.addEventListener('click', function () {
+                openDealItemModal(d, null, products, function () { return render(); });
+            });
+        }
+        $$('[data-edit-item]', root).forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var itemId = Number(btn.getAttribute('data-edit-item'));
+                var item = items.filter(function (row) { return Number(row.id) === itemId; })[0];
+                if (item) {
+                    openDealItemModal(d, item, products, function () { return render(); });
+                }
+            });
+        });
+        $$('[data-delete-item]', root).forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var itemId = Number(btn.getAttribute('data-delete-item'));
+                if (!window.confirm('确认删除这条产品明细？')) { return; }
+                btn.disabled = true;
+                api('/deals/' + d.id + '/items/' + itemId, { method: 'DELETE' }).then(function () {
+                    toast('产品明细已删除');
+                    return render();
+                }).catch(function (err) {
+                    toast(err.message, true);
+                    btn.disabled = false;
+                });
+            });
+        });
 
         var loseBtn = $('#dealLose', root);
         if (loseBtn) {
@@ -201,6 +281,109 @@ function viewDealDetail(root, rawId) {
                 openDealLose(d, function () { return render(); });
             });
         }
+    });
+}
+
+/* ---------------- 产品明细：一张商机可包含多个产品，同产品不同参数拆行 ---------------- */
+function openDealItemModal(deal, item, products, done) {
+    var modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML =
+        '<div class="modal-overlay"></div>' +
+        '<div class="modal-content wide">' +
+        '<div class="modal-header"><h3>' + (item ? '编辑产品明细' : '添加产品') + '</h3>' +
+        '<button type="button" class="btn btn-link modal-close" aria-label="关闭">×</button></div>' +
+        '<div class="modal-body"><form id="dealItemForm" class="form-grid" autocomplete="off">' +
+        '<div class="field field-wide"><label>产品 *</label>' +
+        productPickerHtml(products || [], item && item.product_id, '搜索并选择产品') +
+        '<div class="small muted" data-product-hint>' +
+        esc(item && item.product_config_snapshot || '选择产品后带出编码、类型和生产配置') +
+        '</div></div>' +
+        '<div class="row-3">' +
+        '<div class="field"><label>数量 *</label><input name="quantity" type="number" ' +
+        'min="1" max="999" step="1" inputmode="numeric" required value="' +
+        Number(item && item.quantity || 1) + '"></div>' +
+        '<div class="field"><label>单价 *</label><input name="unit_price" type="number" ' +
+        'min="0" step="0.01" inputmode="decimal" required value="' +
+        Number(item && item.unit_price || 0) + '"></div>' +
+        '<div class="field"><label>明细金额</label><input name="amount" disabled value="0.00"></div>' +
+        '</div>' +
+        '<div class="row-2">' +
+        '<div class="field"><label>洞口尺寸</label><input name="spec" maxlength="200" ' +
+        'placeholder="如 1200*2400" value="' + esc(item && item.spec || '') + '"></div>' +
+        '<div class="field"><label>生产参数</label><input name="production_spec" maxlength="1000" ' +
+        'placeholder="框/扇/玻璃制作尺寸或公式结果" value="' +
+        esc(item && item.production_spec || '') + '"></div>' +
+        '</div>' +
+        '<div class="field"><label>明细备注</label><textarea name="note" maxlength="500">' +
+        esc(item && item.note || '') + '</textarea></div>' +
+        '<p class="small muted" style="margin-top:0">同一产品且尺寸、配置相同请改数量；' +
+        '尺寸或生产参数不同请另加一条明细。</p>' +
+        '<div class="form-actions"><button type="button" class="btn modal-cancel">取消</button>' +
+        '<button type="submit" class="btn btn-primary">保存明细</button></div>' +
+        '</form></div></div>';
+    document.body.appendChild(modal);
+
+    function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
+    modal.querySelector('.modal-close').addEventListener('click', close);
+    modal.querySelector('.modal-cancel').addEventListener('click', close);
+
+    var form = modal.querySelector('form');
+    var picker = bindProductPicker(form.querySelector('[data-product-picker]'), products || [], {
+        onChange: function (product) {
+            var hint = form.querySelector('[data-product-hint]');
+            if (hint) {
+                hint.textContent = product
+                    ? [product.code, product.name, product.config_summary].filter(Boolean).join(' · ')
+                    : '搜索并选择产品';
+            }
+        }
+    });
+    var qtyEl = form.querySelector('[name="quantity"]');
+    var priceEl = form.querySelector('[name="unit_price"]');
+    var amountEl = form.querySelector('[name="amount"]');
+
+    function refreshAmount() {
+        var qty = Number(qtyEl.value) || 0;
+        var price = Number(priceEl.value) || 0;
+        amountEl.value = (Math.round(qty * price * 100) / 100).toFixed(2);
+    }
+    qtyEl.addEventListener('input', refreshAmount);
+    priceEl.addEventListener('input', refreshAmount);
+    refreshAmount();
+
+    form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        if (!picker.getValue()) { toast('请选择产品', true); return; }
+        var quantity = Number(qtyEl.value);
+        var unitPrice = Number(priceEl.value);
+        if (!Number.isInteger(quantity) || quantity < 1) {
+            toast('数量必须是大于 0 的整数', true);
+            return;
+        }
+        if (isNaN(unitPrice) || unitPrice < 0) {
+            toast('单价不能为负', true);
+            return;
+        }
+        var payload = {
+            product_id: Number(picker.getValue()),
+            quantity: quantity,
+            unit_price: unitPrice,
+            spec: String(form.querySelector('[name="spec"]').value || '').trim() || null,
+            production_spec: String(form.querySelector('[name="production_spec"]').value || '').trim() || null,
+            note: String(form.querySelector('[name="note"]').value || '').trim() || null
+        };
+        var btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        var path = '/deals/' + deal.id + '/items' + (item ? '/' + item.id : '');
+        api(path, { method: item ? 'PUT' : 'POST', body: payload }).then(function () {
+            toast(item ? '产品明细已保存' : '产品已添加');
+            close();
+            if (done) { done(); }
+        }).catch(function (err) {
+            toast(err.message, true);
+            btn.disabled = false;
+        });
     });
 }
 
@@ -465,8 +648,10 @@ function viewDealNew(root, route) {
  *          自提不需要收货信息，包邮/代办必须选物流公司 + 填全收货人。
  * 走 POST /deals/{id}/orders（正路），不再用 /win（那是定金=全额的兼容端点）。
  */
-function openDealOrderModal(deal, customerName) {
-    var amount0 = Number(deal.amount) || 0;
+function openDealOrderModal(deal, customerName, items) {
+    var productTotal = (items || []).reduce(function (sum, item) {
+        return sum + (Number(item.amount) || 0);
+    }, 0);
 
     var modal = document.createElement('div');
     modal.className = 'modal';
@@ -478,16 +663,36 @@ function openDealOrderModal(deal, customerName) {
         '<div class="modal-body">' +
         '<form id="dealOrderForm" class="form-grid" autocomplete="off">' +
         '<p class="small muted" style="margin-top:0">' +
-        esc(customerName) + ' · ' + esc(dealProductText(deal)) + '　成交后商机会锁定。</p>' +
+        esc(customerName) + ' · 生成后订单先等待客户确认，商机会锁定。</p>' +
+        '<div class="card" style="margin:0"><div class="card-head"><h3>产品明细</h3>' +
+        '<span class="small muted">共 ' + (items || []).length + ' 项</span></div>' +
+        (items || []).map(function (item) {
+            return '<div class="item"><div class="item-main"><div class="item-title">' +
+                esc(dealItemName(item)) + '<span class="badge muted">×' +
+                esc(item.quantity || 1) + '</span></div><div class="item-sub small muted">' +
+                esc([item.spec, item.production_spec].filter(Boolean).join(' · ') || '参数待确认') +
+                '</div></div><div class="item-side"><b>' + money(item.amount) + '</b></div></div>';
+        }).join('') + '</div>' +
         '<div class="row-3">' +
-        '<div class="field"><label>报价金额（订单总额）</label>' +
-        '<input name="amount" type="number" value="' + amount0 + '" readonly title="订单总额固定取商机报价"></div>' +
+        '<div class="field"><label>产品合计</label>' +
+        '<input name="product_total" type="number" value="' + productTotal + '" readonly></div>' +
+        '<div class="field"><label>整单优惠</label>' +
+        '<input name="discount_amount" type="number" min="0" step="0.01" inputmode="decimal" value="0"></div>' +
+        '<div class="field"><label>优惠后产品应收</label>' +
+        '<input name="product_payable" type="number" readonly></div>' +
+        '</div>' +
+        '<div class="field"><label>优惠说明（优惠大于 0 时填写）</label>' +
+        '<input name="discount_reason" maxlength="200" placeholder="微信协商的优惠原因"></div>' +
+        '<div class="row-3">' +
+        '<div class="field"><label>运费（我方收取）</label>' +
+        '<input name="logistics_fee" type="number" min="0" step="0.01" inputmode="decimal" value="0"></div>' +
+        '<div class="field"><label>订单应收</label>' +
+        '<input name="amount" type="number" readonly></div>' +
         '<div class="field"><label>定金（第一笔）*</label>' +
         '<input name="deposit" type="number" min="0" step="0.01" inputmode="decimal" required ' +
-        'placeholder="按合同填定金"></div>' +
-        '<div class="field"><label>尾款（自动算）</label>' +
-        '<input name="balance" value="" disabled></div>' +
+        'placeholder="按协商填定金"></div>' +
         '</div>' +
+        '<div class="field"><label>尾款（自动计算）</label><input name="balance" disabled></div>' +
         '<div class="row-2">' +
         '<div class="field"><label>物流方式</label>' +
         '<select name="logistics_mode">' +
@@ -498,14 +703,15 @@ function openDealOrderModal(deal, customerName) {
         '<div class="field" data-ship hidden><label>物流公司 *</label>' +
         '<select name="carrier_id"><option value="">请选择</option></select></div>' +
         '</div>' +
-        '<div class="field" data-ship hidden><label>物流费用</label>' +
-        '<input name="logistics_fee" type="number" min="0" step="0.01" inputmode="decimal" value="0"></div>' +
         '<div class="row-3" data-ship hidden>' +
         '<div class="field"><label>收货人 *</label><input name="receiver_name" maxlength="32"></div>' +
         '<div class="field"><label>收货电话 *</label><input name="receiver_phone" maxlength="32" inputmode="tel"></div>' +
         '<div class="field field-wide"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
         '</div>' +
-        '<p class="small muted">收款只走两笔：先「收定金」，生产阶段再「收尾款」。定金 + 尾款 = 报价金额。</p>' +
+        '<div class="field"><label>订单备注</label><textarea name="note" maxlength="500">' +
+        esc(deal.note || '') + '</textarea></div>' +
+        '<p class="small muted">优惠只减产品合计，运费单独计入订单应收，不混入产品金额。' +
+        '订单生成后，先发下单表给客户确认；客户确认后再进入收款。</p>' +
         '<div class="form-actions">' +
         '<button type="button" class="btn modal-cancel">取消</button>' +
         '<button type="submit" class="btn btn-primary">生成订单</button>' +
@@ -519,6 +725,9 @@ function openDealOrderModal(deal, customerName) {
     modal.querySelector('.modal-cancel').addEventListener('click', close);
 
     var form = modal.querySelector('form');
+    var discountEl = form.querySelector('[name="discount_amount"]');
+    var feeEl = form.querySelector('[name="logistics_fee"]');
+    var productPayableEl = form.querySelector('[name="product_payable"]');
     var amountEl = form.querySelector('[name="amount"]');
     var depositEl = form.querySelector('[name="deposit"]');
     var balanceEl = form.querySelector('[name="balance"]');
@@ -526,20 +735,30 @@ function openDealOrderModal(deal, customerName) {
     var carrierEl = form.querySelector('[name="carrier_id"]');
     var shipFields = $$('[data-ship]', modal);
 
-    function refreshBalance() {
-        var a = Number(amountEl.value) || 0;
+    function refreshMoney() {
+        var discount = Number(discountEl.value) || 0;
+        var fee = modeEl.value === 'self' ? 0 : (Number(feeEl.value) || 0);
+        var payable = Math.max(0, productTotal - discount);
+        var receivable = payable + fee;
+        productPayableEl.value = (Math.round(payable * 100) / 100).toFixed(2);
+        amountEl.value = (Math.round(receivable * 100) / 100).toFixed(2);
         var dep = Number(depositEl.value) || 0;
-        balanceEl.value = (Math.round((a - dep) * 100) / 100).toFixed(2);
+        balanceEl.value = (Math.round((receivable - dep) * 100) / 100).toFixed(2);
     }
-    depositEl.addEventListener('input', refreshBalance);
-    refreshBalance();
 
     function refreshShip() {
         var need = modeEl.value !== 'self';
         shipFields.forEach(function (el) { el.hidden = !need; });
+        feeEl.disabled = !need;
+        if (!need) { feeEl.value = '0'; }
+        refreshMoney();
     }
     modeEl.addEventListener('change', refreshShip);
+    discountEl.addEventListener('input', refreshMoney);
+    feeEl.addEventListener('input', refreshMoney);
+    depositEl.addEventListener('input', refreshMoney);
     refreshShip();
+    refreshMoney();
 
     /* 物流公司：只列启用的 */
     api('/carriers').then(function (list) {
@@ -552,18 +771,26 @@ function openDealOrderModal(deal, customerName) {
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var btn = form.querySelector('button[type="submit"]');
-        var amount = amount0;
+        var amount = Number(amountEl.value) || 0;
         var deposit = numOrNull(depositEl.value);
+        var discount = numOrNull(discountEl.value) || 0;
         var mode = modeEl.value;
-        if (!(amount > 0)) { toast('商机报价金额必须大于 0', true); return; }
+        if (!(productTotal > 0)) { toast('产品明细合计必须大于 0', true); return; }
+        if (discount < 0 || discount > productTotal) {
+            toast('优惠必须在 0 到产品合计之间', true);
+            return;
+        }
         if (deposit === null || deposit < 0 || deposit > amount) {
-            toast('定金必须在 0 到报价金额之间', true);
+            toast('定金必须在 0 到订单应收之间', true);
             return;
         }
         var payload = {
+            discount_amount: discount,
+            discount_reason: String(form.querySelector('[name="discount_reason"]').value || '').trim() || null,
             deposit: deposit,
             logistics_mode: mode,
-            logistics_fee: numOrNull(form.querySelector('[name="logistics_fee"]').value) || 0
+            logistics_fee: numOrNull(feeEl.value) || 0,
+            note: String(form.querySelector('[name="note"]').value || '').trim() || null
         };
         if (mode !== 'self') {
             if (!carrierEl.value) { toast('包邮 / 代办要选物流公司', true); return; }

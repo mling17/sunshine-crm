@@ -127,8 +127,11 @@ class TestWorkbench(ApiTestCase):
         
         # 检查订单状态统计
         orders_by_status = data["stats"]["orders_by_status"]
-        # 检查所有7种状态都存在且计数为0
-        expected_statuses = ["pending_payment", "deposit_paid", "producing", "balance_paid", "ready_to_ship", "shipped", "completed"]
+        # 检查所有 8 种状态都存在且计数为 0
+        expected_statuses = [
+            "pending_confirmation", "pending_payment", "deposit_paid", "producing",
+            "balance_paid", "ready_to_ship", "shipped", "completed",
+        ]
         for status in expected_statuses:
             self.assertIn(status, orders_by_status)
             self.assertEqual(orders_by_status[status]["count"], 0)

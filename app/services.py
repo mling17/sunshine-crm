@@ -481,6 +481,7 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
     
     # 验证状态流转是否合法
     valid_transitions = {
+        "pending_confirmation": ["pending_payment"],
         "pending_payment": ["deposit_paid"],
         "deposit_paid": ["producing"],
         "producing": ["balance_paid"],
@@ -506,7 +507,25 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             pass
         
         # 根据目标状态执行相应的逻辑
-        if to_status == "deposit_paid":
+        if to_status == "pending_payment":
+            now = now_iso()
+            conn.execute(
+                "UPDATE orders SET status = ?, customer_confirmed_at = ?,"
+                " customer_confirmation_note = ?, updated_at = ? WHERE id = ?",
+                (
+                    to_status,
+                    now,
+                    str(payload.get("note") or "").strip() or None,
+                    now,
+                    order_id,
+                ),
+            )
+            conn.execute(
+                "UPDATE deals SET stage = 'won', closed_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, order_row["deal_id"]),
+            )
+
+        elif to_status == "deposit_paid":
             # 支付定金逻辑（Q-D：必须等于应收定金，且只能收一次）
             deposit = round(float(payload.get("deposit") or 0), 2)
             due = order_row["deposit_amount"]
@@ -644,6 +663,7 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
 
         note = payload.get("note") or ""
         event_type = {
+            "pending_payment": "confirm",
             "deposit_paid": "pay",
             "balance_paid": "pay",
             "shipped": "ship",

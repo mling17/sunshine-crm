@@ -81,11 +81,12 @@ DEAL_LOST_REASON_LABELS: Dict[str, str] = {
 
 # ---------------- 订单状态 ----------------
 ORDER_STATUS = Literal[
-    "pending_payment", "deposit_paid", "producing", "balance_paid",
+    "pending_confirmation", "pending_payment", "deposit_paid", "producing", "balance_paid",
     "ready_to_ship", "shipped", "completed"
 ]
 #: 订单状态顺序（状态机推进顺序，前端下拉/进度条按这个顺序）
 ORDER_STATUS_ORDER = (
+    "pending_confirmation",
     "pending_payment",
     "deposit_paid",
     "producing",
@@ -96,6 +97,7 @@ ORDER_STATUS_ORDER = (
 )
 
 ORDER_STATUS_LABELS: Dict[str, str] = {
+    "pending_confirmation": "待客户确认",
     "pending_payment": "待支付",
     "deposit_paid": "已支付定金",
     "producing": "生产中",
@@ -179,14 +181,15 @@ DRIVE_TYPE_LABELS: Dict[str, str] = {
 }
 
 # ---------------- 时间线类型 ----------------
-TIMELINE_TYPE = Literal["follow", "create", "change", "stage", "order", "aftersale", "pay", "ship", "address"]
-TIMELINE_TYPE_ORDER = ("follow", "create", "change", "stage", "order", "aftersale", "pay", "ship", "address")
+TIMELINE_TYPE = Literal["follow", "create", "change", "stage", "order", "confirm", "aftersale", "pay", "ship", "address"]
+TIMELINE_TYPE_ORDER = ("follow", "create", "change", "stage", "order", "confirm", "aftersale", "pay", "ship", "address")
 TIMELINE_TYPE_LABELS: Dict[str, str] = {
     "follow": "跟进",
     "create": "创建",
     "change": "编辑",
     "stage": "状态变更",
     "order": "生成订单",
+    "confirm": "客户确认",
     "aftersale": "售后",
     "pay": "收款",
     "ship": "发货",
@@ -195,6 +198,7 @@ TIMELINE_TYPE_LABELS: Dict[str, str] = {
 
 # ---------------- 订单状态流 ----------------
 ORDER_FLOW: Dict[str, str | None] = {
+    "pending_confirmation": "pending_payment",
     "pending_payment": "deposit_paid",
     "deposit_paid": "producing",
     "producing": "balance_paid",

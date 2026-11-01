@@ -7,7 +7,9 @@
 
 /* 阶段下拉选项（商机新增/编辑、跟进顺手改阶段） */
 function stageOptions(current) {
-  return STAGES.map(function (pair) {
+  return STAGES.filter(function (pair) {
+    return pair[0] === 'quote' || pair[0] === 'confirm' || pair[0] === current;
+  }).map(function (pair) {
     return '<option value="' + pair[0] + '"' + (pair[0] === current ? ' selected' : '') + '>' +
       pair[1] + '</option>';
   }).join('');

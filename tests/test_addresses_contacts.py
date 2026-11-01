@@ -45,7 +45,7 @@ class AddressTest(ApiTestCase):
         ).json()
 
         deal = self.create_deal(c["id"], amount=8000.0, drive_type="manual")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         order = self.client.post(
             f"/api/crm/deals/{deal['id']}/orders",
             json={"deposit": 2000, "logistics_mode": "self", "address_id": addr["id"]},
@@ -69,7 +69,7 @@ class AddressTest(ApiTestCase):
     def test_order_saves_new_address_to_book(self):
         c = self.create_customer(name="李地址")
         deal = self.create_deal(c["id"], amount=5000.0, drive_type="manual")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         resp = self.client.post(
             f"/api/crm/deals/{deal['id']}/orders",
             json={"deposit": 1000, "logistics_mode": "self",
@@ -120,7 +120,7 @@ class CarrierContactTest(ApiTestCase):
 
         c = self.create_customer(name="赵物流")
         deal = self.create_deal(c["id"], amount=6000.0, drive_type="manual")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         resp = self.client.post(
             f"/api/crm/deals/{deal['id']}/orders",
             json={"deposit": 1000, "logistics_mode": "agent", "carrier_id": carrier["id"],

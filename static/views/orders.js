@@ -10,6 +10,7 @@ var LOGISTICS_MODE_OPTIONS = [['free', '包邮'], ['agent', '代办'], ['self', 
 
 /* 下一步动作：状态 → [目标状态, 按钮文案] */
 var ORDER_NEXT_STEP = {
+    pending_confirmation: ['pending_payment', '记录客户确认'],
     pending_payment: ['deposit_paid', '收定金'],
     deposit_paid: ['producing', '开始生产'],
     producing: ['balance_paid', '收尾款'],
@@ -19,7 +20,8 @@ var ORDER_NEXT_STEP = {
 };
 
 function orderStatusBadge(status, label) {
-    var cls = status === 'completed' ? 'ok' : (status === 'pending_payment' ? 'warn' : 'muted');
+    var cls = status === 'completed' ? 'ok' :
+        ((status === 'pending_confirmation' || status === 'pending_payment') ? 'warn' : 'muted');
     return '<span class="badge ' + cls + '">' + esc(label || ORDER_STATUS_LABEL[status] || status) + '</span>';
 }
 
@@ -55,8 +57,10 @@ function viewOrders(root, route) {
                 return esc(o.customer_name || index[o.customer_id] || ('客户 #' + o.customer_id));
             } },
             { title: '产品', nowrap: true, render: function (o) {
-                return esc([o.product_name_snapshot, o.product_code_snapshot || o.model]
-                    .filter(Boolean).join(' / ') || [o.product_type, o.model].filter(Boolean).join(' ') || '—');
+                var text = [o.product_name_snapshot, o.product_code_snapshot || o.model]
+                    .filter(Boolean).join(' / ') || [o.product_type, o.model].filter(Boolean).join(' ') || '—';
+                return esc(text) + (Number(o.item_count || 0) > 1
+                    ? '<div class="small muted">共 ' + Number(o.item_count) + ' 项产品</div>' : '');
             } },
             { title: '总额', align: 'right', nowrap: true, render: function (o) { return money(o.amount); } },
             { title: '已收', align: 'right', nowrap: true, render: function (o) {
@@ -158,6 +162,7 @@ function viewOrderDetail(root, rawId) {
         var infoHtml = infoGrid([
             ['客户', '<a href="#/customers/' + order.customer_id + '">' + esc(customerName) + '</a>', true],
             ['关联商机', dealHtml, true],
+            ['产品数量', String((order.items || []).length) + ' 项'],
             ['关联产品', order.product_id
                 ? '<a href="#/products/' + order.product_id + '">' +
                   esc(order.product_name_snapshot || ('产品 #' + order.product_id)) + '</a>'
@@ -171,6 +176,67 @@ function viewOrderDetail(root, rawId) {
             ['创建时间', fmtDateTime(order.created_at)],
             ['完成时间', order.completed_at ? fmtDateTime(order.completed_at) : '—']
         ]);
+
+        var itemsHtml = '<div class="card">' +
+            '<div class="card-head"><h2>产品明细 <span class="badge muted">' +
+            (order.items || []).length + '</span></h2>' +
+            '<span class="small muted">生成订单时冻结的产品快照</span></div>' +
+            ((order.items || []).length
+                ? '<div class="table-wrap"><table><thead><tr><th>#</th><th>产品</th>' +
+                  '<th>数量</th><th>洞口尺寸</th><th>生产参数</th>' +
+                  '<th style="text-align:right">单价</th><th style="text-align:right">金额</th>' +
+                  '</tr></thead><tbody>' +
+                  order.items.map(function (item, index) {
+                      return '<tr><td>' + (index + 1) + '</td><td><b>' +
+                          esc([item.product_code_snapshot, item.product_name_snapshot]
+                              .filter(Boolean).join(' · ') || item.product_type || '—') +
+                          '</b>' + (item.product_config_snapshot
+                              ? '<div class="small muted">' + esc(item.product_config_snapshot) + '</div>' : '') +
+                          '</td><td>' + esc(item.quantity || 1) +
+                          '</td><td>' + esc(item.spec || '—') +
+                          '</td><td>' + esc(item.production_spec || '—') +
+                          '</td><td style="text-align:right;white-space:nowrap">' +
+                          money(item.unit_price) + '</td><td style="text-align:right;white-space:nowrap"><b>' +
+                          money(item.amount) + '</b></td></tr>';
+                  }).join('') + '</tbody></table></div>'
+                : '<p class="empty">没有产品明细快照</p>') +
+            '</div>';
+
+        var productTotal = Number(order.product_total || order.amount || 0);
+        var discountAmount = Number(order.discount_amount || 0);
+        var productPayable = Number(order.product_payable || (productTotal - discountAmount));
+        var freightAmount = Number(order.logistics_fee || order.freight_amount || 0);
+        var priceBreakdownHtml = '<div class="card">' +
+            '<div class="card-head"><h2>订单金额</h2>' +
+            '<span class="small muted">优惠只作用于产品合计，运费独立核算</span></div>' +
+            infoGrid([
+                ['产品合计', money(productTotal)],
+                ['整单优惠', discountAmount ? '-' + money(discountAmount) : money(0)],
+                ['优惠后产品应收', money(productPayable)],
+                ['运费（我方收取）', money(freightAmount)],
+                ['订单应收', money(totalAmount)],
+                ['优惠说明', order.discount_reason || '—']
+            ]) + '</div>';
+
+        var confirmFiles = (order.confirmation_files || []).map(function (file) {
+            var url = '/crm' + file.url;
+            return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' +
+                '<img src="' + esc(url) + '" alt="客户确认截图" loading="lazy"></a>';
+        }).join('');
+        var confirmationHtml = '<div class="card">' +
+            '<div class="card-head"><h2>客户确认</h2>' +
+            (order.customer_confirmed_at
+                ? '<span class="badge ok">已确认</span>'
+                : '<span class="badge warn">待确认</span>') + '</div>' +
+            '<p class="small muted" style="margin-top:0">客户通过微信查看下单表并确认；' +
+            '优惠和物流等协商条件可同时通过聊天确认，截图作为凭证。</p>' +
+            infoGrid([
+                ['确认时间', order.customer_confirmed_at
+                    ? fmtDateTime(order.customer_confirmed_at) : '—'],
+                ['确认说明', order.customer_confirmation_note || '—']
+            ]) +
+            (confirmFiles ? '<div class="photos">' + confirmFiles + '</div>' : '') +
+            '</div>';
 
         /* 售后单 */
         var aftersalesHtml = aftersales.length ? '<div class="card">' +
@@ -209,8 +275,14 @@ function viewOrderDetail(root, rawId) {
         /* 下一步操作 */
         var next = ORDER_NEXT_STEP[order.status];
         var actionBtns = '';
+        if (order.status === 'pending_confirmation') {
+            actionBtns += '<button type="button" class="btn btn-primary" id="btnConfirmCustomer">' +
+                '记录客户确认</button>';
+        }
         if (next) {
-            actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
+            if (order.status !== 'pending_confirmation') {
+                actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
+            }
         }
         if (order.status === 'completed') {
             actionBtns += '<button type="button" class="btn" id="btnAddAftersale">＋ 添加售后</button>';
@@ -228,6 +300,9 @@ function viewOrderDetail(root, rawId) {
             progressHtml +
             '<div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">' + actionBtns + '</div>' +
             '</div>' +
+            itemsHtml +
+            priceBreakdownHtml +
+            confirmationHtml +
 
             (function () {
                 var depositDue = Number(order.deposit_amount || 0);
@@ -283,9 +358,55 @@ function viewOrderDetail(root, rawId) {
             });
         }
 
+        var confirmBtn = $('#btnConfirmCustomer', root);
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', function () { showCustomerConfirmModal(order); });
+        }
+
         var addAsBtn = $('#btnAddAftersale', root);
         if (addAsBtn) { addAsBtn.addEventListener('click', function () { openAftersaleModal(order); }); }
     });
+}
+
+/* ---------------- 客户确认：下单表在微信发出，截图/说明作为确认凭证 ---------------- */
+function showCustomerConfirmModal(order) {
+    var modal = createOrderModal('记录客户确认');
+    modal.querySelector('.modal-body').innerHTML =
+        '<form id="customerConfirmForm" class="form-modal form-grid" autocomplete="off">' +
+        '<p class="small muted">订单 ' + esc(order.order_no) + '。<br>' +
+        '请确认客户已经查看下单表，并通过微信确认了产品参数、优惠和物流等协商条件。</p>' +
+        '<div class="field"><label>确认说明</label>' +
+        '<textarea name="note" maxlength="500" rows="3" ' +
+        'placeholder="例如：客户已确认下单表；整单优惠 500 元；运费 300 元由我方收取"></textarea></div>' +
+        '<div class="field"><label>微信确认截图 / 下单表回传（最多 3 张）</label>' +
+        '<input type="file" name="screenshots" accept="image/*" multiple></div>' +
+        '<p class="small muted">确认后订单进入「待支付」，商机同时记录为成交。</p>' +
+        '<div class="form-actions"><button type="submit" class="btn btn-primary">' +
+        '客户已确认</button></div></form>';
+
+    var form = modal.querySelector('#customerConfirmForm');
+    form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        if (!window.confirm('确认客户已经同意这张订单的产品、优惠和物流条件？')) { return; }
+        var btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        var fd = new FormData();
+        var note = String(form.querySelector('[name="note"]').value || '').trim();
+        fd.append('note', note || '客户已通过微信确认下单表及协商条件');
+        var files = form.querySelector('[name="screenshots"]').files;
+        for (var i = 0; i < files.length && i < 3; i++) {
+            fd.append('screenshots', files[i]);
+        }
+        api('/orders/' + order.id + '/confirm', { method: 'POST', body: fd }).then(function () {
+            toast('已记录客户确认，订单进入待支付');
+            document.body.removeChild(modal);
+            return render();
+        }).catch(function (err) {
+            toast(err.message, true);
+            btn.disabled = false;
+        });
+    });
+    document.body.appendChild(modal);
 }
 
 /* ---------------- 添加售后（订单已完成才允许；售后单只能这么创建） ---------------- */

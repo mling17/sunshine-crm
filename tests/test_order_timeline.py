@@ -10,7 +10,7 @@ class OrderTimelineTest(ApiTestCase):
     def _order(self, amount: float = 10000.0, deposit: float = 3000.0):
         c = self.create_customer(name="王测试")
         deal = self.create_deal(c["id"], amount=amount, drive_type="electric")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         resp = self.client.post(
             f"/api/crm/deals/{deal['id']}/orders",
             json={
@@ -22,7 +22,13 @@ class OrderTimelineTest(ApiTestCase):
             },
         )
         self.assertEqual(resp.status_code, 200, resp.text)
-        return resp.json()["order"]
+        order = resp.json()["order"]
+        confirmed = self.client.post(
+            f"/api/crm/orders/{order['id']}/confirm",
+            data={"note": "测试客户已微信确认"},
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        return order
 
     def _pay_deposit(self, order_id: int, amount: float):
         return self.client.post(
@@ -40,7 +46,8 @@ class OrderTimelineTest(ApiTestCase):
         self.assertEqual(detail["deposit_amount"], 3000.0)
         self.assertEqual(detail["balance_amount"], 7000.0)
         self.assertEqual(detail["receiver_address"], "济南市历下区")
-        self.assertEqual([t["type"] for t in detail["timeline"]], ["order"])
+        self.assertIn("order", [t["type"] for t in detail["timeline"]])
+        self.assertIn("confirm", [t["type"] for t in detail["timeline"]])
         self.assertEqual(detail["aftersales"], [], "没有售后单就是空列表")
 
     def test_deposit_amount_must_match_due(self):

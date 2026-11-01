@@ -175,18 +175,20 @@ class DictHttpTest(ApiTestCase):
         """A18 后半：改字典显示名，出参 *_label 必须跟着变（R1 M1）"""
         c = self.create_customer(name="改名客户")
         deal = self.create_deal(c["id"], amount=500.0, drive_type="manual")
-        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"})
         self.assertEqual(
-            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage_label"], "成交"
+            self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage_label"], "待客户确认"
         )
 
-        renamed = self.client.put("/api/crm/dicts/deal_stage/items/won", json={"label": "已成交"})
+        renamed = self.client.put(
+            "/api/crm/dicts/deal_stage/items/confirm", json={"label": "等待客户拍板"}
+        )
         self.assertEqual(renamed.status_code, 200, renamed.text)
 
         detail = self.client.get(f"/api/crm/deals/{deal['id']}").json()
-        self.assertEqual(detail["stage_label"], "已成交", "字典改名必须作用到出参")
+        self.assertEqual(detail["stage_label"], "等待客户拍板", "字典改名必须作用到出参")
         rows = self.client.get("/api/crm/deals").json()
-        self.assertEqual([r["stage_label"] for r in rows if r["id"] == deal["id"]], ["已成交"])
+        self.assertEqual([r["stage_label"] for r in rows if r["id"] == deal["id"]], ["等待客户拍板"])
 
     def test_status_and_type_labels_follow_dict(self):
         created = self.client.post(

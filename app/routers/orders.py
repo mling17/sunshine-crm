@@ -20,7 +20,7 @@ from app.models import (
     AttachmentOut, OrderStatusLogOut, OrderTransitionIn, OrderTransitionOut
 )
 from app.routers.auth import require_auth
-from app.timeline import entries_for
+from app.timeline import add_entry, entries_for
 from app.security import now_iso
 from app.errors import ApiError
 from app.services import read_images
@@ -33,6 +33,7 @@ router = APIRouter(
 
 # 订单状态流转映射
 ORDER_TRANSITIONS = {
+    "pending_confirmation": ["pending_payment"],
     "pending_payment": ["deposit_paid"],
     "deposit_paid": ["producing"],
     "producing": ["balance_paid"],
@@ -78,8 +79,18 @@ def list_orders(
         rows = conn.execute(
             f"SELECT * FROM orders {where_sql} ORDER BY id DESC", params
         ).fetchall()
+        result = []
+        for row in rows:
+            data = dict(row)
+            count_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM order_items"
+                " WHERE order_id = ? AND is_delete = 0",
+                (row["id"],),
+            ).fetchone()
+            data["item_count"] = int(count_row["n"] or 0)
+            result.append(OrderOut(**data))
 
-    return [OrderOut(**dict(row)) for row in rows]
+    return result
 
 
 @router.get("/orders/{order_id}", response_model=OrderDetailOut)
@@ -111,9 +122,31 @@ def get_order(order_id: int) -> OrderDetailOut:
             ).fetchone()
         
         order_dict = dict(row)
+        order_dict["freight_amount"] = float(order_dict.get("logistics_fee") or 0)
+        order_dict["logistics_mode_label"] = LOGISTICS_MODE_LABELS.get(
+            order_dict.get("logistics_mode")
+        )
         order_dict['status_log'] = [OrderStatusLogOut(**dict(log)) for log in status_logs]
         order_dict['attachments'] = [AttachmentOut(**dict(attach)) for attach in attachments]
         order_dict['carrier'] = dict(carrier_row) if carrier_row else None
+        order_dict["items"] = [
+            dict(item)
+            for item in conn.execute(
+                "SELECT * FROM order_items WHERE order_id = ? AND is_delete = 0"
+                " ORDER BY sort, id",
+                (order_id,),
+            ).fetchall()
+        ]
+        order_dict["item_count"] = len(order_dict["items"])
+        order_dict["confirmation_files"] = [
+            AttachmentOut(**dict(attach))
+            for attach in conn.execute(
+                "SELECT * FROM attachments"
+                " WHERE object_type = 'order_confirmation' AND object_id = ?"
+                " ORDER BY id",
+                (order_id,),
+            ).fetchall()
+        ]
 
         # 物流联系人（多联系人 + 标签）
         if row['carrier_id']:
@@ -195,6 +228,71 @@ def transition_order(order_id: int, payload: OrderTransitionIn) -> OrderTransiti
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/orders/{order_id}/confirm", response_model=OrderDetailOut)
+async def confirm_order(
+    order_id: int,
+    note: str | None = Form(default=None),
+    screenshots: list[UploadFile] = File(default=[]),
+) -> OrderDetailOut:
+    """记录客户已确认下单表和微信中协商的商务条件。"""
+    with db_conn() as conn:
+        row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="订单不存在")
+        if row["status"] != "pending_confirmation":
+            raise ApiError(
+                status_code=409,
+                code="order_already_confirmed",
+                message="只有「待客户确认」的订单可以执行客户确认",
+            )
+        if screenshots:
+            await _save_order_files(
+                conn, order_id, screenshots, object_type="order_confirmation"
+            )
+        now = now_iso()
+        conn.execute(
+            "UPDATE orders SET status = 'pending_payment', customer_confirmed_at = ?,"
+            " customer_confirmation_note = ?, updated_at = ? WHERE id = ?",
+            (now, (note or "").strip() or None, now, order_id),
+        )
+        conn.execute(
+            "INSERT INTO order_status_log"
+            " (order_id, from_status, to_status, event_type, note, detail, created_at)"
+            " VALUES (?, 'pending_confirmation', 'pending_payment', 'confirm', ?, ?, ?)",
+            (
+                order_id,
+                (note or "").strip() or "客户已通过微信确认下单表及协商条件",
+                json.dumps({"customer_confirmed_at": now}, ensure_ascii=False),
+                now,
+            ),
+        )
+        conn.execute(
+            "UPDATE deals SET stage = 'won', closed_at = ?, updated_at = ? WHERE id = ?",
+            (now, now, row["deal_id"]),
+        )
+        add_entry(
+            conn,
+            object_type="order",
+            object_id=order_id,
+            kind="confirm",
+            customer_id=row["customer_id"],
+            deal_id=row["deal_id"],
+            content=(note or "").strip() or "客户已通过微信确认下单表及协商条件",
+            detail={"from_status": "pending_confirmation", "to_status": "pending_payment"},
+        )
+        add_entry(
+            conn,
+            object_type="deal",
+            object_id=row["deal_id"],
+            kind="confirm",
+            customer_id=row["customer_id"],
+            deal_id=row["deal_id"],
+            content=f"客户已确认订单 {row['order_no']}",
+            detail={"order_id": order_id},
+        )
+    return get_order(order_id)
+
+
 @router.get("/orders/{order_id}/status_log", response_model=list[OrderStatusLogOut])
 def get_order_status_log(order_id: int) -> list[OrderStatusLogOut]:
     """获取订单状态变更日志"""
@@ -255,8 +353,10 @@ def upload_payment_screenshots(
     return OrderOut(**dict(row))
 
 # ---------------- 前端契约：定金 / 尾款支付（multipart） ----------------
-async def _save_order_screenshots(conn, order_id: int, screenshots) -> list[int]:
-    """存订单支付截图到 attachments（object_type=order_payment）。async：UploadFile.read 是协程。"""
+async def _save_order_files(
+    conn, order_id: int, screenshots, *, object_type: str = "order_payment"
+) -> list[int]:
+    """存订单截图/确认凭证到 attachments。async：UploadFile.read 是协程。"""
     from app.storage import MAX_PHOTO_BYTES, ext_and_mime, new_storage_key, save_photo
 
     ids: list[int] = []
@@ -277,8 +377,8 @@ async def _save_order_screenshots(conn, order_id: int, screenshots) -> list[int]
         cur = conn.execute(
             """INSERT INTO attachments
                  (object_type, object_id, file_name, mime_type, size, storage_key, created_at)
-               VALUES ('order_payment', ?, ?, ?, ?, ?, ?)""",
-            (order_id, file_name, mime, len(data), key, now_iso()),
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (object_type, order_id, file_name, mime, len(data), key, now_iso()),
         )
         ids.append(int(cur.lastrowid or 0))
     return ids
@@ -295,7 +395,7 @@ async def pay_deposit(
 
     with db_conn() as conn:
         if screenshots:
-            await _save_order_screenshots(conn, order_id, screenshots)
+            await _save_order_files(conn, order_id, screenshots)
         result = transition(conn, order_id, "deposit_paid", {"deposit": amount, "note": note})
     return OrderTransitionOut(**result)
 
@@ -311,6 +411,6 @@ async def pay_balance(
 
     with db_conn() as conn:
         if screenshots:
-            await _save_order_screenshots(conn, order_id, screenshots)
+            await _save_order_files(conn, order_id, screenshots)
         result = transition(conn, order_id, "balance_paid", {"balance": amount, "note": note})
     return OrderTransitionOut(**result)

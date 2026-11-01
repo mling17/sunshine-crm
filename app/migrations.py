@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_009"
-SCHEMA_USER_VERSION = 9
+MIGRATION_VERSION = "v2_010"
+SCHEMA_USER_VERSION = 10
 
 
 def default_db_path() -> Path:
@@ -761,7 +761,123 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_009", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_009', datetime('now'), '每个产品必须包含一份对应 Excel 下单表')"),
-    ("user_version v2_009", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 26. v2_010：多产品商机/订单、整单优惠、客户确认 ----------
+    ("deal_items", None, """
+    CREATE TABLE IF NOT EXISTS deal_items (
+      id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+      deal_id                  INTEGER NOT NULL,
+      product_id               INTEGER,
+      product_code_snapshot    TEXT,
+      product_name_snapshot    TEXT,
+      product_config_snapshot  TEXT,
+      product_type             TEXT,
+      model                    TEXT,
+      drive_type               TEXT,
+      quantity                 INTEGER NOT NULL DEFAULT 1,
+      spec                     TEXT,
+      production_spec          TEXT,
+      unit_price               REAL NOT NULL DEFAULT 0,
+      amount                   REAL NOT NULL DEFAULT 0,
+      note                     TEXT,
+      sort                     INTEGER NOT NULL DEFAULT 0,
+      created_at               TEXT NOT NULL,
+      updated_at               TEXT NOT NULL,
+      create_time              TEXT NOT NULL DEFAULT '',
+      update_time              TEXT NOT NULL DEFAULT '',
+      is_delete                INTEGER NOT NULL DEFAULT 0
+    )
+    """),
+    ("order_items", None, """
+    CREATE TABLE IF NOT EXISTS order_items (
+      id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id                 INTEGER NOT NULL,
+      source_deal_item_id      INTEGER,
+      product_id               INTEGER,
+      product_code_snapshot    TEXT,
+      product_name_snapshot    TEXT,
+      product_config_snapshot  TEXT,
+      product_type             TEXT,
+      model                    TEXT,
+      drive_type               TEXT,
+      quantity                 INTEGER NOT NULL DEFAULT 1,
+      spec                     TEXT,
+      production_spec          TEXT,
+      unit_price               REAL NOT NULL DEFAULT 0,
+      amount                   REAL NOT NULL DEFAULT 0,
+      note                     TEXT,
+      sort                     INTEGER NOT NULL DEFAULT 0,
+      created_at               TEXT NOT NULL,
+      updated_at               TEXT NOT NULL,
+      create_time              TEXT NOT NULL DEFAULT '',
+      update_time              TEXT NOT NULL DEFAULT '',
+      is_delete                INTEGER NOT NULL DEFAULT 0
+    )
+    """),
+    ("idx_deal_items_deal", _tbl_guard("deal_items"),
+     "CREATE INDEX IF NOT EXISTS idx_deal_items_deal ON deal_items(deal_id, is_delete, sort)"),
+    ("idx_order_items_order", _tbl_guard("order_items"),
+     "CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id, is_delete, sort)"),
+    ("orders.product_total", _col_guard("orders", "product_total"),
+     "ALTER TABLE orders ADD COLUMN product_total REAL NOT NULL DEFAULT 0"),
+    ("orders.discount_amount", _col_guard("orders", "discount_amount"),
+     "ALTER TABLE orders ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0"),
+    ("orders.discount_reason", _col_guard("orders", "discount_reason"),
+     "ALTER TABLE orders ADD COLUMN discount_reason TEXT"),
+    ("orders.product_payable", _col_guard("orders", "product_payable"),
+     "ALTER TABLE orders ADD COLUMN product_payable REAL NOT NULL DEFAULT 0"),
+    ("orders.customer_confirmed_at", _col_guard("orders", "customer_confirmed_at"),
+     "ALTER TABLE orders ADD COLUMN customer_confirmed_at TEXT"),
+    ("orders.customer_confirmation_note", _col_guard("orders", "customer_confirmation_note"),
+     "ALTER TABLE orders ADD COLUMN customer_confirmation_note TEXT"),
+    ("deal_items_legacy_backfill", _once("v2_010", "deals", "deal_items"), """
+    INSERT INTO deal_items (
+      deal_id, product_id, product_code_snapshot, product_name_snapshot,
+      product_config_snapshot, product_type, model, drive_type, quantity,
+      spec, production_spec, unit_price, amount, note, sort,
+      created_at, updated_at, create_time, update_time, is_delete
+    )
+    SELECT d.id, d.product_id, d.product_code_snapshot, d.product_name_snapshot,
+      d.product_config_snapshot, d.product_type, d.model, d.drive_type, 1,
+      d.spec, NULL, COALESCE(d.amount, 0), COALESCE(d.amount, 0), d.note, 0,
+      d.created_at, d.updated_at, '', '', 0
+    FROM deals d
+    WHERE COALESCE(d.is_delete, 0) = 0
+      AND NOT EXISTS (
+        SELECT 1 FROM deal_items i
+        WHERE i.deal_id = d.id AND COALESCE(i.is_delete, 0) = 0
+      )
+    """),
+    ("order_items_legacy_backfill", _once("v2_010", "orders", "order_items"), """
+    INSERT INTO order_items (
+      order_id, source_deal_item_id, product_id, product_code_snapshot,
+      product_name_snapshot, product_config_snapshot, product_type, model,
+      drive_type, quantity, spec, production_spec, unit_price, amount, note,
+      sort, created_at, updated_at, create_time, update_time, is_delete
+    )
+    SELECT o.id, NULL, o.product_id, o.product_code_snapshot,
+      o.product_name_snapshot, o.product_config_snapshot, o.product_type,
+      o.model, d.drive_type, 1, o.spec, NULL,
+      COALESCE(o.amount, 0), COALESCE(o.amount, 0), o.note, 0,
+      o.created_at, o.updated_at, '', '', 0
+    FROM orders o
+    LEFT JOIN deals d ON d.id = o.deal_id
+    WHERE COALESCE(o.is_delete, 0) = 0
+      AND NOT EXISTS (
+        SELECT 1 FROM order_items i
+        WHERE i.order_id = o.id AND COALESCE(i.is_delete, 0) = 0
+      )
+    """),
+    ("orders.amount_breakdown_backfill", _once("v2_010", "orders"), """
+    UPDATE orders
+    SET product_total = COALESCE(amount, 0),
+        discount_amount = 0,
+        product_payable = COALESCE(amount, 0)
+    WHERE COALESCE(product_total, 0) = 0 AND COALESCE(amount, 0) > 0
+    """),
+    ("schema_migrations v2_010", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_010', datetime('now'), '多产品明细、整单优惠、独立运费与客户确认')"),
+    ("user_version v2_010", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -876,7 +992,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
     required_tables = (
         "leads", "lead_tags", "customer_contacts", "carriers", "orders",
         "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
-        "products",
+        "products", "deal_items", "order_items",
     )
     for table in required_tables:
         assert table_exists(conn, table), f"缺表 {table}"
@@ -889,7 +1005,11 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
             "order_id", "owner", "product_id", "product_code_snapshot",
             "product_name_snapshot", "product_config_snapshot",
         ),
-        "orders": ("product_id", "product_code_snapshot", "product_name_snapshot", "product_config_snapshot"),
+        "orders": (
+            "product_id", "product_code_snapshot", "product_name_snapshot",
+            "product_config_snapshot", "product_total", "discount_amount",
+            "product_payable", "customer_confirmed_at",
+        ),
         "follow_ups": ("object_type", "object_id", "method"),
         "attachments": ("object_type", "object_id", "follow_up_id"),
         "products": (

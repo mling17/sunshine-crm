@@ -7,6 +7,16 @@ from tests._util import ApiTestCase
 
 
 class StatsTest(ApiTestCase):
+    def _win_deal(self, deal_id: int) -> None:
+        result = self.client.post(f"/api/crm/deals/{deal_id}/win")
+        self.assertEqual(result.status_code, 200, result.text)
+        order_id = result.json()["order"]["id"]
+        confirmed = self.client.post(
+            f"/api/crm/orders/{order_id}/confirm",
+            data={"note": "统计测试客户已确认"},
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+
     def _seed(self):
         c = self.create_customer(name="老客甲", source="wechat")
         d1 = self.create_deal(c["id"], amount=1000.0, drive_type="manual")
@@ -14,7 +24,7 @@ class StatsTest(ApiTestCase):
         self.client.put(f"/api/crm/deals/{d2['id']}", json={"stage": "confirm"})
         c2 = self.create_customer(name="新客乙", source="referral")
         d3 = self.create_deal(c2["id"], amount=5000.0, drive_type="manual")
-        self.client.put(f"/api/crm/deals/{d3['id']}", json={"stage": "won"})
+        self._win_deal(d3["id"])
         d4 = self.create_deal(c2["id"], amount=3000.0, drive_type="manual")
         self.client.post(f"/api/crm/deals/{d4['id']}/lose", json={"lost_reason": "price"})
         return c, c2
@@ -37,7 +47,7 @@ class StatsTest(ApiTestCase):
         keys = [m["key"] for m in data["months"]]
         self.assertEqual(len(set(keys)), 6, "6 个月份不能重复（10-31 减月的进位坑）")
         self.assertEqual(keys, sorted(keys), "月份要按时间正序")
-        self.assertEqual(len(data["orders_by_status"]), 7, "7 个订单状态都要给")
+        self.assertEqual(len(data["orders_by_status"]), 8, "8 个订单状态都要给")
 
     def test_funnel_is_cumulative_and_ignores_lost(self):
         self._seed()
@@ -93,11 +103,15 @@ class WorkbenchTest(ApiTestCase):
     def test_order_event_appears_in_activities(self):
         c = self.create_customer(name="李四")
         d = self.create_deal(c["id"], amount=9000.0, drive_type="manual")
-        self.client.put(f"/api/crm/deals/{d['id']}", json={"stage": "won"})
+        self.client.put(f"/api/crm/deals/{d['id']}", json={"stage": "confirm"})
         order = self.client.post(
             f"/api/crm/deals/{d['id']}/orders",
             json={"deposit": 2000, "logistics_mode": "self"},
         ).json()["order"]
+        self.client.post(
+            f"/api/crm/orders/{order['id']}/confirm",
+            data={"note": "工作台测试客户已确认"},
+        )
         self.client.post(f"/api/crm/orders/{order['id']}/pay-deposit", data={"amount": "2000"})
 
         acts = self.dashboard()["stats"]["recent_activities"]

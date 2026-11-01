@@ -169,8 +169,9 @@ def get_dashboard() -> DashboardOut:
             """
         ).fetchone()["n"]
 
-        # 订单状态统计（7个状态）
+        # 订单状态统计（8个状态）
         orders_by_status = {
+            "pending_confirmation": {"count": 0, "amount": 0.0},
             "pending_payment": {"count": 0, "amount": 0.0},
             "deposit_paid": {"count": 0, "amount": 0.0},
             "producing": {"count": 0, "amount": 0.0},

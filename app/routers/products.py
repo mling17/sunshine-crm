@@ -92,15 +92,25 @@ def _usage_maps(conn: sqlite3.Connection) -> tuple[dict[int, int], dict[int, int
     deal_counts = {
         int(row["product_id"]): int(row["n"])
         for row in conn.execute(
-            "SELECT product_id, COUNT(*) AS n FROM deals"
-            " WHERE product_id IS NOT NULL AND is_delete = 0 GROUP BY product_id"
+            "SELECT product_id, COUNT(DISTINCT deal_id) AS n FROM ("
+            " SELECT product_id, deal_id FROM deal_items"
+            " WHERE product_id IS NOT NULL AND is_delete = 0"
+            " UNION"
+            " SELECT product_id, id AS deal_id FROM deals"
+            " WHERE product_id IS NOT NULL AND is_delete = 0"
+            ") GROUP BY product_id"
         )
     }
     order_counts = {
         int(row["product_id"]): int(row["n"])
         for row in conn.execute(
-            "SELECT product_id, COUNT(*) AS n FROM orders"
-            " WHERE product_id IS NOT NULL AND is_delete = 0 GROUP BY product_id"
+            "SELECT product_id, COUNT(DISTINCT order_id) AS n FROM ("
+            " SELECT product_id, order_id FROM order_items"
+            " WHERE product_id IS NOT NULL AND is_delete = 0"
+            " UNION"
+            " SELECT product_id, id AS order_id FROM orders"
+            " WHERE product_id IS NOT NULL AND is_delete = 0"
+            ") GROUP BY product_id"
         )
     }
     return deal_counts, order_counts

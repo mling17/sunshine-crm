@@ -215,14 +215,14 @@ def _validate_object_type(object_type: str) -> None:
 def _check_deal_frozen(conn, deal_id: int) -> None:
     """检查商机是否被冻结"""
     deal = conn.execute(
-        "SELECT stage FROM deals WHERE id = ? AND is_delete = 0",
+        "SELECT stage, order_id FROM deals WHERE id = ? AND is_delete = 0",
         (deal_id,),
     ).fetchone()
     if deal is None:
         raise HTTPException(status_code=404, detail="商机不存在")
     
     # 检查是否为冻结状态
-    if deal["stage"] in ("won", "lost"):
+    if deal["order_id"] is not None or deal["stage"] in ("won", "lost"):
         raise ApiError(
             status_code=409,
             code="deal_frozen",
@@ -326,13 +326,13 @@ async def create_follow_up(
         elif object_type == "deal":
             # 检查商机是否存在
             deal = conn.execute(
-                "SELECT id, stage FROM deals WHERE id = ? AND is_delete = 0",
+                "SELECT id, stage, order_id FROM deals WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if deal is None:
                 raise HTTPException(status_code=404, detail="商机不存在")
             # 检查商机是否被冻结
-            if deal["stage"] in ("won", "lost"):
+            if deal["order_id"] is not None or deal["stage"] in ("won", "lost"):
                 raise ApiError(
                     status_code=409,
                     code="deal_frozen",

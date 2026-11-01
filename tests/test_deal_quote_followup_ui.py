@@ -16,6 +16,7 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.leads = (views / "leads.js").read_text(encoding="utf-8")
         self.customers = (views / "customers.js").read_text(encoding="utf-8")
         self.deals = (views / "deals.js").read_text(encoding="utf-8")
+        self.orders = (views / "orders.js").read_text(encoding="utf-8")
 
     def test_leads_customers_and_deals_share_followup_timeline_adapter(self):
         self.assertIn("function followupRecordsFromApi(records)", self.shared)
@@ -48,15 +49,18 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertNotIn("deposit: numOrNull", edit)
         self.assertNotIn("balance: numOrNull", edit)
 
-    def test_order_modal_shows_readonly_quote_and_calculates_balance(self):
+    def test_order_modal_separates_product_discount_and_freight(self):
         order_modal = self.deals[
             self.deals.index("function openDealOrderModal"):
         ]
-        self.assertIn("报价金额（订单总额）", order_modal)
-        self.assertIn('value="\' + amount0 + \'" readonly', order_modal)
+        self.assertIn("<label>产品合计</label>", order_modal)
+        self.assertIn("<label>整单优惠</label>", order_modal)
+        self.assertIn("<label>优惠后产品应收</label>", order_modal)
+        self.assertIn("<label>运费（我方收取）</label>", order_modal)
+        self.assertIn("<label>订单应收</label>", order_modal)
         self.assertIn("<label>定金（第一笔）*</label>", order_modal)
-        self.assertIn("定金 + 尾款 = 报价金额", order_modal)
-        self.assertIn("Math.round((a - dep) * 100) / 100", order_modal)
+        self.assertIn("优惠只减产品合计，运费单独计入订单应收", order_modal)
+        self.assertIn("Math.round(receivable * 100) / 100", order_modal)
         self.assertNotIn("amount: amount,", order_modal)
 
     def test_deal_list_and_customer_deal_cards_do_not_prefill_deposit(self):
@@ -67,6 +71,14 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("报价金额", self.deals)
         self.assertNotIn("deal.deposit", deal_items)
         self.assertNotIn("deal.balance", deal_items)
+
+    def test_deal_items_and_customer_confirmation_are_wired(self):
+        self.assertIn("function openDealItemModal", self.deals)
+        self.assertIn("function dealItemsCardHtml", self.deals)
+        self.assertIn("/items", self.deals)
+        self.assertIn("showCustomerConfirmModal", self.orders)
+        self.assertIn("/confirm", self.orders)
+        self.assertIn("客户通过微信查看下单表", self.orders)
 
 
 if __name__ == "__main__":
