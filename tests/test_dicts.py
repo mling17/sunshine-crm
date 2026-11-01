@@ -50,6 +50,8 @@ class TestDicts(unittest.TestCase):
         self.assertEqual(DICT_REGISTRY["deal_stage"]["level"], "B")
         self.assertEqual(DICT_REGISTRY["product_model"]["level"], "A")
         self.assertEqual(DICT_REGISTRY["follow_object"]["level"], "D")
+        self.assertEqual(DICT_REGISTRY["product_type"]["name"], "产品分类")
+        self.assertIn("products.category", DICT_REGISTRY["product_type"]["table"])
     
     def test_dict_seeds_complete(self):
         """测试字典种子数据完整性"""
@@ -76,6 +78,12 @@ class TestDicts(unittest.TestCase):
         self.assertEqual(len(xw60), 1, "产品型号 XW-60 必须存在且唯一")
         self.assertEqual(xw60[0]["label"], "XW-60 天窗 600×1200")
         self.assertEqual(xw60[0]["meta"]["size"], "600×1200", "型号必须带出尺寸")
+
+        product_types = {item["key"] for item in DICT_SEEDS["product_type"]}
+        self.assertTrue(
+            {"天窗", "天幕", "开合屋面", "纱窗", "遮阳", "配件"}.issubset(product_types),
+            "产品主档实际使用的分类都必须进入数据字典",
+        )
 
         sources = {item["key"]: item["label"] for item in DICT_SEEDS["customer_source"]}
         self.assertEqual(sources["video_account"], "视频号")

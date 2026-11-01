@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse
 
+from app import dicts as dict_svc
 from app.db import db_conn
 from app.errors import ApiError
 from app.models import (
@@ -198,6 +199,12 @@ def _prepare_product_data(data: dict) -> dict:
     prepared["category"] = _clean(prepared.get("category")) or "天窗"
     if not prepared["name"]:
         raise ApiError(400, "product_name_required", "产品名称不能为空")
+    if not dict_svc.validate("product_type", prepared["category"]):
+        raise ApiError(
+            400,
+            "product_category_invalid",
+            "产品分类不在数据字典中，请先在「数据字典 → 产品分类」添加",
+        )
     _check_dimensions(prepared)
     return prepared
 
@@ -439,6 +446,12 @@ def update_product(product_id: int, payload: ProductUpdate) -> ProductOut:
                 updates[key] = _clean(updates[key])
         if "category" in updates and not updates["category"]:
             raise ApiError(400, "product_category_required", "产品分类不能为空")
+        if "category" in updates and not dict_svc.validate("product_type", updates["category"]):
+            raise ApiError(
+                400,
+                "product_category_invalid",
+                "产品分类不在数据字典中，请先在「数据字典 → 产品分类」添加",
+            )
         if "attributes" in updates:
             updates["attributes"] = json.dumps(
                 _attributes(updates["attributes"]), ensure_ascii=False

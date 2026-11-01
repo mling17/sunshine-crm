@@ -8,6 +8,19 @@ var PRODUCT_STRUCTURES = ['平放', '嵌入', '平起', '平移', 'L型平移', 
 var PRODUCT_FRAMES = ['普通', '重型', '极窄', '断桥', '隐藏型材', '大料', '标准'];
 var PRODUCT_LEAVES = ['新扇', '老扇', '高低扇', '大料', '标准'];
 
+function productCategoryOptions(current, emptyLabel) {
+    if (typeof dictItems === 'function' && dictItems('product_type').length) {
+        return dictOptions('product_type', current, emptyLabel);
+    }
+    return productOption(PRODUCT_CATEGORIES, current, emptyLabel);
+}
+
+function productCategoryLabel(value) {
+    return typeof dictLabel === 'function'
+        ? dictLabel('product_type', value)
+        : (value || '—');
+}
+
 function productOption(values, current, emptyLabel) {
     var html = emptyLabel === null ? '' : '<option value="">' + esc(emptyLabel || '不指定') + '</option>';
     var known = false;
@@ -87,7 +100,7 @@ function filterProducts(products, filters) {
         if (filters.active === '1' && !p.is_active) { return false; }
         if (filters.active === '0' && p.is_active) { return false; }
         if (!q) { return true; }
-        return [p.code, p.name, p.category, p.series, p.structure, p.opening_mode,
+        return [p.code, p.name, p.category, productCategoryLabel(p.category), p.series, p.structure, p.opening_mode,
             p.frame_type, p.leaf_type, p.config_summary]
             .filter(Boolean).join(' ').toLowerCase().indexOf(q) >= 0;
     });
@@ -97,7 +110,7 @@ function productFiltersHtml() {
     return '<div class="product-filters">' +
         '<label class="product-search"><span class="sr-only">搜索产品</span>' +
         '<input id="productQ" type="search" placeholder="搜索编码、名称、结构或配置"></label>' +
-        '<select id="productCategory">' + productOption(PRODUCT_CATEGORIES, '', '全部分类') + '</select>' +
+        '<select id="productCategory">' + productCategoryOptions('', '全部分类') + '</select>' +
         '<select id="productSeries">' + productOption(PRODUCT_SERIES, '', '全部系列') + '</select>' +
         '<select id="productDrive"><option value="">全部驱动</option><option value="manual">手动</option>' +
         '<option value="electric">电动</option></select>' +
@@ -135,7 +148,7 @@ function productRowsHtml(products) {
                 '<div class="small muted">' + esc(p.code) + '</div>';
         } },
         { title: '分类 / 系列', nowrap: true, render: function (p) {
-            return esc([p.category, p.series].filter(Boolean).join(' / ') || '—');
+            return esc([productCategoryLabel(p.category), p.series].filter(Boolean).join(' / ') || '—');
         } },
         { title: '结构 / 开启', nowrap: true, render: function (p) {
             return esc([p.structure, p.opening_mode].filter(Boolean).join(' / ') || '—');
@@ -227,7 +240,7 @@ function productImportPreviewHtml(preview) {
             '<b>' + esc(preview.name) + '</b></div>' +
         '<p class="product-config-line">' + esc(preview.config_summary || '按下单表识别') + '</p>' +
         infoGrid([
-            ['分类', preview.category || '—'],
+            ['分类', productCategoryLabel(preview.category)],
             ['系列', preview.series || '通用'],
             ['结构', preview.structure || '—'],
             ['开启', preview.opening_mode || '—'],
@@ -387,7 +400,7 @@ function viewProductDetail(root, rawId) {
                     (p.form_available ? '' : '<span class="badge danger">缺少 Excel</span> ') +
                     '<button type="button" class="btn btn-sm" id="productEdit">编辑产品</button></div></div>' +
                 '<div class="product-detail-head"><span class="product-code">' + esc(p.code) + '</span>' +
-                    '<span class="badge muted">' + esc(p.category) + '</span> ' + productDriveBadge(p) + '</div>' +
+                    '<span class="badge muted">' + esc(productCategoryLabel(p.category)) + '</span> ' + productDriveBadge(p) + '</div>' +
                 '<p class="product-config-line">' + esc(p.config_summary || '按订单参数配置') + '</p>' +
                 '<div class="product-form-file">' +
                     (p.form_available
@@ -444,7 +457,7 @@ function openProductEdit(product, done) {
             '</div>' +
             '<div class="row-3">' +
                 '<div class="field"><label>产品分类 *</label><select name="category">' +
-                    productOption(PRODUCT_CATEGORIES, p.category || '天窗', null) + '</select></div>' +
+                    productCategoryOptions(p.category || '天窗', null) + '</select></div>' +
                 '<div class="field"><label>产品系列</label><select name="series">' +
                     productOption(PRODUCT_SERIES, p.series || '', '通用') + '</select></div>' +
                 '<div class="field"><label>驱动方式</label><select name="drive_type">' +

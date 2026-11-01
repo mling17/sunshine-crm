@@ -98,6 +98,20 @@ class TestProducts(ApiTestCase):
         self.assertEqual(download.status_code, 200, download.text)
         self.assertTrue(download.content.startswith(b"PK\x03\x04"))
 
+    def test_product_category_is_managed_by_data_dictionary(self):
+        created = self.client.post(
+            "/api/crm/dicts/product_type/items",
+            json={"key": "测试新分类", "label": "测试新分类", "sort": 99},
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        product = self.create_product(code="TS-DICT-001", category="测试新分类")
+        self.assertEqual(product["category"], "测试新分类")
+
+        product_types = self.client.get("/api/crm/dicts/product_type").json()["items"]
+        used = next(item["used"] for item in product_types if item["key"] == "测试新分类")
+        self.assertGreaterEqual(used, 1)
+
     def test_create_search_update_and_deactivate_product(self):
         product = self.create_product()
         self.assertRegex(product["code"], r"^TS-\d{3,}$")
