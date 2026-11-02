@@ -173,6 +173,10 @@ class DealOrdersTest(ApiTestCase):
         data = resp.json()
         self.assertEqual(len(data), 1)
         self.assertTrue(data[0]["locked"])
+        self.assertEqual(data[0]["stage_label"], "已生成订单")
+
+        detail = self.client.get(f"/api/crm/deals/{deal['id']}").json()
+        self.assertEqual(detail["stage_label"], "已生成订单")
 
     # ---------- GET /deals/{id} ----------
     def test_get_deal_detail_include_timeline(self):
@@ -525,6 +529,7 @@ class DealOrdersTest(ApiTestCase):
         self.assertIn("deal", data)
         self.assertIn("order", data)
         self.assertEqual(data["deal"]["stage"], "confirm")
+        self.assertEqual(data["deal"]["stage_label"], "已生成订单")
         self.assertIsNotNone(data["deal"]["order_id"])
         self.assertIsNotNone(data["order"]["order_no"])
         self.assertEqual(data["order"]["amount"], 12000.0)

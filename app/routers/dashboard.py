@@ -47,6 +47,8 @@ WITH latest AS (
 )
 SELECT l.id, l.customer_id, l.deal_id, l.content, l.next_date,
        c.name AS customer_name,
+       c.intent_level, c.customer_type,
+       l.created_at AS last_follow_at,
        d.stage AS deal_stage,
        CAST(julianday(date('now','localtime')) - julianday(date(l.next_date)) AS INTEGER) AS days_overdue
   FROM latest l
@@ -125,6 +127,66 @@ WHERE a.status = 'pending'
   AND a.is_delete = 0 AND o.is_delete = 0 AND c.is_delete = 0
   AND julianday(date('now','localtime')) - julianday(date(a.created_at)) > 3
 ORDER BY a.created_at ASC
+"""
+
+#: 工作台“昨日新增与跟进”：以昨天本地自然日为界，客服/订单系统事件不计入人工跟进。
+_YESTERDAY_ACTIVITY_SQL = """
+WITH y AS (
+  SELECT date('now','localtime','-1 day') AS day
+)
+SELECT 'lead' AS module,
+       (SELECT COUNT(*) FROM leads
+         WHERE is_delete = 0
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y)) AS new_count,
+       (SELECT COUNT(*) FROM follow_ups
+         WHERE is_delete = 0 AND kind = 'follow' AND object_type = 'lead'
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y)) AS followups
+UNION ALL
+SELECT 'customer',
+       (SELECT COUNT(*) FROM customers
+         WHERE is_delete = 0
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y)),
+       (SELECT COUNT(*) FROM follow_ups
+         WHERE is_delete = 0 AND kind = 'follow' AND object_type = 'customer'
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y))
+UNION ALL
+SELECT 'deal',
+       (SELECT COUNT(*) FROM deals
+         WHERE is_delete = 0
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y)),
+       (SELECT COUNT(*) FROM follow_ups
+         WHERE is_delete = 0 AND kind = 'follow' AND object_type = 'deal'
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y))
+UNION ALL
+SELECT 'order',
+       (SELECT COUNT(*) FROM orders
+         WHERE is_delete = 0
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y)),
+       (SELECT COUNT(*) FROM follow_ups
+         WHERE is_delete = 0 AND kind = 'follow' AND object_type = 'order'
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y))
+UNION ALL
+SELECT 'aftersale',
+       (SELECT COUNT(*) FROM aftersales
+         WHERE is_delete = 0
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y)),
+       (SELECT COUNT(*) FROM follow_ups
+         WHERE is_delete = 0 AND kind = 'follow' AND object_type = 'aftersale'
+           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y))
+"""
+
+#: 售后提醒卡只展示最近 4 单，超时仍以 created_at 与本地日期差计算。
+_RECENT_AFTERSALES_SQL = """
+SELECT a.id, a.no, a.type, a.status, a.description, a.created_at,
+       c.name AS customer_name, o.order_no,
+       CAST(julianday(date('now','localtime')) - julianday(date(a.created_at)) AS INTEGER)
+         AS days_pending
+  FROM aftersales a
+  JOIN orders o ON o.id = a.order_id
+  JOIN customers c ON c.id = a.customer_id
+ WHERE a.is_delete = 0 AND o.is_delete = 0 AND c.is_delete = 0
+ ORDER BY datetime(a.created_at) DESC, a.id DESC
+ LIMIT 4
 """
 
 
@@ -226,6 +288,37 @@ def get_dashboard() -> DashboardOut:
                 "customer_name": row["customer_name"]
             })
 
+        yesterday_activity = [
+            {
+                "key": row["module"],
+                "name": {
+                    "lead": "线索",
+                    "customer": "客户",
+                    "deal": "商机",
+                    "order": "订单",
+                    "aftersale": "售后",
+                }[row["module"]],
+                "new_count": int(row["new_count"] or 0),
+                "followups": int(row["followups"] or 0),
+            }
+            for row in conn.execute(_YESTERDAY_ACTIVITY_SQL).fetchall()
+        ]
+
+        recent_aftersales = [
+            {
+                "id": row["id"],
+                "no": row["no"],
+                "type": row["type"],
+                "status": row["status"],
+                "description": row["description"],
+                "customer_name": row["customer_name"],
+                "order_no": row["order_no"],
+                "days_pending": int(row["days_pending"] or 0),
+                "created_at": row["created_at"],
+            }
+            for row in conn.execute(_RECENT_AFTERSALES_SQL).fetchall()
+        ]
+
     today_followups = [
         TodayFollowUpOut(
             id=row["id"],
@@ -237,6 +330,9 @@ def get_dashboard() -> DashboardOut:
             content=row["content"],
             next_date=row["next_date"],
             days_overdue=int(row["days_overdue"] or 0),
+            last_follow_at=row["last_follow_at"],
+            intent_level=row["intent_level"],
+            customer_type=row["customer_type"],
         )
         for row in follow_rows
     ]
@@ -253,6 +349,8 @@ def get_dashboard() -> DashboardOut:
             orders_by_status=orders_by_status,
             recent_orders=recent_orders,
             aftersale_sla_alerts=aftersale_sla_alerts,
+            yesterday_activity=yesterday_activity,
+            recent_aftersales=recent_aftersales,
             in_progress_deals=in_progress,
             recent_activities=recent_activities,
         ),

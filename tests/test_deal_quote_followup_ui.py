@@ -156,6 +156,7 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             "data-quote-void",
             "data-quote-delete",
             "data-quote-order",
+            "data-quote-follow",
             "quote-card",
             "deal-quote-list",
             "deal-quote-empty",
@@ -198,6 +199,56 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             self.deals.index("function openQuoteConfirmModal")
         ]
         self.assertNotIn("识别依据", quote_form)
+
+    def test_quote_card_follow_entry_works_collapsed_and_expanded(self):
+        quote_helpers = self.deals[
+            self.deals.index("function quoteFollowButtonHtml"):
+            self.deals.index("function quoteCardsHtml")
+        ]
+        quote_cards = self.deals[
+            self.deals.index("function quoteCardsHtml"):
+            self.deals.index("function dealTagsHtml")
+        ]
+
+        self.assertIn("quoteFollowButtonHtml(quote, deal, 'collapsed')", quote_cards)
+        self.assertIn("quoteFollowButtonHtml(quote, deal, 'expanded')", quote_cards)
+        self.assertLess(
+            quote_cards.index("quoteFollowButtonHtml(quote, deal, 'collapsed')"),
+            quote_cards.index("</summary>"),
+            "收缩状态的跟进入口应位于报价单标题层级",
+        )
+        self.assertGreater(
+            quote_cards.index("quoteFollowButtonHtml(quote, deal, 'expanded')"),
+            quote_cards.index('class="deal-quote-card-body"'),
+            "展开状态的跟进入口应位于报价单明细区",
+        )
+        self.assertIn('data-quote-follow="', quote_helpers)
+        self.assertIn("直接关联报价单 ", quote_helpers)
+        self.assertIn("!!deal.order_id || deal.stage === 'lost'", quote_helpers)
+        self.assertIn('<input type="hidden" name="quote_id"', quote_helpers)
+        self.assertIn("quoteFollowAssociationHtml(quote)", quote_helpers)
+
+        binding = self.deals[
+            self.deals.index("function bindQuoteActions"):
+            self.deals.index("function bindDealTagActions")
+        ]
+        self.assertIn("$$('[data-quote-follow]', root)", binding)
+        self.assertIn("ev.stopPropagation()", binding)
+        self.assertIn("openQuoteFollowModal(quote, onFollowSubmit)", binding)
+        self.assertIn(
+            "bindQuoteActions(root, d, customerName, quotes, products, submitDealFollowUp)",
+            self.deals,
+        )
+
+        for marker in (
+            ".deal-quote-card-follow-collapsed {",
+            ".deal-quote-card[open] .deal-quote-card-follow-collapsed,",
+            ".deal-quote-card[open] .deal-quote-card-follow-expanded {",
+            ".deal-quote-card-footer {",
+            ".followup-linked-quote {",
+            ".followup-linked-quote-copy {",
+        ):
+            self.assertIn(marker, self.css)
 
     def test_deal_page_uses_quote_cards_and_priority_actions(self):
         detail = self.deals[
@@ -280,6 +331,19 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             neutral,
         ):
             self.assertIn(marker, self.css)
+
+    def test_ordered_deal_uses_locked_follow_button_without_adding_tabs(self):
+        detail = self.deals[
+            self.deals.index("function viewDealDetail"):
+            self.deals.index("function openDealEdit")
+        ]
+        self.assertIn("lockedButtonLabel: d.order_id ? '已生成订单，请在订单中跟进' : ''", detail)
+        self.assertIn("dealStageBadge(deal.stage, deal.stage_label, deal.order_id)", self.deals)
+        self.assertIn("var tabs = [['', '全部']].concat(STAGES);", self.deals)
+        self.assertIn("opts.lockedButtonLabel", self.shared)
+        self.assertIn("disabled title=", self.shared)
+        products = (ROOT / "static" / "views" / "products.js").read_text(encoding="utf-8")
+        self.assertIn("dealStageBadge(d.stage, d.stage_label, d.order_id)", products)
 
 
 if __name__ == "__main__":

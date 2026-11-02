@@ -516,9 +516,12 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 9px 12px;
-  padding: 15px 48px 15px 16px;
+  padding: 15px 48px 45px 16px;
   cursor: pointer;
   list-style: none;
+}
+.deal-quote-card[open] .deal-quote-card-head {
+  padding-bottom: 15px;
 }
 .deal-quote-card-head::-webkit-details-marker { display: none; }
 .deal-quote-card-head::after {
@@ -594,6 +597,36 @@
   font-size: 11px;
   line-height: 1.4;
 }
+.deal-quote-card-follow-collapsed {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+}
+.deal-quote-card[open] .deal-quote-card-follow-collapsed,
+.deal-quote-card-follow-expanded {
+  display: none;
+}
+.deal-quote-card[open] .deal-quote-card-follow-expanded {
+  display: inline-flex;
+}
+.deal-quote-card-follow {
+  min-width: 62px;
+  justify-content: center;
+  box-shadow: 0 3px 8px rgba(37, 99, 235, .15);
+}
+.deal-quote-card-follow[disabled] {
+  border-color: #d7dee8;
+  background: #eef2f7;
+  box-shadow: none;
+  color: #7b8797;
+}
+.deal-quote-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #edf1f6;
+}
 @media (hover: none) {
   .deal-quote-card-delete {
     opacity: 1;
@@ -604,6 +637,37 @@
 .deal-quote-card-body {
   padding: 0 16px 16px;
   border-top: 1px solid #edf1f6;
+}
+.followup-linked-quote {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+  background: #f7faff;
+}
+.followup-linked-quote-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.followup-linked-quote-copy b,
+.followup-linked-quote-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.followup-linked-quote-copy b {
+  color: #274767;
+  font-size: 13px;
+}
+.followup-linked-quote-copy small {
+  color: #718096;
+  font-size: 11px;
 }
 .deal-quote-items { margin: 10px 0; }
 .quote-item-actions {

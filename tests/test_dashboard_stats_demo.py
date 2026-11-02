@@ -25,6 +25,7 @@ class DashboardStatsDemoTest(unittest.TestCase):
 
         for range_key in ("month", '"3m"', '"6m"', "year"):
             self.assertIn(range_key, script)
+        self.assertIn('"7d"', script)
         self.assertIn("openFollowupModal", script)
         self.assertIn("renderSources", script)
         self.assertIn("renderFunnel", script)
@@ -44,6 +45,25 @@ class DashboardStatsDemoTest(unittest.TestCase):
         self.assertNotIn("本月快照", script)
         self.assertNotIn("snapshot-row", styles)
 
+        self.assertIn("@media (max-width: 760px)", styles)
+        self.assertIn("prefers-reduced-motion", styles)
+
+
+class ProductionDashboardStatsTest(unittest.TestCase):
+    def test_production_views_and_scoped_styles_are_wired(self):
+        dashboard = (ROOT / "static" / "views" / "dashboard.js").read_text(encoding="utf-8")
+        stats = (ROOT / "static" / "views" / "stats.js").read_text(encoding="utf-8")
+        styles = (ROOT / "static" / "dashboard-stats.css").read_text(encoding="utf-8")
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("昨日新增与跟进", dashboard)
+        self.assertIn("recent_aftersales", dashboard)
+        self.assertIn("ds-work-grid", dashboard)
+        self.assertIn("data-stat-range", stats)
+        self.assertIn('"7d", "近7天"', stats)
+        self.assertIn("/stats?range=", stats)
+        self.assertIn("dashboard-stats.css", html)
+        self.assertIn(".ds-page", styles)
         self.assertIn("@media (max-width: 760px)", styles)
         self.assertIn("prefers-reduced-motion", styles)
 

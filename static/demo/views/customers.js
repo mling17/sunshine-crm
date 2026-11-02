@@ -115,7 +115,7 @@ function viewCustomerDetail(root, rawId) {
     return '<div class="item"><div class="item-main">' +
       '<div class="item-title"><a href="#/deals/' + d.id + '">' +
         esc([d.product_type, d.model, d.size].filter(Boolean).join(' ')) + '</a>' +
-        '<span class="badge muted">' + esc(STAGE_LABEL[d.stage] || d.stage) + '</span></div>' +
+        '<span class="badge muted">' + esc(d.order_id ? '已生成订单' : (STAGE_LABEL[d.stage] || d.stage)) + '</span></div>' +
       '<div class="item-sub small muted">' + DRIVE_LABEL[d.drive_type] + ' · ' + money(d.amount) +
         ' · ' + fmtDateTime(d.created_at).slice(0, 10) + '</div>' +
       '</div><div class="item-side muted">›</div></div>';

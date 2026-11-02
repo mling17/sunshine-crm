@@ -1,201 +1,313 @@
-/* 工作台（2026-10-31 对齐 demo 定稿 PAGES-V2 §1 D1–D5）
- *   A 数字卡 5 个（今日待跟进 / 逾期未跟进 / 进行中商机 / 本月成交 / 本月新增客户）
- *   B 今日待跟进（核心区，行内「记一条」直接开弹窗，不跳页）
- *   C 订单待办（按状态分组的计数 chip，点进订单列表）
- *   D 最近动态 10 条（跟进 + 订单事件混排）
- *   E 空态引导（一个客户都没有时给三步上手）
- * 依赖后端 GET /dashboard：today_followups / month_won / stats.{in_progress_deals, recent_activities, orders_by_status, ...}
- */
+/* 工作台：按 PAGES-V2 §1 与 dashboard-stats-preview 定稿实现。
+ * 真实数据全部来自 GET /dashboard，页面只负责展示与少量派生计算。 */
+
+function dashIcon(name) {
+  var icons = {
+    calendar: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M8 3v4M16 3v4M3 10h18"></path><path d="m9 15 2 2 4-4"></path></svg>',
+    alert: '<svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"></path><path d="M12 9v4M12 17h.01"></path></svg>',
+    plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>',
+    clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>',
+    order: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6z"></path><path d="M9 8h6M9 12h6M9 16h4"></path></svg>',
+    service: '<svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"></path><path d="M4 13v5h3v-5H4Zm13 0h3v5h-3v-5Z"></path><path d="M10 21h4"></path></svg>',
+    lead: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c.8-4 3.1-6 7-6s6.2 2 7 6"></path><path d="M18 4v4M16 6h4"></path></svg>',
+    customer: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"></circle><path d="M3.5 19c.6-3.7 2.5-5.5 5.5-5.5s4.9 1.8 5.5 5.5"></path><circle cx="17" cy="9" r="2.3"></circle><path d="M15.5 14.8c3.4-.5 5.2 1.2 5.7 4.2"></path></svg>',
+    won: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 2.5 2.5L16 9"></path></svg>'
+  };
+  return icons[name] || "";
+}
+
+function dashDateLabel() {
+  var names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  var date = new Date();
+  return date.getFullYear() + "年" + (date.getMonth() + 1) + "月" + date.getDate() + "日 · " +
+    names[date.getDay()];
+}
+
+function dashGreeting() {
+  var hour = new Date().getHours();
+  if (hour < 11) { return "早上好"; }
+  if (hour < 14) { return "中午好"; }
+  if (hour < 18) { return "下午好"; }
+  return "晚上好";
+}
+
+function dashKpi(options) {
+  var tag = options.href ? "a" : "div";
+  var attrs = options.href ? ' href="' + esc(options.href) + '"' : "";
+  return "<" + tag + ' class="ds-kpi ' + esc(options.tone) + '"' + attrs + ">" +
+    '<div class="ds-kpi-head"><span>' + esc(options.label) + "</span>" +
+    '<span class="ds-kpi-icon">' + dashIcon(options.icon) + "</span></div>" +
+    '<div class="ds-kpi-value">' + options.value + "</div>" +
+    '<div class="ds-kpi-foot">' + options.foot + "</div>" +
+  "</" + tag + ">";
+}
+
+function dashYesterdayItem(item, all) {
+  var maxNew = Math.max.apply(null, all.map(function (entry) { return Number(entry.new_count || 0); }).concat([1]));
+  var maxFollow = Math.max.apply(null, all.map(function (entry) { return Number(entry.followups || 0); }).concat([1]));
+  var tones = { lead: "blue", customer: "green", deal: "violet", order: "amber", aftersale: "red" };
+  var icons = { lead: "lead", customer: "customer", deal: "won", order: "order", aftersale: "service" };
+  return '<a class="ds-yesterday ' + esc(tones[item.key] || "blue") + '" href="#/' +
+    (item.key === "aftersale" ? "aftersales" : item.key === "deal" ? "deals" : item.key + "s") + '">' +
+    '<span class="ds-yesterday-top"><i>' + dashIcon(icons[item.key] || "chart") + "</i><b>" +
+      esc(item.name) + "</b></span>" +
+    '<span class="ds-yesterday-values">' +
+      "<span><b>" + Number(item.new_count || 0) + "</b><small>新增</small></span><i></i>" +
+      "<span><b>" + Number(item.followups || 0) + "</b><small>跟进次数</small></span>" +
+    "</span>" +
+    '<span class="ds-yesterday-tracks" aria-hidden="true">' +
+      '<i class="new" style="width:' + (Number(item.new_count || 0) ? Math.max(Number(item.new_count || 0) / maxNew * 100, 8) : 0) + '%"></i>' +
+      '<i class="follow" style="width:' + (Number(item.followups || 0) ? Math.max(Number(item.followups || 0) / maxFollow * 100, 8) : 0) + '%"></i>' +
+    "</span></a>";
+}
+
+function dashActivity(a) {
+  var type = String(a.type || "");
+  var tone = type === "follow" ? "follow"
+    : type === "pay" ? "pay"
+    : type === "aftersale" ? "service"
+    : "order";
+  var icon = tone === "follow" ? "跟" : tone === "pay" ? "收" : tone === "service" ? "售" : "单";
+  var amount = (type === "order" || type === "pay") && Number(a.amount || 0) ? " · " + money(a.amount) : "";
+  return '<div class="ds-activity-row">' +
+    '<span class="ds-activity-icon ' + tone + '">' + icon + "</span>" +
+    '<span class="ds-activity-copy"><p>' + esc(a.text || "业务状态已更新") + esc(amount) +
+      "</p><small>" + esc(fmtDateTime(a.at).slice(5)) + "</small></span>" +
+  "</div>";
+}
+
 function viewDashboard(root) {
-    return api('/dashboard').then(function (d) {
-        var stats = d.stats || {};
-        var monthWon = d.month_won || stats.month_won || { count: 0, amount: 0 };
-        var todos = d.today_followups || [];
-        var inProgress = stats.in_progress_deals || { count: 0, amount: 0 };
-        var ordersByStatus = stats.orders_by_status || {};
-        var acts = stats.recent_activities || [];
+  return api("/dashboard").then(function (d) {
+    var stats = d.stats || {};
+    var todos = d.today_followups || [];
+    var monthWon = d.month_won || stats.month_won || { count: 0, amount: 0 };
+    var orders = stats.orders_by_status || {};
+    var yesterday = stats.yesterday_activity || [];
+    var services = stats.recent_aftersales || [];
+    var activities = stats.recent_activities || [];
+    var alerts = stats.aftersale_sla_alerts || [];
+    var overdue = todos.filter(function (item) { return Number(item.days_overdue || 0) > 0; });
+    var openStatuses = ORDER_STATUS.slice(0, 7);
+    var openOrders = openStatuses.reduce(function (sum, pair) {
+      return sum + Number((orders[pair[0]] || {}).count || 0);
+    }, 0);
+    var overdueServices = services.filter(function (item) {
+      return item.status !== "done" && Number(item.days_pending || 0) > 3;
+    }).length;
 
-        /* ---------- 售后 SLA 红条 ---------- */
-        var slaAlerts = stats.aftersale_sla_alerts || [];
-        var slaAlertHtml = '';
-        if (slaAlerts.length) {
-            var a0 = slaAlerts[0];
-            slaAlertHtml = '<div class="sla-alert">' +
-                '⚠ 售后单 ' + esc(a0.no) + ' 已挂 ' + esc(a0.days_pending) + ' 天未处理（SLA 3 天）' +
-                '<a class="btn btn-sm" href="#/aftersales/' + a0.id + '">去处理</a>' +
-                '</div>';
-        }
+    var alertHtml = "";
+    if (alerts.length) {
+      var firstAlert = alerts[0];
+      alertHtml = '<div class="ds-alert">' +
+        '<span class="ds-alert-icon">' + dashIcon("alert") + "</span>" +
+        '<div class="ds-alert-copy"><b>售后单 ' + esc(firstAlert.no) + " 已挂 " +
+          esc(firstAlert.days_pending) + " 天未处理</b><span>" +
+          esc(firstAlert.customer_name || "") + " · 已超过 3 天 SLA，请优先处理。</span></div>" +
+        '<a class="ds-button ds-button-small" href="#/aftersales/' + firstAlert.id + '">去处理</a>' +
+      "</div>";
+    }
 
-        /* ---------- A. 数字卡（5 个，可点） ---------- */
-        var overdueCount = todos.filter(function (t) { return Number(t.days_overdue) > 0; }).length;
-        var kpiHtml =
-            '<div class="grid-kpi">' +
-            '<a class="kpi kpi-link" href="#/followups">' +
-            '<div class="label">今日待跟进</div><div class="value">' + todos.length + '</div>' +
-            '<div class="sub">按最近一次跟进算</div></a>' +
-            '<a class="kpi kpi-link' + (overdueCount ? ' kpi-danger' : '') + '" href="#/followups">' +
-            '<div class="label">逾期未跟进</div><div class="value">' + overdueCount + '</div>' +
-            '<div class="sub">' + (overdueCount ? '已超约定日期' : '没有逾期') + '</div></a>' +
-            '<a class="kpi kpi-link" href="#/deals">' +
-            '<div class="label">进行中商机</div><div class="value">' + (inProgress.count || 0) + '</div>' +
-            '<div class="sub">报价 ' + money(inProgress.amount) + '</div></a>' +
-            '<a class="kpi kpi-link" href="#/deals?stage=won">' +
-            '<div class="label">本月成交</div><div class="value">' + money(monthWon.amount) + '</div>' +
-            '<div class="sub">' + (monthWon.count || 0) + ' 单</div></a>' +
-            '<a class="kpi kpi-link" href="#/customers">' +
-            '<div class="label">本月新增客户</div><div class="value">' + (stats.month_new_customers || 0) + '</div>' +
-            '<div class="sub">客户总数 ' + (stats.customers_total || 0) + '</div></a>' +
-            '</div>';
+    var todoHtml = todos.length ? todos.map(function (item) {
+      var intent = item.intent_level ? (INTENT_LABELS[item.intent_level] || "") : "";
+      var intentClass = item.intent_level === "high" ? "high" : item.intent_level === "low" ? "low" : "medium";
+      var stage = item.deal_stage_label || STAGE_LABEL[item.deal_stage] || "";
+      return '<div class="ds-todo' + (Number(item.days_overdue || 0) > 0 ? " overdue" : "") + '">' +
+        '<span class="ds-avatar">' + esc(String(item.customer_name || "?").slice(0, 1)) + "</span>" +
+        '<div class="ds-todo-main"><div class="ds-todo-line">' +
+          '<a class="ds-person" href="#/customers/' + item.customer_id + '">' + esc(item.customer_name) + "</a>" +
+          '<span class="ds-tag">客户</span>' +
+          (intent ? '<span class="ds-tag ' + intentClass + '">意向 ' + esc(intent) + "</span>" : "") +
+          (stage ? '<span class="ds-tag stage">' + esc(stage) + "</span>" : "") +
+        "</div>" +
+        '<div class="ds-todo-content">' + esc(item.content) + "</div>" +
+        '<div class="ds-todo-meta">' +
+          (item.last_follow_at ? "<span>上次跟进 " + esc(fmtDateTime(item.last_follow_at).slice(0, 10)) + "</span><span>·</span>" : "") +
+          "<span>约好 " + esc(item.next_date) + "</span>" +
+          (Number(item.days_overdue || 0) > 0
+            ? '<span class="ds-danger-badge">逾期 ' + item.days_overdue + " 天</span>"
+            : "<span>今天</span>") +
+        "</div></div>" +
+        '<div class="ds-todo-side"><button type="button" class="ds-button ds-button-primary ds-button-small" ' +
+          'data-log-fu="' + item.customer_id + '"' + (item.deal_id ? ' data-log-deal="' + item.deal_id + '"' : "") +
+          ">记一条</button></div>" +
+      "</div>";
+    }).join("") : '<div class="ds-empty"><span>' + dashIcon("won") +
+      "</span><b>今天的跟进已经清空</b><small>接下来可以检查订单进度或售后提醒。</small></div>";
 
-        /* ---------- B. 今日待跟进 ---------- */
-        var todoHtml = todos.length ? todos.map(function (t) {
-            var intent = t.intent_level ? (INTENT_LABELS[t.intent_level] || '') : '';
-            var intentCls = t.intent_level === 'high' ? 'badge danger'
-                : (t.intent_level === 'medium' ? 'badge warn' : 'badge muted');
-            var stage = t.deal_stage_label ? '<span class="tag">' + esc(t.deal_stage_label) + '</span>' : '';
-            var overdue = Number(t.days_overdue);
-            return '<div class="item todo-row' + (overdue > 0 ? ' todo-overdue' : '') + '">' +
-                '<div class="item-main">' +
-                '<div class="item-title"><a href="#/customers/' + t.customer_id + '">' +
-                esc(t.customer_name) + '</a>' +
-                (intent ? '<span class="' + intentCls + '">' + esc(intent) + '</span>' : '') + stage + '</div>' +
-                '<div class="item-sub">' + esc(t.content) + '</div>' +
-                '<div class="item-sub small">' +
-                (t.last_follow_at ? '上次跟进 ' + fmtDateTime(t.last_follow_at).slice(0, 10) + ' · ' : '') +
-                '约好 ' + esc(t.next_date) +
-                (overdue > 0
-                    ? ' <span class="badge danger">逾期 ' + overdue + ' 天</span>'
-                    : ' <span class="badge warn">今天</span>') +
-                '</div>' +
-                '</div>' +
-                '<div class="item-side">' +
-                '<button type="button" class="btn btn-sm btn-primary" data-log-fu="' + t.customer_id + '"' +
-                (t.deal_id ? ' data-log-deal="' + t.deal_id + '"' : '') + '>记一条</button>' +
-                '</div>' +
-                '</div>';
-        }).join('') : '<p class="empty">今天没有待跟进，清爽 👌</p>';
+    var orderChips = openStatuses.map(function (pair) {
+      var count = Number((orders[pair[0]] || {}).count || 0);
+      var tone = pair[0] === "pending_payment" ? "red"
+        : pair[0] === "producing" ? "violet"
+        : pair[0] === "ready_to_ship" ? "cyan"
+        : pair[0] === "pending_confirmation" ? "amber"
+        : "blue";
+      return '<a class="ds-order-chip" href="#/orders?status=' + pair[0] + '">' +
+        '<i class="' + tone + '"></i><span><b>' + count + "</b><small>" +
+        esc(ORDER_STATUS_LABEL[pair[0]] || pair[1]) + "</small></span></a>";
+    }).join("");
 
-        /* ---------- C. 订单待办（按状态分组） ---------- */
-        var orderChips = ORDER_STATUS.map(function (p) {
-            var c = (ordersByStatus[p[0]] || {}).count || 0;
-            if (!c) { return ''; }
-            return '<a class="chip-due" href="#/orders?status=' + p[0] + '">' +
-                '<span class="chip-due-num">' + c + '</span>' +
-                '<span class="chip-due-label">' + esc(p[1]) + '</span></a>';
-        }).join('');
-        if (!orderChips) { orderChips = '<p class="empty">暂无待办订单</p>'; }
+    var serviceHtml = services.length ? services.map(function (item) {
+      var type = AFTERSALE_TYPE_LABEL[item.type] || item.type || "售后";
+      var urgent = item.status !== "done" && Number(item.days_pending || 0) > 3;
+      var status = urgent ? "超时 " + item.days_pending + " 天"
+        : (AFTERSALE_STATUS_LABEL[item.status] || item.status);
+      return '<a class="ds-service' + (urgent ? " urgent" : "") + '" href="#/aftersales/' + item.id + '">' +
+        '<span class="ds-service-dot"></span><span class="ds-service-main"><b>' +
+          esc(item.customer_name || "客户") + " · " + esc(type) + "</b><small>" +
+          esc(item.description || item.no || "") + "</small></span>" +
+        '<span class="ds-service-age">' + esc(status) + "</span></a>";
+    }).join("") : '<div class="ds-empty compact"><b>暂无售后提醒</b><small>最近售后会显示在这里。</small></div>';
 
-        /* ---------- D. 最近动态 ---------- */
-        var actHtml = acts.length ? acts.map(function (a) {
-            var icon = a.type === 'followup' ? '💬' : (a.type === 'order' ? '📦' : '•');
-            var amt = (a.type === 'order' && a.amount) ? ' · ' + money(a.amount) : '';
-            return '<div class="act-row">' +
-                '<span class="act-time">' + fmtDateTime(a.at).slice(5) + '</span>' +
-                '<span class="act-icon">' + icon + '</span>' +
-                '<span class="act-text">' + esc(a.text) + esc(amt) + '</span>' +
-                '</div>';
-        }).join('') : '<p class="empty">还没有动态</p>';
+    var emptyGuide = !stats.customers_total
+      ? '<div class="ds-card ds-empty-guide"><span>开始使用</span><b>先录一条线索，下一步会顺很多</b>' +
+        '<div><a class="ds-button ds-button-primary" href="#/leads">新增线索</a>' +
+        '<a class="ds-button" href="#/followups">记录跟进</a></div></div>'
+      : "";
 
-        /* ---------- E. 空态引导 ---------- */
-        var emptyGuide = '';
-        if (!stats.customers_total) {
-            emptyGuide = '<div class="card"><div class="card-head"><h2>开始使用</h2></div>' +
-                '<p class="small muted">还没有数据，按这个顺序三步就能跑起来：</p>' +
-                '<div class="row-3">' +
-                '<a class="btn btn-primary" href="#/leads">① 录第一条线索</a>' +
-                '<a class="btn" href="#/followups">② 记一条跟进</a>' +
-                '<a class="btn" href="#/deals">③ 线索转商机</a>' +
-                '</div></div>';
-        }
+    root.innerHTML = '<section class="ds-page ds-page-enter">' +
+      '<header class="ds-heading"><div><p class="ds-eyebrow">' + esc(dashDateLabel()) + "</p>" +
+        "<h1>" + esc(dashGreeting()) + "，" + esc(window.state.displayName || window.state.me || "销售") + "</h1>" +
+        '<p class="ds-subtitle">今天有 ' + todos.length + " 位客户需要跟进，先处理 " + overdue.length +
+          " 条已逾期的，效率最高。</p></div>" +
+        '<div class="ds-heading-actions"><button type="button" class="ds-button" data-dash-refresh>' +
+          dashIcon("clock") + "刚刚同步</button>" +
+          '<a class="ds-button ds-button-primary" href="#/leads">' + dashIcon("plus") + "新增线索</a></div>" +
+      "</header>" + alertHtml + emptyGuide +
+      '<div class="ds-kpi-grid">' +
+        dashKpi({
+          label: "今日待跟进",
+          value: String(todos.length),
+          tone: "blue",
+          icon: "calendar",
+          href: "#/followups",
+          foot: "<span>" + overdue.length + " 条已逾期</span><span>·</span><span>按最近一条跟进计算</span>"
+        }) +
+        dashKpi({
+          label: "已逾期",
+          value: String(overdue.length),
+          tone: "red",
+          icon: "alert",
+          href: "#/followups",
+          foot: "<span>" + (overdue.length ? "需要优先处理" : "当前没有逾期") + "</span>"
+        }) +
+        dashKpi({
+          label: "进行中订单",
+          value: String(openOrders),
+          tone: "violet",
+          icon: "order",
+          href: "#/orders",
+          foot: "<span>待支付 " + Number((orders.pending_payment || {}).count || 0) +
+            "</span><span>·</span><span>已发货 " + Number((orders.shipped || {}).count || 0) + "</span>"
+        }) +
+        dashKpi({
+          label: "超时售后",
+          value: String(overdueServices),
+          tone: "amber",
+          icon: "service",
+          href: "#/aftersales",
+          foot: "<span>本月成交 " + money(monthWon.amount) + "</span><span>·</span><span>SLA 3 天</span>"
+        }) +
+      "</div>" +
+      '<section class="ds-card ds-yesterday-card"><div class="ds-card-head"><div><h2>昨日新增与跟进</h2>' +
+        "</div><span>昨天 00:00–24:00</span></div>" +
+        '<div class="ds-yesterday-grid">' + yesterday.map(function (item) { return dashYesterdayItem(item, yesterday); }).join("") +
+      "</div></section>" +
+      '<div class="ds-work-grid">' +
+        '<section class="ds-card ds-follow-card"><div class="ds-card-head">' +
+          '<div><h2>今日待跟进</h2><span class="ds-count">' + todos.length + "</span></div>" +
+          '<a class="ds-text-link" href="#/followups">查看全部</a></div><div>' + todoHtml + "</div></section>" +
+        '<div class="ds-side-stack">' +
+          '<section class="ds-card"><div class="ds-card-head"><div><h2>订单待办</h2></div><span>' +
+            openOrders + ' 单未完成</span></div><div class="ds-order-summary"><b>' + openOrders +
+            "<small>进行中订单</small></b><p>当前最需要关注<br><strong>待支付 " +
+            Number((orders.pending_payment || {}).count || 0) + " 单 · 待收尾款 " +
+            Number((orders.balance_paid || {}).count || 0) + " 单</strong></p></div>" +
+            '<div class="ds-order-grid">' + orderChips + "</div></section>" +
+          '<section class="ds-card"><div class="ds-card-head"><div><h2>售后提醒</h2></div>' +
+            '<span class="ds-count">' + services.length + "</span></div>" +
+            '<div class="ds-service-list">' + serviceHtml + "</div></section>" +
+        "</div>" +
+        '<section class="ds-card ds-activity-card"><div class="ds-card-head"><div><h2>最近动态</h2></div>' +
+          "<span>跟进、收款、订单与售后混排</span></div>" +
+          '<div class="ds-activity-list">' + (activities.length
+            ? activities.map(dashActivity).join("")
+            : '<div class="ds-empty compact"><b>还没有动态</b><small>业务操作后会显示在这里。</small></div>') +
+          "</div></section>" +
+      "</div></section>";
 
-        root.innerHTML =
-            slaAlertHtml + kpiHtml + emptyGuide +
-            '<div class="card">' +
-            '<div class="card-head"><h2>今日待跟进 <span class="badge warn">' + todos.length + '</span></h2>' +
-            '<a class="btn btn-sm" href="#/followups">全部跟进</a></div>' +
-            todoHtml +
-            '</div>' +
-            '<div class="card">' +
-            '<div class="card-head"><h2>订单待办</h2><a class="btn btn-sm" href="#/orders">管理订单</a></div>' +
-            '<div class="chip-grid">' + orderChips + '</div>' +
-            '</div>' +
-            '<div class="card">' +
-            '<div class="card-head"><h2>最近动态</h2><span class="small muted">跟进与订单事件混排</span></div>' +
-            actHtml +
-            '</div>';
-
-        /* ---------- 「记一条」弹窗 ---------- */
-        $$('button[data-log-fu]', root).forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                openQuickFollowup(
-                    Number(btn.getAttribute('data-log-fu')),
-                    Number(btn.getAttribute('data-log-deal')) || 0
-                );
-            });
-        });
+    $$("button[data-log-fu]", root).forEach(function (button) {
+      button.addEventListener("click", function () {
+        openQuickFollowup(
+          Number(button.getAttribute("data-log-fu")),
+          Number(button.getAttribute("data-log-deal")) || 0
+        );
+      });
     });
+    var refresh = $("[data-dash-refresh]", root);
+    if (refresh) {
+      refresh.addEventListener("click", function () {
+        render();
+        toast("工作台已刷新");
+      });
+    }
+  });
 }
 
-/* 工作台行内「记一条」：POST /follow-ups（方式取字典 follow_method） */
+/* 行内「记一条」：POST /follow-ups，保存后刷新工作台。 */
 function openQuickFollowup(customerId, dealId) {
-    var modal = document.createElement('div');
-    modal.className = 'modal';
-    modal.innerHTML =
-        '<div class="modal-overlay"></div>' +
-        '<div class="modal-content">' +
-        '<div class="modal-header"><h3>记一条跟进</h3>' +
-        '<button type="button" class="btn btn-link modal-close">×</button></div>' +
-        '<div class="modal-body">' +
-        '<form id="quickFuForm" class="form-grid" autocomplete="off">' +
-        '<div class="field"><label>跟进内容 *</label>' +
-        '<textarea name="content" rows="4" maxlength="2000" required ' +
-        'placeholder="聊了什么、客户什么态度、下一步做什么"></textarea></div>' +
-        '<div class="row-2">' +
-        '<div class="field"><label>下次跟进日期</label>' +
-        '<input type="date" name="next_date" value="' + quickDayAfter(3) + '"></div>' +
-        '<div class="field"><label>跟进方式</label>' +
-        '<select name="method">' + dictOptions('follow_method', 'wechat') + '</select></div>' +
-        '</div>' +
-        '<div class="form-actions">' +
-        '<button type="button" class="btn modal-cancel">取消</button>' +
-        '<button type="submit" class="btn btn-primary">保存跟进</button>' +
-        '</div>' +
-        '</form>' +
-        '</div></div>';
-    document.body.appendChild(modal);
+  var modal = document.createElement("div");
+  modal.className = "modal";
+  modal.innerHTML =
+    '<div class="modal-overlay"></div>' +
+    '<div class="modal-content"><div class="modal-header"><h3>记一条跟进</h3>' +
+      '<button type="button" class="btn btn-link modal-close">×</button></div>' +
+      '<div class="modal-body"><form id="quickFuForm" class="form-grid" autocomplete="off">' +
+        '<div class="field"><label>跟进内容 *</label><textarea name="content" rows="4" maxlength="2000" required ' +
+          'placeholder="聊了什么、客户什么态度、下一步做什么"></textarea></div>' +
+        '<div class="row-2"><div class="field"><label>下次跟进日期</label>' +
+          '<input type="date" name="next_date" value="' + quickDayAfter(3) + '"></div>' +
+          '<div class="field"><label>跟进方式</label><select name="method">' +
+            dictOptions("follow_method", "wechat") + "</select></div></div>" +
+        '<div class="form-actions"><button type="button" class="btn modal-cancel">取消</button>' +
+          '<button type="submit" class="btn btn-primary">保存跟进</button></div>' +
+      "</form></div></div>";
+  document.body.appendChild(modal);
 
-    function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
-    modal.querySelector('.modal-close').addEventListener('click', close);
-    modal.querySelector('.modal-cancel').addEventListener('click', close);
-
-    var form = modal.querySelector('form');
-    form.addEventListener('submit', function (ev) {
-        ev.preventDefault();
-        var btn = form.querySelector('button[type="submit"]');
-        var content = String(form.querySelector('[name="content"]').value || '').trim();
-        if (!content) { toast('跟进内容不能为空', true); return; }
-        var fd = new FormData();
-        fd.append('customer_id', String(customerId));
-        fd.append('content', content);
-        fd.append('method', form.querySelector('[name="method"]').value || 'wechat');
-        var nextDate = form.querySelector('[name="next_date"]').value;
-        if (nextDate) { fd.append('next_date', nextDate); }
-        if (dealId) { fd.append('deal_id', String(dealId)); }
-        btn.disabled = true;
-        api('/follow-ups', { method: 'POST', body: fd }).then(function () {
-            toast('已记录跟进');
-            close();
-            return render();
-        }).catch(function (err) {
-            toast(err.message, true);
-            btn.disabled = false;
-        });
+  function close() {
+    if (modal.parentNode) { document.body.removeChild(modal); }
+  }
+  modal.querySelector(".modal-close").addEventListener("click", close);
+  modal.querySelector(".modal-cancel").addEventListener("click", close);
+  var form = modal.querySelector("form");
+  form.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var button = form.querySelector('button[type="submit"]');
+    var content = String(form.querySelector('[name="content"]').value || "").trim();
+    if (!content) {
+      toast("跟进内容不能为空", true);
+      return;
+    }
+    var body = new FormData();
+    body.append("customer_id", String(customerId));
+    body.append("content", content);
+    body.append("method", form.querySelector('[name="method"]').value || "wechat");
+    var nextDate = form.querySelector('[name="next_date"]').value;
+    if (nextDate) { body.append("next_date", nextDate); }
+    if (dealId) { body.append("deal_id", String(dealId)); }
+    button.disabled = true;
+    api("/follow-ups", { method: "POST", body: body }).then(function () {
+      toast("已记录跟进");
+      close();
+      return render();
+    }).catch(function (err) {
+      toast(err.message, true);
+      button.disabled = false;
     });
+  });
 }
 
-function quickDayAfter(n) {
-    var dt = new Date();
-    dt.setDate(dt.getDate() + n);
-    return dt.getFullYear() + '-' + ((dt.getMonth() + 1) < 10 ? '0' : '') + (dt.getMonth() + 1) +
-        '-' + (dt.getDate() < 10 ? '0' : '') + dt.getDate();
+function quickDayAfter(days) {
+  var date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate());
 }

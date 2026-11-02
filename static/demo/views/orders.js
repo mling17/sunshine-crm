@@ -345,8 +345,8 @@ function openDealPreviewModal(dealId) {
       '<div class="modal-header"><h3>商机 · ' + esc(customerNameOf(d.customer_id)) + '</h3>' +
         '<button type="button" class="btn-link modal-close">×</button></div>' +
       '<div class="modal-body">' +
-        '<div class="badge-row"><span class="badge ' + (d.stage === 'won' ? 'ok' : 'warn') + '">' +
-          esc(STAGE_LABEL[d.stage] || d.stage) + '</span>' +
+        '<div class="badge-row"><span class="badge ' + (d.order_id || d.stage === 'won' ? 'ok' : 'warn') + '">' +
+          esc(d.order_id ? '已生成订单' : (STAGE_LABEL[d.stage] || d.stage)) + '</span>' +
           (d.locked ? '<span class="badge muted">已下单</span>' : '') + '</div>' +
         infoGrid([
           ['产品类型', d.product_type], ['型号', d.model],

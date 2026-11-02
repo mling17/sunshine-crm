@@ -12,6 +12,10 @@ function dealTitle(d) {
   return [d.product_type, d.model, d.size].filter(Boolean).join(' ') || ('商机 #' + d.id);
 }
 
+function dealStageBadgeText(d) {
+  return d.order_id ? '已生成订单' : (STAGE_LABEL[d.stage] || d.stage);
+}
+
 function customerNameOf(id) {
   var c = (window.DEMO.customers || []).filter(function (x) { return x.id === id; })[0];
   return c ? c.name : ('客户 #' + id);
@@ -51,8 +55,8 @@ function viewDeals(root, route) {
         { title: '尺寸', render: function (d) { return esc(d.size || '—'); }, nowrap: true },
         { title: '金额', render: function (d) { return money(d.amount); }, align: 'right', nowrap: true },
         { title: '阶段', render: function (d) {
-            return '<span class="badge ' + (d.stage === 'won' ? 'ok' : d.stage === 'lost' ? 'danger' : 'warn') + '">' +
-              esc(STAGE_LABEL[d.stage] || d.stage) + '</span>';
+            return '<span class="badge ' + (d.order_id || d.stage === 'won' ? 'ok' : d.stage === 'lost' ? 'danger' : 'warn') + '">' +
+              esc(dealStageBadgeText(d)) + '</span>';
           } },
         { title: '更新时间', render: function (d) { return fmtDateTime(d.updated_at || d.created_at).slice(0, 10); }, nowrap: true },
         { title: '操作', nowrap: true, render: function (d) {
@@ -102,8 +106,8 @@ function viewDealDetail(root, rawId) {
     backHash: '#/deals',
     backLabel: '商机',
     title: customerNameOf(d.customer_id) + ' · ' + dealTitle(d),
-    badgesHtml: '<span class="badge ' + (d.stage === 'won' ? 'ok' : 'warn') + '">' +
-      esc(STAGE_LABEL[d.stage] || d.stage) + '</span>' + orderLink,
+    badgesHtml: '<span class="badge ' + (d.locked || d.stage === 'won' ? 'ok' : 'warn') + '">' +
+      esc(dealStageBadgeText(d)) + '</span>' + orderLink,
     infoHtml: infoGrid([
       ['客户', '<a href="#/customers/' + d.customer_id + '">' + esc(customerNameOf(d.customer_id)) + '</a>', true],
       ['产品类型', d.product_type],
@@ -113,11 +117,14 @@ function viewDealDetail(root, rawId) {
       ['金额', money(d.amount), true],
       ['定金', money(d.deposit)],
       ['尾款', money(d.balance)],
-      ['阶段', STAGE_LABEL[d.stage] || d.stage, true],
+      ['阶段', dealStageBadgeText(d), true],
       ['创建时间', fmtDateTime(d.created_at)],
       ['成交时间', d.closed_at ? fmtDateTime(d.closed_at) : '—']
     ]),
     placeholder: '报了方案？客户对尺寸/价格什么反馈？下一步做什么？',
+    canFollow: !d.locked,
+    lockedText: d.locked ? '已生成订单，请在订单中跟进' : '',
+    lockedButtonLabel: d.locked ? '已生成订单，请在订单中跟进' : '',
     extraHtml: filesCardHtml(dealFiles, '这个商机还没有上传图纸 / 报价单'),
     actionsHtml:
       (d.locked

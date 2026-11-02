@@ -7,11 +7,12 @@
  *   · 产品类型、型号、阶段、流失原因全部取数据字典（dictOptions / dictLabel），不许硬编码
  */
 
-/* 阶段徽标：成交绿、流失红、其余黄 */
-function dealStageBadge(stage, label) {
-    var cls = stage === 'won' ? 'ok' : (stage === 'lost' ? 'muted' :
+/* 阶段徽标：已生成订单/成交绿、流失灰、其余黄 */
+function dealStageBadge(stage, label, orderId) {
+    var cls = orderId || stage === 'won' ? 'ok' : (stage === 'lost' ? 'muted' :
         (stage === 'confirm' ? 'warn' : 'quote'));
-    return '<span class="badge ' + cls + '">' + esc(label || STAGE_LABEL[stage] || stage || '—') + '</span>';
+    var text = orderId ? '已生成订单' : (label || STAGE_LABEL[stage] || stage || '—');
+    return '<span class="badge ' + cls + '">' + esc(text) + '</span>';
 }
 
 /* 手动/电动徽标（后端下发 drive_type_label；数据字典里没有这张表） */
@@ -141,6 +142,39 @@ function quoteItemHtml(item, editable) {
         '</div></div>';
 }
 
+function quoteFollowButtonHtml(quote, deal, placement) {
+    var unavailable = !!deal.order_id || deal.stage === 'lost';
+    var title = unavailable
+        ? (deal.order_id ? '已生成订单，请在订单中跟进' : '已作废的商机不能再添加跟进')
+        : '直接关联报价单 ' + quote.quote_no + ' 记录跟进';
+    return '<button type="button" class="btn btn-sm btn-primary deal-quote-card-follow ' +
+        'deal-quote-card-follow-' + placement + '" data-quote-follow="' + quote.id + '"' +
+        ' title="' + esc(title) + '" aria-label="' + esc(title) + '"' +
+        (unavailable ? ' disabled' : '') + '>跟进</button>';
+}
+
+function quoteFollowAssociationHtml(quote) {
+    return '<div class="field"><label>关联报价单</label>' +
+        '<div class="followup-linked-quote">' +
+            '<span class="badge quote">' + esc(quote.status_label || quote.status || '报价单') + '</span>' +
+            '<span class="followup-linked-quote-copy">' +
+                '<b>' + esc(quote.quote_no) + '</b>' +
+                (quote.title ? '<small>' + esc(quote.title) + '</small>' : '') +
+            '</span>' +
+        '</div>' +
+        '<input type="hidden" name="quote_id" value="' + quote.id + '">' +
+    '</div>';
+}
+
+function openQuoteFollowModal(quote, onSubmit) {
+    openFollowModal({
+        title: '记一条跟进 · ' + (quote.quote_no || quote.title || '报价单'),
+        placeholder: '客户对这张报价单的价格、配置或交付有什么反馈？下一步做什么？',
+        extraHtml: quoteFollowAssociationHtml(quote),
+        onSubmit: onSubmit
+    });
+}
+
 function quoteCardsHtml(deal, quotes) {
     var cards = (quotes || []).map(function (quote) {
         var editable = !deal.order_id && quote.status === 'draft';
@@ -189,6 +223,7 @@ function quoteCardsHtml(deal, quotes) {
                 '<span class="deal-quote-card-meta">' + esc(quote.quote_no) +
                     ' · ' + itemCount + ' 项产品</span>' +
                 deleteCardAction +
+                quoteFollowButtonHtml(quote, deal, 'collapsed') +
             '</summary>' +
             '<div class="deal-quote-card-body">' +
                 '<div class="small muted">创建 ' + fmtDateTime(quote.created_at) +
@@ -206,6 +241,9 @@ function quoteCardsHtml(deal, quotes) {
                     : '') +
                 '<div class="deal-quote-items">' + itemHtml + '</div>' +
                 (actions ? '<div class="deal-quote-actions">' + actions + '</div>' : '') +
+                '<div class="deal-quote-card-footer">' +
+                    quoteFollowButtonHtml(quote, deal, 'expanded') +
+                '</div>' +
             '</div>' +
         '</details>';
     }).join('');
@@ -274,7 +312,7 @@ function dealOverviewHtml(deal, customerName, quotes) {
                 dealTagsHtml(deal, quotes) +
             '</div>' +
             '<div class="deal-overview-status"><span>商机状态</span>' +
-                dealStageBadge(deal.stage, deal.stage_label) + '</div>' +
+                dealStageBadge(deal.stage, deal.stage_label, deal.order_id) + '</div>' +
         '</div>' +
         quoteCardsHtml(deal, quotes) +
         '<div class="deal-overview-actions">' + addQuoteAction +
@@ -282,7 +320,18 @@ function dealOverviewHtml(deal, customerName, quotes) {
     '</section>';
 }
 
-function bindQuoteActions(root, deal, customerName, quotes, products) {
+function bindQuoteActions(root, deal, customerName, quotes, products, onFollowSubmit) {
+    $$('[data-quote-follow]', root).forEach(function (btn) {
+        btn.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (btn.disabled) { return; }
+            var quote = quotes.filter(function (q) {
+                return String(q.id) === btn.getAttribute('data-quote-follow');
+            })[0];
+            if (quote) { openQuoteFollowModal(quote, onFollowSubmit); }
+        });
+    });
     $$('[data-quote-add-item]', root).forEach(function (btn) {
         btn.addEventListener('click', function () {
             var quote = quotes.filter(function (q) {
@@ -682,7 +731,7 @@ function viewDeals(root, route) {
                 '<td>' + esc(d.spec || '—') + '</td>' +
                 '<td style="text-align:right;white-space:nowrap">' +
                 (Number(d.amount || 0) > 0 ? money(d.amount) : '—') + '</td>' +
-                '<td>' + dealStageBadge(d.stage, d.stage_label) + '</td>' +
+                '<td>' + dealStageBadge(d.stage, d.stage_label, d.order_id) + '</td>' +
                 '<td style="white-space:nowrap">' + fmtDateTime(d.updated_at || d.created_at).slice(0, 10) + '</td>' +
                 '<td style="white-space:nowrap"><a class="btn btn-sm" href="#/deals/' + d.id + '">跟进</a></td>' +
                 '</tr>';
@@ -745,6 +794,21 @@ function viewDealDetail(root, rawId) {
         var canEditItems = !d.order_id && d.stage !== 'lost';
         var items = d.items || [];
 
+        function submitDealFollowUp(p) {
+            var fd = new FormData();
+            fd.append('object_type', 'deal');
+            fd.append('object_id', String(d.id));
+            fd.append('content', p.content);
+            fd.append('method', p.method || 'wechat');
+            if (p.next_date) { fd.append('next_date', p.next_date); }
+            if (p.quote_id) { fd.append('quote_id', String(p.quote_id)); }
+            (p.files || []).forEach(function (f) { if (f.file) { fd.append('files', f.file); } });
+            api('/follow-ups', { method: 'POST', body: fd }).then(function () {
+                toast('已记录跟进');
+                return render();
+            }).catch(function (err) { toast(err.message, true); });
+        }
+
         renderEntityFollowPage(root, {
             backHash: '#/deals',
             backLabel: '商机',
@@ -753,8 +817,9 @@ function viewDealDetail(root, rawId) {
             placeholder: '这次沟通聊了什么？客户对报价和参数是什么态度？下一步做什么？',
             canFollow: canFollow,
             lockedText: d.order_id
-                ? '商机已生成订单，请到订单中继续处理'
+                ? '已生成订单，请在订单中跟进'
                 : (d.stage === 'lost' ? '已作废的商机不能再添加跟进' : '已转订单的商机请到订单中继续跟进'),
+            lockedButtonLabel: d.order_id ? '已生成订单，请在订单中跟进' : '',
             records: timelineRecords,
             followExtraHtml:
                 '<div class="field"><label>关联报价单</label><select name="quote_id"' +
@@ -770,20 +835,7 @@ function viewDealDetail(root, rawId) {
                     ? dealItemsCardHtml(items, false, d.amount) : ''),
             extraHtml:
                 filesCardHtml(collectFiles(timelineRecords), '这个商机还没有上传图纸 / 报价单 / 现场照片'),
-            onSubmit: function (p) {
-                var fd = new FormData();
-                fd.append('object_type', 'deal');
-                fd.append('object_id', String(d.id));
-                fd.append('content', p.content);
-                fd.append('method', p.method || 'wechat');
-                if (p.next_date) { fd.append('next_date', p.next_date); }
-                if (p.quote_id) { fd.append('quote_id', String(p.quote_id)); }
-                (p.files || []).forEach(function (f) { if (f.file) { fd.append('files', f.file); } });
-                api('/follow-ups', { method: 'POST', body: fd }).then(function () {
-                    toast('已记录跟进');
-                    return render();
-                }).catch(function (err) { toast(err.message, true); });
-            }
+            onSubmit: submitDealFollowUp
         });
 
         var headerCreateQuote = $('#headerCreateQuote', root);
@@ -793,7 +845,7 @@ function viewDealDetail(root, rawId) {
             });
         }
 
-        bindQuoteActions(root, d, customerName, quotes, products);
+        bindQuoteActions(root, d, customerName, quotes, products, submitDealFollowUp);
         bindDealTagActions(root, d);
 
         var addItemBtn = $('#btnAddDealItem', root);

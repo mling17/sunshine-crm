@@ -428,6 +428,18 @@
     }
   };
 
+  /* 统计口径追加近 7 天；保留原有 6 个月默认区间。 */
+  const sevenDayStats = JSON.parse(JSON.stringify(state.stats.month));
+  sevenDayStats.label = "近7天";
+  sevenDayStats.trend = Object.assign({}, sevenDayStats.trend, {
+    title: "近 7 日成交走势",
+    caption: "含今天在内的 7 个自然日",
+    labels: sevenDayStats.trend.labels.slice(-7),
+    values: sevenDayStats.trend.values.slice(-7),
+    counts: sevenDayStats.trend.counts.slice(-7)
+  });
+  state.stats = Object.assign({ "7d": sevenDayStats }, state.stats);
+
   const icons = {
     calendar: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M8 3v4M16 3v4M3 10h18"></path><path d="m9 15 2 2 4-4"></path></svg>',
     alert: '<svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"></path><path d="M12 9v4M12 17h.01"></path></svg>',

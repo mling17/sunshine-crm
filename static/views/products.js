@@ -384,7 +384,7 @@ function viewProductDetail(root, rawId) {
             { title: '尺寸', nowrap: true, render: function (d) { return esc(d.spec || '—'); } },
             { title: '金额', align: 'right', nowrap: true, render: function (d) { return money(d.amount); } },
             { title: '阶段', nowrap: true, render: function (d) {
-                return dealStageBadge(d.stage, STAGE_LABEL[d.stage]);
+                return dealStageBadge(d.stage, d.stage_label, d.order_id);
             } },
             { title: '订单', nowrap: true, render: function (d) {
                 return d.order_id ? '<a href="#/orders/' + d.order_id + '">查看订单</a>' : '—';

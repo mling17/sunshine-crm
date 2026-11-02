@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date, datetime, timedelta
 
 from tests._util import ApiTestCase
 
@@ -87,6 +88,42 @@ class StatsTest(ApiTestCase):
         self.assertEqual({s["key"] for s in sources}, {"wechat", "referral"})
         self.assertEqual(sum(s["value"] for s in sources), 2)
 
+    def test_7d_range_uses_seven_local_days_and_filters_cohort(self):
+        self.client.post(
+            "/api/crm/leads",
+            json={"name": "近七天线索", "phone": "18753110001", "source": "wechat"},
+        )
+        old_day = (date.today() - timedelta(days=8)).isoformat() + "T08:00:00Z"
+        with self.db_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO leads
+                    (name, phone, source, status, created_at, updated_at)
+                VALUES (?, ?, ?, 'new', ?, ?)
+                """,
+                ("区间外线索", "18753110002", "phone", old_day, old_day),
+            )
+
+        data = self.client.get("/api/crm/stats?range=7d").json()
+        expected_start = (date.today() - timedelta(days=6)).isoformat()
+        self.assertEqual(data["range"]["key"], "7d")
+        self.assertEqual(data["range"]["label"], "近7天")
+        self.assertEqual(data["range"]["start"], expected_start)
+        self.assertEqual(data["summary"]["newLeads"], 1)
+        self.assertEqual(data["range"]["end"], date.today().isoformat())
+        self.assertEqual(len(data["months"]), 7)
+        self.assertEqual(len(data["trend"]["labels"]), 7)
+        self.assertEqual(len(data["lead_funnel"]), 5)
+        self.assertIn("products", data)
+        self.assertIn("sources", data)
+        self.assertIn("service_status", data)
+
+    def test_period_alias_is_backwards_compatible(self):
+        data = self.client.get("/api/crm/stats?period=3m").json()
+        self.assertEqual(data["range"]["key"], "3m")
+        self.assertEqual(data["range"]["label"], "近3月")
+        self.assertEqual(len(data["months"]), 3)
+
 
 class WorkbenchTest(ApiTestCase):
     def test_in_progress_and_recent_activities(self):
@@ -117,6 +154,18 @@ class WorkbenchTest(ApiTestCase):
         acts = self.dashboard()["stats"]["recent_activities"]
         self.assertIn("pay", [a["type"] for a in acts])
         self.assertTrue(any("定金" in a["text"] for a in acts))
+
+    def test_dashboard_adds_yesterday_summary_and_recent_services(self):
+        stats = self.dashboard()["stats"]
+        self.assertEqual(
+            {item["key"] for item in stats["yesterday_activity"]},
+            {"lead", "customer", "deal", "order", "aftersale"},
+        )
+        self.assertTrue(all(
+            {"new_count", "followups"} <= set(item)
+            for item in stats["yesterday_activity"]
+        ))
+        self.assertEqual(stats["recent_aftersales"], [])
 
 
 class LeadDerivedTest(ApiTestCase):

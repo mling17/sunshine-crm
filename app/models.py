@@ -472,7 +472,9 @@ class DealOut(BaseModel):
 
     @model_validator(mode="after")
     def _fill_stage_label(self) -> "DealOut":
-        if self.stage_label is None:
+        if self.order_id is not None:
+            self.stage_label = "已生成订单"
+        elif self.stage_label is None:
             self.stage_label = labels.deal_stage(self.stage)
         return self
 
@@ -612,6 +614,9 @@ class TodayFollowUpOut(BaseModel):
     content: str
     next_date: str
     days_overdue: int = 0
+    last_follow_at: str | None = None
+    intent_level: str | None = None
+    customer_type: str | None = None
 
 
 class MonthWonOut(BaseModel):
@@ -632,6 +637,10 @@ class DashboardStatsOut(BaseModel):
     orders_by_status: dict[str, dict[str, int | float]] = Field(default_factory=dict)
     recent_orders: list[dict] = Field(default_factory=list)
     aftersale_sla_alerts: list[dict] = Field(default_factory=list)
+    #: 昨日各业务对象的新增数与跟进次数（工作台“昨日新增与跟进”）
+    yesterday_activity: list[dict] = Field(default_factory=list)
+    #: 最近售后单（工作台售后提醒区）
+    recent_aftersales: list[dict] = Field(default_factory=list)
 
 
 class DashboardOut(BaseModel):

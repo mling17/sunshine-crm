@@ -517,7 +517,10 @@ function renderEntityFollowPage(root, opts) {
     '<div class="card">' +
     '<div class="card-head"><h2>跟进履历 <span class="badge muted">' + (opts.records || []).length + '</span></h2>' +
     (opts.canFollow === false
-      ? '<span class="small muted">' + esc(opts.lockedText || '已完成，不能再添加跟进') + '</span>'
+      ? (opts.lockedButtonLabel
+        ? '<button type="button" class="btn btn-sm" disabled title="' +
+          esc(opts.lockedText || opts.lockedButtonLabel) + '">' + esc(opts.lockedButtonLabel) + '</button>'
+        : '<span class="small muted">' + esc(opts.lockedText || '已完成，不能再添加跟进') + '</span>')
       : '<button type="button" class="btn btn-sm btn-primary" id="btnAddFollow">' +
       esc(opts.addLabel || '＋ 记一条跟进') + '</button>') +
     '</div>' +
