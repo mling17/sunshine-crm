@@ -5,8 +5,6 @@ function dashIcon(name) {
   var icons = {
     calendar: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M8 3v4M16 3v4M3 10h18"></path><path d="m9 15 2 2 4-4"></path></svg>',
     alert: '<svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"></path><path d="M12 9v4M12 17h.01"></path></svg>',
-    plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>',
-    clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>',
     order: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6z"></path><path d="M9 8h6M9 12h6M9 16h4"></path></svg>',
     service: '<svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"></path><path d="M4 13v5h3v-5H4Zm13 0h3v5h-3v-5Z"></path><path d="M10 21h4"></path></svg>',
     lead: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c.8-4 3.1-6 7-6s6.2 2 7 6"></path><path d="M18 4v4M16 6h4"></path></svg>',
@@ -169,9 +167,6 @@ function viewDashboard(root) {
         "<h1>" + esc(dashGreeting()) + "，" + esc(window.state.displayName || window.state.me || "销售") + "</h1>" +
         '<p class="ds-subtitle">今天有 ' + todos.length + " 位客户需要跟进，先处理 " + overdue.length +
           " 条已逾期的，效率最高。</p></div>" +
-        '<div class="ds-heading-actions"><button type="button" class="ds-button" data-dash-refresh>' +
-          dashIcon("clock") + "刚刚同步</button>" +
-          '<a class="ds-button ds-button-primary" href="#/leads">' + dashIcon("plus") + "新增线索</a></div>" +
       "</header>" + alertHtml + emptyGuide +
       '<div class="ds-kpi-grid">' +
         dashKpi({
@@ -243,13 +238,6 @@ function viewDashboard(root) {
         );
       });
     });
-    var refresh = $("[data-dash-refresh]", root);
-    if (refresh) {
-      refresh.addEventListener("click", function () {
-        render();
-        toast("工作台已刷新");
-      });
-    }
   });
 }
 
