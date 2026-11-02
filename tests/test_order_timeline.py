@@ -107,6 +107,41 @@ class OrderTimelineTest(ApiTestCase):
         self.assertEqual(detail["balance_paid"], 7000.0)
         self.assertEqual(detail["deposit_paid"] + detail["balance_paid"], detail["amount"])
 
+    def test_tracking_is_required_at_shipping_not_stock_ready(self):
+        order = self._order()
+        carrier = self.create_carrier(name="发货校验物流")
+        updated = self.client.put(
+            f"/api/crm/orders/{order['id']}",
+            json={
+                "logistics_mode": "agent",
+                "carrier_id": carrier["id"],
+                "carrier_contact_id": carrier["contacts"][0]["id"],
+                "receiver_name": "王测试",
+                "receiver_phone": "13800000000",
+                "receiver_address": "济南市历下区",
+            },
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self._pay_deposit(order["id"], 3000.0)
+        self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={"to_status": "producing"},
+        )
+        self._pay_balance(order["id"], 7000.0)
+
+        stock_ready = self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={"to_status": "ready_to_ship"},
+        )
+        self.assertEqual(stock_ready.status_code, 200, stock_ready.text)
+
+        shipped = self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={"to_status": "shipped"},
+        )
+        self.assertEqual(shipped.status_code, 400, shipped.text)
+        self.assertEqual(shipped.json()["code"], "missing_tracking_number")
+
     def test_completed_requires_full_payment(self):
         order = self._order(amount=10000.0, deposit=10000.0)
         self._pay_deposit(order["id"], 10000.0)

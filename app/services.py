@@ -752,10 +752,8 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             )
 
         elif to_status == "ready_to_ship":
-            # 备货完成时沿用创建订单时填写的物流信息；允许本次补齐联络人/运单号。
-            updates = order_logistics_updates(
-                conn, order_row, payload, require_tracking=True
-            )
+            # 备货完成只确认库存与物流安排；运单号在真正发货时强制填写。
+            updates = order_logistics_updates(conn, order_row, payload)
             updates.update(status=to_status, updated_at=now_iso())
             assignments = ", ".join(f"{column} = ?" for column in updates)
             conn.execute(
