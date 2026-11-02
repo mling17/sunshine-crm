@@ -33,6 +33,10 @@ class DashboardStatsDemoTest(unittest.TestCase):
         self.assertIn("renderStageSteps", script)
         self.assertIn("renderOrderPipeline", script)
         self.assertIn("renderAftersales", script)
+        self.assertIn("昨日转化与跟进", script)
+        self.assertIn("yesterdayActivity", script)
+        self.assertIn("yesterday-card", styles)
+        self.assertIn(".yesterday-grid", styles)
 
         self.assertNotIn("snapshot-row", script)
         self.assertNotIn("snapshotItem", script)
