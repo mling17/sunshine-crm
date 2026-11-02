@@ -2,7 +2,7 @@
  *
  * 定稿口径：
  *   · 列表用表格 + 状态 Tab；订单由商机「生成订单」产生，页面不新建
- *   · 详情 = 信息卡（含关联商机，可点回）+ 状态进度条 + 收款 + 收货/配送 + 当前操作 + 售后单 + 状态历史
+ *   · 详情 = 订单摘要 + 跟进履历 + 报价单 + 金额收款 + 物流 + 售后单 + 资料
  *   · 状态推进统一走 POST /orders/{id}/transition；定金/尾款走 /pay-deposit /pay-balance（要传截图）
  */
 
@@ -154,6 +154,125 @@ function viewOrders(root, route) {
 }
 
 /* ---------------- 订单详情 ---------------- */
+function orderFileUrl(url) {
+    if (!url) { return ''; }
+    return String(url).charAt(0) === '/' && String(url).indexOf('/crm/') !== 0 ? '/crm' + url : url;
+}
+
+var ORDER_CHANGE_LABELS = {
+    logistics_mode: '物流方式',
+    carrier_id: '物流公司',
+    carrier_contact_id: '物流联络人',
+    carrier_contact_name: '物流联络人',
+    carrier_contact_phone: '联络电话',
+    logistics_fee: '物流费用',
+    receiver_name: '收件人',
+    receiver_phone: '收货电话',
+    receiver_address: '收货地址',
+    amount: '订单金额',
+    balance_amount: '尾款应收',
+    tracking_no: '运单号'
+};
+
+function orderTimelineContent(record) {
+    if (record.type !== 'change' && record.type !== 'address') {
+        return record.content;
+    }
+    var detail = record.detail || {};
+    var lines = Object.keys(detail).map(function (key) {
+        var change = detail[key] || {};
+        if (!change || typeof change !== 'object') { return ''; }
+        var label = change.label || ORDER_CHANGE_LABELS[key] || key;
+        var before = change.from_label !== undefined ? change.from_label : change.from;
+        var after = change.to_label !== undefined ? change.to_label : change.to;
+        before = before === null || before === undefined || before === '' ? '未填写' : before;
+        after = after === null || after === undefined || after === '' ? '未填写' : after;
+        return label + '：' + before + ' → ' + after;
+    }).filter(Boolean);
+    return lines.length ? lines.join('；') : record.content;
+}
+
+function orderTimelineRecords(order) {
+    return (order.timeline || []).map(function (record) {
+        return Object.assign({}, record, {
+            content: orderTimelineContent(record),
+            files: (record.files || []).map(function (file) {
+                return Object.assign({}, file, { url: orderFileUrl(file.url) });
+            })
+        });
+    });
+}
+
+function orderDocumentFiles(order, timelineRecords) {
+    var seen = {};
+    var files = [];
+    function add(file, at) {
+        if (!file) { return; }
+        var url = orderFileUrl(file.url);
+        var key = url || file.name;
+        if (!key || seen[key]) { return; }
+        seen[key] = true;
+        files.push({
+            name: file.name || file.file_name || '附件',
+            url: url,
+            isImage: /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(file.name || file.file_name || ''),
+            at: at || file.created_at || order.created_at
+        });
+    }
+    (timelineRecords || []).forEach(function (record) {
+        (record.files || []).forEach(function (file) { add(file, record.at); });
+    });
+    (order.confirmation_files || []).forEach(function (file) {
+        add(file, order.customer_confirmed_at);
+    });
+    (order.attachments || []).forEach(function (file) {
+        add(file, file.created_at || order.updated_at);
+    });
+    return files;
+}
+
+function orderTagsHtml(deal) {
+    var tags = (deal && deal.tags) || [];
+    if (!deal) {
+        return '<span class="small muted">订单没有关联商机标签</span>';
+    }
+    return '<div class="order-tags" aria-label="订单标签">' + tags.map(function (tag) {
+        return '<span class="order-tag' + (tag.source === 'auto' ? ' is-auto' : '') + '">' +
+            esc(tag.name) +
+            (tag.deletable
+                ? '<button type="button" class="order-tag-remove" data-deal-tag-remove="' +
+                  tag.id + '" title="删除标签" aria-label="删除标签 ' + esc(tag.name) + '">×</button>'
+                : '') +
+            '</span>';
+    }).join('') +
+        '<button type="button" class="order-tag-add" data-deal-tag-add="' + deal.id +
+        '" title="添加标签" aria-label="添加标签">＋</button></div>';
+}
+
+function orderFollowModal(order) {
+    openFollowModal({
+        title: '记一条订单跟进 · ' + order.order_no,
+        placeholder: '这次和客户沟通了什么？生产、收款、发货或安装有什么新进展？',
+        onSubmit: function (payload) {
+            var fd = new FormData();
+            fd.append('object_type', 'order');
+            fd.append('object_id', String(order.id));
+            fd.append('content', payload.content);
+            fd.append('method', payload.method || 'wechat');
+            if (payload.next_date) { fd.append('next_date', payload.next_date); }
+            (payload.files || []).forEach(function (file) {
+                if (file.file) { fd.append('files', file.file); }
+            });
+            api('/follow-ups', { method: 'POST', body: fd }).then(function () {
+                toast('已记录订单跟进');
+                return render();
+            }).catch(function (err) {
+                toast(err.message, true);
+            });
+        }
+    });
+}
+
 function viewOrderDetail(root, rawId) {
     var id = Number(rawId);
     if (!id || isNaN(id)) {
@@ -161,264 +280,308 @@ function viewOrderDetail(root, rawId) {
         return Promise.resolve();
     }
 
-    return Promise.all([
-        api('/orders/' + id),
+    var supporting = Promise.all([
         api('/aftersales?order_id=' + id).catch(function () { return []; }),
         ensureCustomerIndex()
-    ]).then(function (all) {
-        var order = all[0];
-        var afRes = all[1];
-        var index = all[2] || {};
-        var aftersales = Array.isArray(afRes) ? afRes : ((afRes && afRes.items) || []);
+    ]);
 
+    return api('/orders/' + id).then(function (order) {
         if (!order) {
             root.innerHTML = '<div class="card">订单不存在，<a href="#/orders">回订单列表</a></div>';
             return;
         }
-
-        var totalAmount = Number(order.amount) || 0;
-        var paidTotal = (order.paid_amount !== undefined && order.paid_amount !== null)
-            ? Number(order.paid_amount) || 0
-            : (Number(order.deposit_paid) || 0) + (Number(order.balance_paid) || 0);
-        var unpaid = Math.max(0, totalAmount - paidTotal);
-        var customerName = order.customer_name || index[order.customer_id] ||
-            ('客户 #' + order.customer_id);
-
-        /* 进度条：走字典顺序（ORDER_STATUS 已由字典回填） */
-        var stepIdx = ORDER_STATUS.map(function (p) { return p[0]; }).indexOf(order.status);
-        var progressHtml = '<div class="progress-bar">' + ORDER_STATUS.map(function (p, i) {
-            var cls = 'step' + (i === stepIdx ? ' active' : (i < stepIdx ? ' done' : ''));
-            return '<div class="' + cls + '"><div class="step-label">' +
-                esc(p[1]) + '</div></div>';
-        }).join('') + '</div>';
-
-        /* 关联商机（能点回去） */
-        var dealHtml = order.deal_id
-            ? '<a href="#/deals/' + order.deal_id + '">商机 #' + order.deal_id + ' ›</a>'
-            : '—';
-
-        var infoHtml = infoGrid([
-            ['客户', '<a href="#/customers/' + order.customer_id + '">' + esc(customerName) + '</a>', true],
-            ['关联商机', dealHtml, true],
-            ['来源报价单', order.quote
-                ? esc(order.quote.quote_no) + ' · ' + fmtDateTime(order.quote.confirmed_at)
-                : '历史订单'],
-            ['产品数量', String((order.items || []).length) + ' 项'],
-            ['关联产品', order.product_id
-                ? '<a href="#/products/' + order.product_id + '">' +
-                  esc(order.product_name_snapshot || ('产品 #' + order.product_id)) + '</a>'
-                : '未关联产品', true],
-            ['产品 / 型号', [order.product_code_snapshot, order.product_type, order.model, order.spec]
-                .filter(Boolean).join(' ')],
-            ['产品配置', order.product_config_snapshot || '—'],
-            ['物流方式', order.logistics_mode_label],
-            ['承运公司', (order.carrier && (order.carrier.name || order.carrier.company)) || '不指定'],
-            ['物流联络人', order.carrier_contact_name || '—'],
-            ['联络电话', order.carrier_contact_phone || '—'],
-            ['运单号', order.tracking_number || order.tracking_no || '待补'],
-            ['创建时间', fmtDateTime(order.created_at)],
-            ['完成时间', order.completed_at ? fmtDateTime(order.completed_at) : '—']
-        ]);
-
-        var itemsHtml = '<div class="card">' +
-            '<div class="card-head"><h2>产品明细 <span class="badge muted">' +
-            (order.items || []).length + '</span></h2>' +
-            '<span class="small muted">生成订单时冻结的产品快照</span></div>' +
-            ((order.items || []).length
-                ? '<div class="table-wrap"><table><thead><tr><th>#</th><th>产品</th>' +
-                  '<th>数量</th><th>洞口尺寸</th><th>生产参数</th>' +
-                  '<th style="text-align:right">单价</th><th style="text-align:right">金额</th>' +
-                  '</tr></thead><tbody>' +
-                  order.items.map(function (item, index) {
-                      return '<tr><td>' + (index + 1) + '</td><td><b>' +
-                          esc([item.product_code_snapshot, item.product_name_snapshot]
-                              .filter(Boolean).join(' · ') || item.product_type || '—') +
-                          '</b>' + (item.product_config_snapshot
-                              ? '<div class="small muted">' + esc(item.product_config_snapshot) + '</div>' : '') +
-                          '</td><td>' + esc(item.quantity || 1) +
-                          '</td><td>' + esc(item.spec || '—') +
-                          '</td><td>' + esc(item.production_spec || '—') +
-                          '</td><td style="text-align:right;white-space:nowrap">' +
-                          money(item.unit_price) + '</td><td style="text-align:right;white-space:nowrap"><b>' +
-                          money(item.amount) + '</b></td></tr>';
-                  }).join('') + '</tbody></table></div>'
-                : '<p class="empty">没有产品明细快照</p>') +
-            '</div>';
-
-        var productTotal = Number(order.product_total || order.amount || 0);
-        var discountAmount = Number(order.discount_amount || 0);
-        var productPayable = Number(order.product_payable || (productTotal - discountAmount));
-        var freightAmount = Number(order.logistics_fee || order.freight_amount || 0);
-        var priceBreakdownHtml = '<div class="card">' +
-            '<div class="card-head"><h2>订单金额</h2>' +
-            '<span class="small muted">优惠只作用于产品合计，运费独立核算</span></div>' +
-            infoGrid([
-                ['产品合计', money(productTotal)],
-                ['整单优惠', discountAmount ? '-' + money(discountAmount) : money(0)],
-                ['优惠后产品应收', money(productPayable)],
-                ['运费（我方收取）', money(freightAmount)],
-                ['订单应收', money(totalAmount)],
-                ['优惠说明', order.discount_reason || '—']
-            ]) + '</div>';
-
-        var confirmFiles = (order.confirmation_files || []).map(function (file) {
-            var url = '/crm' + file.url;
-            return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' +
-                '<img src="' + esc(url) + '" alt="客户确认截图" loading="lazy"></a>';
-        }).join('');
-        var confirmationHtml = '<div class="card">' +
-            '<div class="card-head"><h2>客户确认</h2>' +
-            (order.customer_confirmed_at
-                ? '<span class="badge ok">已确认</span>'
-                : '<span class="badge warn">待确认</span>') + '</div>' +
-            '<p class="small muted" style="margin-top:0">客户通过微信查看下单表并确认；' +
-            '优惠和物流等协商条件可同时通过聊天确认，截图作为凭证。</p>' +
-            infoGrid([
-                ['确认时间', order.customer_confirmed_at
-                    ? fmtDateTime(order.customer_confirmed_at) : '—'],
-                ['确认说明', order.customer_confirmation_note || '—']
-            ]) +
-            (confirmFiles ? '<div class="photos">' + confirmFiles + '</div>' : '') +
-            '</div>';
-
-        /* 售后单 */
-        var aftersalesHtml = aftersales.length ? '<div class="card">' +
-            '<div class="card-head"><h2>售后单（' + aftersales.length + '）</h2></div>' +
-            aftersales.map(function (a) {
-                return '<div class="item"><div class="item-main">' +
-                    '<div class="item-title"><a href="#/aftersales/' + a.id + '">' + esc(a.no) + '</a>' +
-                    '<span class="badge ' + (a.status === 'done' ? 'ok' : (a.status === 'rejected' ? 'danger' : 'warn')) + '">' +
-                    esc(a.status_label || AFTERSALE_STATUS_LABEL[a.status] || a.status) + '</span></div>' +
-                    '<div class="item-sub small muted">' +
-                    esc(a.type_label || AFTERSALE_TYPE_LABEL[a.type] || a.type) +
-                    ' · ' + fmtDateTime(a.created_at).slice(0, 10) +
-                    ' · ' + esc(String(a.description || '').slice(0, 30)) + '</div>' +
-                    '</div><div class="item-side muted">›</div></div>';
-            }).join('') + '</div>'
-            : '<div class="card"><div class="card-head"><h2>售后单</h2></div><p class="empty">暂无售后单</p></div>';
-
-        /* 状态历史 */
-        var logs = order.status_log || [];
-        var historyHtml = logs.length ? '<div class="card">' +
-            '<div class="card-head"><h2>状态历史</h2></div>' +
-            logs.map(function (log) {
-                var shots = (log.screenshots || []).map(function (s) {
-                    var url = '/crm' + s.url;
-                    return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' +
-                        '<img src="' + esc(url) + '" alt="截图" loading="lazy"></a>';
-                }).join('');
-                return '<div class="item"><div class="item-main">' +
-                    '<div class="item-title">' + esc(log.to_status_label || log.to_status) + '</div>' +
-                    '<div class="item-sub small">' + fmtDateTime(log.created_at) + '</div>' +
-                    (log.note ? '<div class="item-sub">' + esc(log.note) + '</div>' : '') +
-                    (shots ? '<div class="photos">' + shots + '</div>' : '') +
-                    '</div></div>';
-            }).join('') + '</div>' : '';
-
-        /* 下一步操作 */
-        var next = ORDER_NEXT_STEP[order.status];
-        var actionBtns = '';
-        if (order.status === 'pending_confirmation') {
-            actionBtns += '<button type="button" class="btn btn-primary" id="btnConfirmCustomer">' +
-                '记录客户确认</button>';
-        }
-        if (next) {
-            if (order.status !== 'pending_confirmation') {
-                actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
-            }
-        }
-        actionBtns += '<button type="button" class="btn" id="btnEditOrder">修改订单</button>';
-        if (order.status === 'completed') {
-            actionBtns += '<button type="button" class="btn" id="btnAddAftersale">＋ 添加售后</button>';
-        } else {
-            actionBtns += '<button type="button" class="btn" disabled title="订单完成后才能申请售后">添加售后</button>';
-        }
-        /* 收款只有两笔：定金（待支付 → 已付定金）、尾款（生产中 → 已付尾款）。
-           入口就一个 —— 上面「下一步」按钮在对应状态就是「收定金 / 收尾款」，不再重复放快捷按钮。 */
-
-        root.innerHTML =
-            '<div class="card">' +
-            '<div class="card-head"><h2><a href="#/orders">‹ 订单</a> / ' + esc(order.order_no) + '</h2>' +
-            orderStatusBadge(order.status, order.status_label) + '</div>' +
-            infoHtml +
-            progressHtml +
-            '<div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">' + actionBtns + '</div>' +
-            '</div>' +
-            itemsHtml +
-            priceBreakdownHtml +
-            confirmationHtml +
-
-            (function () {
-                var depositDue = Number(order.deposit_amount || 0);
-                var balanceDue = Number(order.balance_amount || 0);
-                var depositPaid = Number(order.deposit_paid || 0);
-                var balancePaid = Number(order.balance_paid || 0);
-                function paidBadge(paid, due) {
-                    if (!due) { return '<span class="badge muted">无需收</span>'; }
-                    return paid >= due
-                        ? '<span class="badge ok">已收</span>'
-                        : '<span class="badge warn">待收</span>';
-                }
-                return '<div class="card">' +
-                    '<div class="card-head"><h2>收款</h2>' +
-                    '<span class="small muted">只收两笔：定金 + 尾款，合计 ' + money(totalAmount) + '</span></div>' +
-                    '<div class="grid-kpi">' +
-                    '<div class="kpi"><div class="label">定金应收</div><div class="value">' + money(depositDue) + '</div>' +
-                    '<div class="sub">' + paidBadge(depositPaid, depositDue) + '</div></div>' +
-                    '<div class="kpi"><div class="label">定金已收</div><div class="value">' + money(depositPaid) + '</div>' +
-                    '<div class="sub">第一笔</div></div>' +
-                    '<div class="kpi"><div class="label">尾款应收</div><div class="value">' + money(balanceDue) + '</div>' +
-                    '<div class="sub">' + paidBadge(balancePaid, balanceDue) + '</div></div>' +
-                    '<div class="kpi"><div class="label">尾款已收</div><div class="value">' + money(balancePaid) + '</div>' +
-                    '<div class="sub">第二笔</div></div>' +
-                    '</div>' +
-                    '<p class="small muted" style="margin:10px 0 0">已收合计 <b>' + money(paidTotal) + '</b>' +
-                    ' · 未收 ' + money(unpaid) + '</p>' +
-                    '</div>';
-            })() +
-
-            '<div class="card">' +
-            '<div class="card-head"><h2>收货 / 配送</h2></div>' +
-            infoGrid([
-                ['收件人', order.receiver_name],
-                ['电话', order.receiver_phone],
-                ['收货地址', order.receiver_address],
-                ['物流方式', order.logistics_mode_label],
-                ['承运公司', (order.carrier && (order.carrier.name || order.carrier.company)) || '不指定'],
-                ['物流联络人', order.carrier_contact_name
-                    ? order.carrier_contact_name + (order.carrier_contact_phone ? ' · ' + order.carrier_contact_phone : '')
-                    : '—'],
-                ['物流费用', order.logistics_fee ? money(order.logistics_fee) : '0'],
-                ['运单号', order.tracking_number || order.tracking_no]
-            ]) +
-            '</div>' +
-
-            aftersalesHtml + historyHtml;
-
-        var nextBtn = $('#btnNextAction', root);
-        if (nextBtn) {
-            nextBtn.addEventListener('click', function () {
-                var target = next[0];
-                if (target === 'deposit_paid') { showDepositPayment(order); return; }
-                if (target === 'balance_paid') { showBalancePayment(order); return; }
-                if (target === 'shipped') { showShipModal(order); return; }
-                transitionOrder(order, target, {}, next[1]);
+        return supporting.then(function (base) {
+            var afRes = base[0];
+            var index = base[1] || {};
+            return Promise.all([
+                order.deal_id
+                    ? api('/deals/' + order.deal_id).catch(function () { return order.deal; })
+                    : Promise.resolve(order.deal),
+                order.quote_id
+                    ? api('/quotes/' + order.quote_id).catch(function () { return order.quote; })
+                    : Promise.resolve(order.quote)
+            ]).then(function (extra) {
+                var deal = extra[0] || order.deal;
+                var quote = extra[1] || order.quote;
+                var aftersales = Array.isArray(afRes) ? afRes : ((afRes && afRes.items) || order.aftersales || []);
+                renderOrderDetail(root, order, deal, quote, aftersales, index);
             });
-        }
-
-        var confirmBtn = $('#btnConfirmCustomer', root);
-        if (confirmBtn) {
-            confirmBtn.addEventListener('click', function () { showCustomerConfirmModal(order); });
-        }
-
-        var addAsBtn = $('#btnAddAftersale', root);
-        if (addAsBtn) { addAsBtn.addEventListener('click', function () { openAftersaleModal(order); }); }
-
-        var editOrderBtn = $('#btnEditOrder', root);
-        if (editOrderBtn) {
-            editOrderBtn.addEventListener('click', function () { openOrderEditModal(order); });
-        }
+        });
     });
+}
+
+function renderOrderDetail(root, order, deal, quote, aftersales, index) {
+    var totalAmount = Number(order.amount) || 0;
+    var paidTotal = (order.paid_amount !== undefined && order.paid_amount !== null)
+        ? Number(order.paid_amount) || 0
+        : (Number(order.deposit_paid) || 0) + (Number(order.balance_paid) || 0);
+    var unpaid = Math.max(0, totalAmount - paidTotal);
+    var customerName = order.customer_name || index[order.customer_id] ||
+        ('客户 #' + order.customer_id);
+    var timelineRecords = orderTimelineRecords(order);
+    var files = orderDocumentFiles(order, timelineRecords);
+    var shippedRecord = timelineRecords.filter(function (record) {
+        return record.type === 'ship';
+    })[0];
+    var shippedAt = shippedRecord ? shippedRecord.at : null;
+    var afterSaleCount = aftersales.length;
+    var isSelfPickup = order.logistics_mode === 'self';
+    var carrierName = (order.carrier && (order.carrier.name || order.carrier.company)) ||
+        (deal && deal.carrier_name) || '未指定';
+
+    /* 进度条：走字典顺序（ORDER_STATUS 已由字典回填） */
+    var stepIdx = ORDER_STATUS.map(function (p) { return p[0]; }).indexOf(order.status);
+    var progressHtml = '<div class="progress-bar">' + ORDER_STATUS.map(function (p, i) {
+        var cls = 'step' + (i === stepIdx ? ' active' : (i < stepIdx ? ' done' : ''));
+        return '<div class="' + cls + '"><div class="step-label">' +
+            esc(p[1]) + '</div></div>';
+    }).join('') + '</div>';
+
+    /* 关联商机（能点回去） */
+    var dealHtml = order.deal_id
+        ? '<a href="#/deals/' + order.deal_id + '">商机 #' + order.deal_id + ' ›</a>'
+        : '—';
+    var opportunityStatus = deal
+        ? dealStageBadge(deal.stage, deal.stage_label, deal.order_id)
+        : '<span class="badge muted">未关联</span>';
+    var productNames = (order.items || []).map(function (item) {
+        return item.product_name_snapshot || item.product_code_snapshot;
+    }).filter(Boolean);
+    var productSummary = productNames.length
+        ? productNames.slice(0, 2).map(esc).join(' / ') +
+          (productNames.length > 2 ? ' 等 ' + productNames.length + ' 项' : '')
+        : ([order.product_code_snapshot, order.product_name_snapshot, order.model]
+            .filter(Boolean).join(' · ') || '未关联产品');
+    var logisticsContact;
+    if (isSelfPickup) {
+        logisticsContact =
+            '<div class="order-logistics-main"><span class="order-logistics-icon">自</span>' +
+            '<div><b>客户自提</b><p>无需物流公司联络人</p></div></div>';
+    } else {
+        logisticsContact =
+            '<div class="order-logistics-main"><span class="order-logistics-icon">运</span>' +
+            '<div><b>' + esc(carrierName) + '</b><p>' +
+            esc(order.carrier_contact_name || '未指定联络人') +
+            (order.carrier_contact_phone ? ' · ' + esc(order.carrier_contact_phone) : '') +
+            '</p></div></div>';
+    }
+
+    var topOverview = '<section class="card order-command-card">' +
+        '<div class="order-command-head">' +
+            '<div class="order-command-identity">' +
+                '<a class="crumb" href="#/orders">‹ 订单</a>' +
+                '<span class="order-command-no">' + esc(order.order_no) + '</span>' +
+                '<span class="badge ' + (order.customer_confirmed_at ? 'ok' : 'warn') + '">' +
+                    (order.customer_confirmed_at ? '客户已确认' : '待客户确认') + '</span>' +
+                '<div class="order-tags-row"><span class="order-tags-label">标签</span>' +
+                    orderTagsHtml(deal) + '</div>' +
+            '</div>' +
+            '<div class="order-command-state"><span>订单状态</span>' +
+                orderStatusBadge(order.status, order.status_label) + '</div>' +
+        '</div>' +
+        '<div class="order-metrics">' +
+            '<div class="order-metric order-metric-money">' +
+                '<span>订单金额</span><strong>' + money(totalAmount) + '</strong>' +
+                '<small>已收 ' + money(paidTotal) + ' · 未收 ' + money(unpaid) + '</small></div>' +
+            (afterSaleCount
+                ? '<div class="order-metric"><span>售后数量</span><strong>' + afterSaleCount +
+                  '</strong><small>已关联售后单</small></div>'
+                : '') +
+            '<div class="order-metric"><span>物流方式</span><strong>' +
+                esc(order.logistics_mode_label || (isSelfPickup ? '自提' : '待确认')) +
+                '</strong><small>运费 ' + money(order.logistics_fee || 0) + '</small></div>' +
+            '<div class="order-metric"><span>商机状态</span>' + opportunityStatus +
+                '<small>跟随报价单最高优先级</small></div>' +
+        '</div>' +
+        '<div class="order-context-grid">' +
+            '<a class="order-context" href="#/customers/' + order.customer_id + '">' +
+                '<span>客户</span><b>' + esc(customerName) + '</b><small>查看客户档案 ›</small></a>' +
+            '<a class="order-context" href="#/deals/' + order.deal_id + '">' +
+                '<span>关联商机</span><b>' + esc(dealHtml.replace(/<[^>]+>/g, '')) +
+                '</b><small>' + esc(deal && (deal.product_name_snapshot || deal.model) || '查看商机详情') +
+                '</small></a>' +
+            '<a class="order-context" href="#/deals/' + order.deal_id + '">' +
+                '<span>报价单</span><b>' + esc(quote ? quote.quote_no : '来源报价单') +
+                '</b><small>' + esc(quote ? (quote.title || '查看报价明细') : '查看商机详情') +
+                '</small></a>' +
+            '<div class="order-context">' +
+                '<span>关联产品</span><b>' + esc(productSummary) + '</b><small>' +
+                (order.items || []).length + ' 项产品明细</small></div>' +
+        '</div>' +
+        '<div class="order-logistics-strip">' +
+            '<div>' + logisticsContact + '</div>' +
+            '<div class="order-logistics-fact"><span>发货日期</span><b>' +
+                (shippedAt ? fmtDateTime(shippedAt).slice(0, 10) : '待发货') + '</b></div>' +
+            '<div class="order-logistics-fact"><span>运单号</span><b>' +
+                esc(isSelfPickup ? '自提' : (order.tracking_number || order.tracking_no || '待补')) +
+                '</b></div>' +
+        '</div>' +
+        progressHtml +
+        '<div class="order-confirmation-note">' +
+            '<span class="badge ' + (order.customer_confirmed_at ? 'ok' : 'warn') + '">客户确认</span>' +
+            '<span>' + esc(order.customer_confirmation_note ||
+                (order.customer_confirmed_at
+                    ? '客户通过微信查看下单表并确认；优惠和物流等条件已同步确认'
+                    : '等待客户确认报价单与下单表')) + '</span>' +
+            (order.customer_confirmed_at
+                ? '<small>' + fmtDateTime(order.customer_confirmed_at) + '</small>' : '') +
+        '</div>' +
+        '<div class="order-primary-actions" id="orderPrimaryActions"></div>' +
+    '</section>';
+
+    var detailItems = (quote && quote.items && quote.items.length) ? quote.items : (order.items || []);
+    var quoteItemsHtml = detailItems.length
+        ? '<div class="order-quote-items">' + detailItems.map(function (item) {
+            return quoteItemHtml(item, false);
+        }).join('') + '</div>'
+        : '<p class="empty">报价单还没有产品明细</p>';
+    var quoteHtml = '<section class="card order-section" id="orderQuoteSection">' +
+        '<div class="card-head"><div><h2>报价单明细</h2>' +
+            '<p class="order-section-copy">客户确认的报价与下单表快照</p></div>' +
+            (quote ? '<span class="badge quote">' + esc(quote.status_label || quote.status) + '</span>' : '') +
+        '</div>' +
+        (quote
+            ? '<div class="order-quote-heading"><div><b>' + esc(quote.quote_no) + '</b>' +
+              '<span>' + esc(quote.title || '') + '</span></div><strong>' +
+              money(quote.amount) + '</strong></div>' +
+              (quote.note ? '<p class="small muted order-quote-note">' + esc(quote.note) + '</p>' : '')
+            : '<p class="small muted">这是历史订单，没有可回查的来源报价单。</p>') +
+        quoteItemsHtml +
+    '</section>';
+
+    var productTotal = Number(order.product_total || order.amount || 0);
+    var discountAmount = Number(order.discount_amount || 0);
+    var productPayable = Number(order.product_payable || (productTotal - discountAmount));
+    var freightAmount = Number(order.logistics_fee || order.freight_amount || 0);
+    var depositDue = Number(order.deposit_amount || 0);
+    var balanceDue = Number(order.balance_amount || 0);
+    var depositPaid = Number(order.deposit_paid || 0);
+    var balancePaid = Number(order.balance_paid || 0);
+    function paidBadge(paid, due) {
+        if (!due) { return '<span class="badge muted">无需收</span>'; }
+        return paid >= due ? '<span class="badge ok">已收</span>' : '<span class="badge warn">待收</span>';
+    }
+    var moneyHtml = '<section class="card order-section">' +
+        '<div class="card-head"><div><h2>订单金额及收付款</h2>' +
+            '<p class="order-section-copy">优惠只作用于产品合计，运费独立核算</p></div>' +
+            '<span class="badge ' + (unpaid ? 'warn' : 'ok') + '">' +
+                (unpaid ? '待收 ' + money(unpaid) : '已收清') + '</span></div>' +
+        '<div class="order-money-summary">' +
+            '<div><span>产品合计</span><b>' + money(productTotal) + '</b></div>' +
+            '<div><span>整单优惠</span><b>' + (discountAmount ? '-' + money(discountAmount) : money(0)) + '</b></div>' +
+            '<div><span>运费</span><b>' + money(freightAmount) + '</b></div>' +
+            '<div class="is-total"><span>订单应收</span><b>' + money(totalAmount) + '</b></div>' +
+        '</div>' +
+        (order.discount_reason
+            ? '<p class="small muted order-discount-note">优惠说明：' + esc(order.discount_reason) + '</p>' : '') +
+        '<div class="order-payment-grid">' +
+            '<div class="order-payment"><span>定金应收</span><b>' + money(depositDue) + '</b>' +
+                paidBadge(depositPaid, depositDue) + '<small>已收 ' + money(depositPaid) + '</small></div>' +
+            '<div class="order-payment"><span>尾款应收</span><b>' + money(balanceDue) + '</b>' +
+                paidBadge(balancePaid, balanceDue) + '<small>已收 ' + money(balancePaid) + '</small></div>' +
+            '<div class="order-payment is-paid"><span>已收合计</span><b>' + money(paidTotal) + '</b>' +
+                '<small>订单实收</small></div>' +
+            '<div class="order-payment' + (unpaid ? ' is-due' : ' is-paid') + '"><span>未收金额</span><b>' +
+                money(unpaid) + '</b><small>' + (unpaid ? '仍需跟进' : '应收账款已清零') + '</small></div>' +
+        '</div>' +
+    '</section>';
+
+    var logisticsHtml = '<section class="card order-section">' +
+        '<div class="card-head"><div><h2>物流信息</h2>' +
+            '<p class="order-section-copy">物流公司、联络人和收货信息</p></div></div>' +
+        '<div class="order-logistics-detail">' +
+            '<div class="order-logistics-detail-main">' + logisticsContact +
+                '<span class="badge muted">' + esc(order.logistics_mode_label || '待确认') + '</span></div>' +
+            infoGrid([
+                ['收件人', order.receiver_name || '—'],
+                ['联系电话', order.receiver_phone || '—'],
+                ['收货地址', order.receiver_address || '—'],
+                ['发货日期', shippedAt ? fmtDateTime(shippedAt).slice(0, 10) : '—'],
+                ['运单号', isSelfPickup ? '自提' : (order.tracking_number || order.tracking_no || '—')],
+                ['物流费用', money(order.logistics_fee || 0)]
+            ]) +
+        '</div>' +
+    '</section>';
+
+    var aftersalesHtml = afterSaleCount ? '<section class="card order-section">' +
+        '<div class="card-head"><div><h2>售后单 <span class="badge muted">' +
+            afterSaleCount + '</span></h2><p class="order-section-copy">订单完成后产生的售后记录</p></div>' +
+            '<button type="button" class="btn btn-sm" id="btnAddAftersale">＋ 添加售后</button></div>' +
+        aftersales.map(function (a) {
+            return '<a class="order-aftersale" href="#/aftersales/' + a.id + '">' +
+                '<div><b>' + esc(a.no) + '</b><span>' +
+                esc(a.type_label || aftersaleTypeLabel(a.type, a.type_other)) + ' · ' +
+                esc(String(a.description || '').slice(0, 48)) + '</span></div>' +
+                '<span class="badge ' + (a.status === 'done' ? 'ok' :
+                    (a.status === 'rejected' ? 'danger' : 'warn')) + '">' +
+                esc(a.status_label || aftersaleStatusLabel(a.status)) + '</span></a>';
+        }).join('') +
+    '</section>' : '';
+
+    var historyHtml = '<section class="card order-section" id="orderTimelineSection">' +
+        '<div class="card-head"><div><h2>跟进履历 <span class="badge muted">' +
+            timelineRecords.length + '</span></h2><p class="order-section-copy">' +
+            '人工跟进、状态变更、收付款、物流和售后记录统一展示</p></div>' +
+            '<button type="button" class="btn btn-sm btn-primary" id="btnOrderFollow">＋ 记一条跟进</button></div>' +
+        timelineHtml(timelineRecords) +
+    '</section>';
+
+    var documentsHtml = filesCardHtml(files, '这个订单还没有上传确认截图、付款凭证或其它资料');
+
+    root.innerHTML = '<div class="order-page">' + topOverview +
+        quoteHtml + moneyHtml + logisticsHtml + aftersalesHtml + historyHtml + documentsHtml + '</div>';
+
+    /* 操作区位于摘要卡内，按钮逻辑仍复用订单原有流转入口。 */
+    var actionHost = $('#orderPrimaryActions', root);
+    var next = ORDER_NEXT_STEP[order.status];
+    var actionBtns = '';
+    if (order.status === 'pending_confirmation') {
+        actionBtns += '<button type="button" class="btn btn-primary" id="btnConfirmCustomer">' +
+            '记录客户确认</button>';
+    }
+    if (next && order.status !== 'pending_confirmation') {
+        actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
+    }
+    actionBtns += '<button type="button" class="btn" id="btnOrderSummaryFollow">＋ 跟进</button>';
+    actionBtns += '<button type="button" class="btn" id="btnEditOrder">修改订单</button>';
+    if (order.status === 'completed') {
+        actionBtns += '<button type="button" class="btn" id="btnAddAftersaleTop">＋ 添加售后</button>';
+    } else {
+        actionBtns += '<button type="button" class="btn" disabled title="订单完成后才能申请售后">添加售后</button>';
+    }
+    actionHost.innerHTML = actionBtns;
+
+    var nextBtn = $('#btnNextAction', root);
+    if (nextBtn) {
+        nextBtn.addEventListener('click', function () {
+            var target = next[0];
+            if (target === 'deposit_paid') { showDepositPayment(order); return; }
+            if (target === 'balance_paid') { showBalancePayment(order); return; }
+            if (target === 'shipped') { showShipModal(order); return; }
+            transitionOrder(order, target, {}, next[1]);
+        });
+    }
+
+    var confirmBtn = $('#btnConfirmCustomer', root);
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', function () { showCustomerConfirmModal(order); });
+    }
+
+    ['#btnOrderFollow', '#btnOrderSummaryFollow'].forEach(function (selector) {
+        var button = $(selector, root);
+        if (button) { button.addEventListener('click', function () { orderFollowModal(order); }); }
+    });
+
+    ['#btnAddAftersale', '#btnAddAftersaleTop'].forEach(function (selector) {
+        var button = $(selector, root);
+        if (button) { button.addEventListener('click', function () { openAftersaleModal(order); }); }
+    });
+
+    var editOrderBtn = $('#btnEditOrder', root);
+    if (editOrderBtn) {
+        editOrderBtn.addEventListener('click', function () { openOrderEditModal(order); });
+    }
+    if (deal) { bindDealTagActions(root, deal); }
 }
 
 /* ---------------- 修改订单：商品/价格继承字段只读，其余订单信息可改 ---------------- */
