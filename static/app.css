@@ -43,79 +43,6 @@
   }
 }
 
-/* ================= 进度条 ================= */
-.progress-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 20px 0;
-  position: relative;
-}
-
-.progress-bar::before {
-  content: '';
-  position: absolute;
-  top: 18px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background-color: #eee;
-  z-index: 1;
-}
-
-.progress-bar .step {
-  position: relative;
-  z-index: 2;
-  text-align: center;
-  flex: 1;
-  padding: 0 10px;
-}
-
-.progress-bar .step-label {
-  font-size: 12px;
-  color: #666;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.progress-bar .step.active .step-label {
-  color: #1f6feb;
-  font-weight: bold;
-}
-
-.progress-bar .step.done .step-label {
-  color: #007700;
-}
-
-.progress-bar .step.active {
-  transform: scale(1.1);
-}
-
-.progress-bar .step::after {
-  content: '';
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background-color: #eee;
-  border: 2px solid #fff;
-  z-index: 3;
-  transform: translateX(-50%);
-}
-
-.progress-bar .step.active::after {
-  background-color: #1f6feb;
-  border-color: #1f6feb;
-}
-
-.progress-bar .step.done::after {
-  background-color: #007700;
-  border-color: #007700;
-}
-
 /* ================= 模态框 ================= */
 .modal {
   position: fixed;
@@ -1609,21 +1536,45 @@ tbody tr:last-child td { border-bottom: none; }
   th, td { padding: 8px 10px; }
 }
 
-/* ---------------------------------------------------------------------------
- * 订单进度条重做：原来 7 个圆点绝对定位压在文字上（top:10px 与标签重叠），
- * 且 nowrap 的标签在 390px 手机屏上把页面撑宽到 448px。这里改为「圆点在上、文字在下」，
- * 窄屏标签允许两行。
- * ------------------------------------------------------------------------- */
-.progress-bar { align-items: flex-start; margin: 18px 0 12px; }
-.progress-bar::before { top: 8px; height: 2px; background: var(--line); }
-.progress-bar .step { flex: 1 1 0; min-width: 0; padding: 24px 2px 0; }
-.progress-bar .step::after { top: 0; left: 50%; width: 16px; height: 16px; background: #e9ecf1; border: 2px solid #fff; }
-.progress-bar .step.active::after { background: var(--accent); border-color: var(--accent); }
-.progress-bar .step.done::after { background: var(--ok); border-color: var(--ok); }
-.progress-bar .step-label { font-size: 11px; color: var(--muted); white-space: normal; line-height: 1.25; overflow: visible; }
-.progress-bar .step.active .step-label { color: var(--accent); font-weight: 600; }
-.progress-bar .step.done .step-label { color: var(--ok); }
-.progress-bar .step.active { transform: none; }
+/* 订单状态进度：只使用状态色彩区分，不显示圆点。 */
+.progress-bar {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.progress-bar .step {
+  flex: 1 0 76px;
+  min-width: 76px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  text-align: center;
+  background: #f3f4f6;
+  color: #6b7280;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.progress-bar .step-label {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+}
+.progress-bar .step[data-status="pending_confirmation"] { background: #fff0f5; border-color: #f0c9d8; color: #9d3f62; }
+.progress-bar .step[data-status="pending_payment"] { background: #fff1ed; border-color: #f2c9bd; color: #a84431; }
+.progress-bar .step[data-status="deposit_paid"] { background: #e9f8f7; border-color: #bfe3df; color: #0b6b63; }
+.progress-bar .step[data-status="producing"] { background: #eef0ff; border-color: #d0d4f3; color: #4e52a1; }
+.progress-bar .step[data-status="balance_paid"] { background: #f7edff; border-color: #e1cdf1; color: #744292; }
+.progress-bar .step[data-status="ready_to_ship"] { background: #fff7df; border-color: #eedba4; color: #7f6300; }
+.progress-bar .step[data-status="shipped"] { background: #eaf3ff; border-color: #c9ddf6; color: #235f9c; }
+.progress-bar .step[data-status="completed"] { background: #e9f8f1; border-color: #c4ead7; color: #087955; }
+.progress-bar .step.active {
+  border-color: currentColor;
+  box-shadow: 0 3px 10px rgba(31, 67, 116, .14);
+  font-weight: 700;
+  transform: translateY(-1px);
+}
 
 /* ================= 右上角用户菜单（修改信息 / 改密码 / 退出）================= */
 #userMenu {
@@ -1915,13 +1866,6 @@ table.data-table th.nowrap { white-space: nowrap; }
 .act-text { flex: 1; }
 
 .todo-row.todo-overdue { border-left: 3px solid #dc2626; padding-left: 8px; }
-
-.progress-bar { display: flex; gap: 6px; margin: 12px 0; overflow-x: auto; }
-.progress-bar .step { flex: 1; min-width: 64px; padding: 6px 4px; text-align: center; font-size: 12px;
-  border-radius: 6px; background: #f3f4f6; color: #6b7280; }
-.progress-bar .step.done { background: #d1fae5; color: #065f46; }
-.progress-bar .step.active { background: #2563eb; color: #fff; font-weight: 600; }
-
 
 /* ================= 2026-10-31 弹层（modal）统一优化 =================
    之前 app.css 里有两套 .modal：宽度随内容塌缩、按钮区贴边、手机上顶到边。
