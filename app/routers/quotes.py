@@ -22,6 +22,11 @@ from app.quote_forms import (
     normalize_form_title,
     read_sheet1_a1,
 )
+from app.quote_versions import (
+    form_download_url,
+    form_preview_url,
+    storage_key_from_token,
+)
 from app.routers.auth import require_auth
 from app.security import now_iso, now_local_iso
 from app.services import next_no
@@ -87,14 +92,16 @@ def _assert_editable(conn, quote_id: int):
 
 
 def _form_preview_url(data: dict) -> str | None:
-    preview_key = data.get("form_preview_storage_key")
-    if not preview_key or not resolve_upload_path(
-        preview_key, must_exist=False
+    return form_preview_url(data.get("form_sha256"))
+
+
+def _form_download_url(data: dict) -> str | None:
+    storage_key = data.get("form_storage_key")
+    if not storage_key or not resolve_upload_path(
+        storage_key, must_exist=False
     ).is_file():
         return None
-    url = f"/api/crm/quotes/items/{data['id']}/form-preview"
-    version = data.get("form_sha256")
-    return f"{url}?v={version}" if version else url
+    return form_download_url(storage_key, data.get("form_file_name"))
 
 
 def _item_out(conn, row) -> QuoteItemOut:
@@ -113,9 +120,7 @@ def _item_out(conn, row) -> QuoteItemOut:
         and resolve_upload_path(data["form_storage_key"], must_exist=False).is_file()
     )
     data["form_content"] = content
-    data["form_url"] = (
-        f"/api/crm/quotes/items/{data['id']}/form" if data["form_available"] else None
-    )
+    data["form_url"] = _form_download_url(data)
     data["form_preview_url"] = _form_preview_url(data)
     data["template_url"] = (
         f"/api/crm/products/{data['product_id']}/form-file"
@@ -244,9 +249,7 @@ def _quote_timeline_item(row) -> dict:
         "form_file_name": data.get("form_file_name"),
         "form_file_size": int(data.get("form_file_size") or 0),
         "form_available": form_available,
-        "form_url": (
-            f"/api/crm/quotes/items/{data['id']}/form" if form_available else None
-        ),
+        "form_url": _form_download_url(data),
         "form_preview_url": _form_preview_url(data),
         "a1_value": data.get("a1_value"),
         "amount_cell": data.get("amount_cell"),
@@ -1023,6 +1026,24 @@ def download_quote_form(item_id: int) -> FileResponse:
         filename=row["form_file_name"] or path.name,
         content_disposition_type="attachment",
         headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@router.get("/quotes/form-versions/{token}")
+def download_quote_form_version(
+    token: str,
+    filename: str | None = None,
+) -> FileResponse:
+    storage_key = storage_key_from_token(token)
+    if not storage_key:
+        raise HTTPException(status_code=404, detail="下单表版本不存在")
+    path = resolve_upload_path(storage_key)
+    return FileResponse(
+        path,
+        media_type=DOC_MIME_BY_EXT[".xlsx"],
+        filename=Path(filename or path.name).name,
+        content_disposition_type="attachment",
+        headers={"Cache-Control": "private, no-cache, max-age=0"},
     )
 
 

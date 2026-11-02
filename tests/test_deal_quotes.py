@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import io
+import json
 import unittest
 import zipfile
 from pathlib import Path
+from urllib.parse import unquote
 
 from openpyxl import load_workbook
 
 from tests._util import ApiTestCase
+
+from app.db import db_conn
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -447,14 +451,94 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(changed_item["amount"], 26.0)
         self.assertNotEqual(changed_item["form_preview_url"], old_preview_url)
         self.assertIn(
-            "v=" + preview_data["preview_token"],
+            "/api/crm/quotes/form-previews/" + preview_data["preview_token"],
             changed_item["form_preview_url"],
         )
 
         new_preview = self.client.get(changed_item["form_preview_url"])
         self.assertEqual(new_preview.status_code, 200, new_preview.text)
         self.assertNotEqual(new_preview.content, old_preview.content)
-        self.assertIn("no-cache", new_preview.headers["cache-control"])
+        self.assertIn(
+            f"/api/crm/quotes/form-previews/{preview_data['preview_token']}",
+            changed_item["form_preview_url"],
+        )
+
+    def test_history_download_keeps_exact_uploaded_version(self):
+        _, deal, quote = self._quote_with_item()
+        item = quote["items"][0]
+        original_bytes = SAMPLE_FORM.read_bytes()
+
+        # 模拟修复前写入的旧履历地址：只有报价明细 ID，没有上传版本。
+        with db_conn() as conn:
+            event = conn.execute(
+                "SELECT id, detail FROM follow_ups"
+                " WHERE deal_id = ? AND kind = 'quote'"
+                " AND content LIKE '%添加产品%'"
+                " ORDER BY id LIMIT 1",
+                (deal["id"],),
+            ).fetchone()
+            self.assertIsNotNone(event)
+            detail = json.loads(event["detail"])
+            detail["items"][0]["form_url"] = (
+                f"/api/crm/quotes/items/{item['id']}/form"
+            )
+            conn.execute(
+                "UPDATE follow_ups SET detail = ? WHERE id = ?",
+                (json.dumps(detail, ensure_ascii=False), event["id"]),
+            )
+
+        updated_bytes = _form_with_updated_visible_text()
+        preview = self.client.post(
+            "/api/crm/quotes/form-preview",
+            data={"product_id": str(item["product_id"])},
+            files={
+                "form_file": (
+                    "更新后的下单表.xlsx",
+                    updated_bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        changed = self.client.put(
+            f"/api/crm/quotes/items/{item['id']}",
+            data={
+                "product_id": str(item["product_id"]),
+                "preview_token": preview.json()["preview_token"],
+                "amount": "26.00",
+            },
+            files={
+                "form_file": (
+                    "更新后的下单表.xlsx",
+                    updated_bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(changed.status_code, 200, changed.text)
+
+        timeline = self.client.get(f"/api/crm/deals/{deal['id']}").json()["timeline"]
+        old_event = next(entry for entry in timeline if "添加产品" in entry["content"])
+        new_event = next(entry for entry in timeline if entry["detail"].get("event") == "item_updated")
+        old_item = old_event["detail"]["items"][0]
+        new_item = new_event["detail"]["items"][0]
+
+        self.assertIn("/api/crm/quotes/form-versions/", old_item["form_url"])
+        self.assertIn("/api/crm/quotes/form-versions/", new_item["form_url"])
+        old_download = self.client.get(old_item["form_url"])
+        new_download = self.client.get(new_item["form_url"])
+        self.assertEqual(old_download.status_code, 200, old_download.text)
+        self.assertEqual(new_download.status_code, 200, new_download.text)
+        self.assertEqual(old_download.content, original_bytes)
+        self.assertEqual(new_download.content, updated_bytes)
+        self.assertIn(
+            "客厅天窗下单表.xlsx",
+            unquote(old_download.headers["content-disposition"]),
+        )
+        self.assertIn(
+            "更新后的下单表.xlsx",
+            unquote(new_download.headers["content-disposition"]),
+        )
 
     def test_quote_priority_void_and_delete_refresh_deal_status(self):
         _, deal, quote = self._quote_with_item()

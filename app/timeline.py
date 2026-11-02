@@ -17,6 +17,7 @@ from typing import Any, Iterable
 
 from app import labels as label_svc
 from app.enums import TIMELINE_TYPE_LABELS
+from app.quote_versions import enrich_quote_detail
 
 #: kind 的中文（前端也可直接用出参 type_label，避免自己维护映射）
 KIND_LABELS = TIMELINE_TYPE_LABELS
@@ -166,6 +167,9 @@ def entries_for(
     items: list[dict] = []
     for row in rows:
         kind = row["kind"] or "follow"
+        detail = _loads(row["detail"])
+        if kind == "quote":
+            detail = enrich_quote_detail(detail, row["created_at"])
         items.append(
             {
                 "at": row["created_at"],
@@ -174,7 +178,7 @@ def entries_for(
                 "content": row["content"],
                 "method": row["method"],
                 "next_date": row["next_date"],
-                "detail": _loads(row["detail"]),
+                "detail": detail,
                 "files": files.get(int(row["id"]), []),
                 "follow_up_id": row["id"],
                 "quote_id": row["quote_id"],
