@@ -106,11 +106,11 @@
       { icon: "跟", tone: "follow", text: "陈国强报价跟进已记录", time: "10月30日 11:15" }
     ],
     yesterdayActivity: [
-      { key: "lead", name: "线索", iconKey: "lead", tone: "blue", converted: 4, conversionLabel: "转客户", followups: 18 },
-      { key: "customer", name: "客户", iconKey: "customer", tone: "green", converted: 2, conversionLabel: "转商机", followups: 12 },
-      { key: "deal", name: "商机", iconKey: "won", tone: "violet", converted: 3, conversionLabel: "成交", followups: 9 },
-      { key: "order", name: "订单", iconKey: "order", tone: "amber", converted: 5, conversionLabel: "推进", followups: 7 },
-      { key: "aftersale", name: "售后", iconKey: "service", tone: "red", converted: 2, conversionLabel: "完成", followups: 6 }
+      { key: "lead", name: "线索", iconKey: "lead", tone: "blue", newCount: 7, followups: 18 },
+      { key: "customer", name: "客户", iconKey: "customer", tone: "green", newCount: 3, followups: 12 },
+      { key: "deal", name: "商机", iconKey: "won", tone: "violet", newCount: 4, followups: 9 },
+      { key: "order", name: "订单", iconKey: "order", tone: "amber", newCount: 6, followups: 7 },
+      { key: "aftersale", name: "售后", iconKey: "service", tone: "red", newCount: 2, followups: 6 }
     ],
     stats: {
       month: {
@@ -600,9 +600,9 @@
           })}
         </div>
 
-        <section class="card yesterday-card" aria-label="昨日转化与跟进">
+        <section class="card yesterday-card" aria-label="昨日新增与跟进">
           <div class="card-head">
-            <div class="card-title"><h2>昨日转化与跟进</h2></div>
+            <div class="card-title"><h2>昨日新增与跟进</h2></div>
             <span class="card-meta">昨天 00:00–24:00</span>
           </div>
           <div class="yesterday-grid">
@@ -691,22 +691,23 @@
   }
 
   function yesterdayItem(item) {
+    const maxNewCount = Math.max(...state.yesterdayActivity.map((entry) => entry.newCount), 1);
     const maxFollowups = Math.max(...state.yesterdayActivity.map((entry) => entry.followups), 1);
     return `
       <button type="button" class="yesterday-item ${item.tone}"
         data-action="chart-detail"
-        data-tip="${escapeHtml(item.name)}：昨日转化 ${item.converted}，跟进 ${item.followups} 次">
+        data-tip="${escapeHtml(item.name)}：昨日新增 ${item.newCount}，跟进 ${item.followups} 次">
         <span class="yesterday-top">
           <span class="yesterday-icon">${icons[item.iconKey]}</span>
           <b>${escapeHtml(item.name)}</b>
         </span>
         <span class="yesterday-values">
-          <span><b>${item.converted}</b><small>${escapeHtml(item.conversionLabel)}</small></span>
+          <span><b>${item.newCount}</b><small>新增</small></span>
           <i></i>
           <span><b>${item.followups}</b><small>跟进次数</small></span>
         </span>
         <span class="yesterday-tracks" aria-hidden="true">
-          <i class="converted" style="width:${Math.max((item.converted / 5) * 100, item.converted ? 8 : 0)}%"></i>
+          <i class="new-count" style="width:${Math.max((item.newCount / maxNewCount) * 100, item.newCount ? 8 : 0)}%"></i>
           <i class="followups" style="width:${Math.max((item.followups / maxFollowups) * 100, item.followups ? 8 : 0)}%"></i>
         </span>
       </button>
