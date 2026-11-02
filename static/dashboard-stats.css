@@ -697,18 +697,6 @@ a.ds-kpi:hover {
 .ds-empty b { color: #526276; font-size: 12px; }
 .ds-empty small { font-size: 9px; }
 .ds-empty.compact { min-height: 84px; }
-.ds-empty-guide {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding: 16px 18px;
-  background: linear-gradient(130deg, #eff5ff, #fff);
-  border: 1px solid #dce8f7;
-  border-radius: 15px;
-}
-.ds-empty-guide > span { color: var(--ds-blue); font-size: 9px; font-weight: 800; letter-spacing: .12em; }
-.ds-empty-guide > b { font-size: 15px; }
-.ds-empty-guide > div { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .ds-segmented {
   display: inline-flex;

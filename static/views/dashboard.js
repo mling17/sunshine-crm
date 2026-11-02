@@ -156,18 +156,12 @@ function viewDashboard(root) {
         '<span class="ds-service-age">' + esc(status) + "</span></a>";
     }).join("") : '<div class="ds-empty compact"><b>暂无售后提醒</b><small>最近售后会显示在这里。</small></div>';
 
-    var emptyGuide = !stats.customers_total
-      ? '<div class="ds-card ds-empty-guide"><span>开始使用</span><b>先录一条线索，下一步会顺很多</b>' +
-        '<div><a class="ds-button ds-button-primary" href="#/leads">新增线索</a>' +
-        '<a class="ds-button" href="#/followups">记录跟进</a></div></div>'
-      : "";
-
     root.innerHTML = '<section class="ds-page ds-page-enter">' +
       '<header class="ds-heading"><div><p class="ds-eyebrow">' + esc(dashDateLabel()) + "</p>" +
         "<h1>" + esc(dashGreeting()) + "，" + esc(window.state.displayName || window.state.me || "销售") + "</h1>" +
         '<p class="ds-subtitle">今天有 ' + todos.length + " 位客户需要跟进，先处理 " + overdue.length +
           " 条已逾期的，效率最高。</p></div>" +
-      "</header>" + alertHtml + emptyGuide +
+      "</header>" + alertHtml +
       '<div class="ds-kpi-grid">' +
         dashKpi({
           label: "今日待跟进",

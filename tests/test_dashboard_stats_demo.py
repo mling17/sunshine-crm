@@ -61,6 +61,8 @@ class ProductionDashboardStatsTest(unittest.TestCase):
         self.assertIn("ds-work-grid", dashboard)
         self.assertNotIn("刚刚同步", dashboard)
         self.assertNotIn("data-dash-refresh", dashboard)
+        self.assertNotIn("ds-empty-guide", dashboard)
+        self.assertNotIn(".ds-empty-guide", styles)
         self.assertIn("data-stat-range", stats)
         self.assertIn('"7d", "近7天"', stats)
         self.assertIn("/stats?range=", stats)
