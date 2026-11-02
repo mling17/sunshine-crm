@@ -164,7 +164,7 @@ class OrderTimelineTest(ApiTestCase):
         self.assertIn("修改订单", latest["note"])
         self.assertIn("收件人", latest["note"])
 
-    def test_update_order_is_rejected_after_shipping(self):
+    def test_update_order_is_allowed_after_shipping(self):
         order = self._order()
         with self.db_conn() as conn:
             conn.execute(
@@ -176,11 +176,13 @@ class OrderTimelineTest(ApiTestCase):
             f"/api/crm/orders/{order['id']}",
             json={"receiver_address": "不应写入的新地址"},
         )
-        self.assertEqual(resp.status_code, 409, resp.text)
-        self.assertEqual(resp.json()["code"], "order_locked")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["receiver_address"], "不应写入的新地址")
 
         detail = self.client.get(f"/api/crm/orders/{order['id']}").json()
-        self.assertEqual(detail["receiver_address"], "济南市历下区")
+        self.assertEqual(detail["receiver_address"], "不应写入的新地址")
+        self.assertEqual(detail["product_total"], 10000.0)
+        self.assertEqual(detail["amount"], 10000.0)
 
 
 if __name__ == "__main__":

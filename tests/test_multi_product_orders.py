@@ -64,6 +64,7 @@ class MultiProductOrderTest(ApiTestCase):
                 "deposit": 3000.0,
                 "logistics_mode": "agent",
                 "carrier_id": carrier["id"],
+                "carrier_contact_id": carrier["contacts"][0]["id"],
                 "logistics_fee": 600.0,
                 "receiver_name": "多产品客户",
                 "receiver_phone": "13911112222",

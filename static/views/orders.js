@@ -19,10 +19,41 @@ var ORDER_NEXT_STEP = {
     shipped: ['completed', '确认收货']
 };
 
-var ORDER_EDIT_LOCKED_STATUSES = { shipped: true, completed: true };
-
 function canEditOrder(order) {
-    return !ORDER_EDIT_LOCKED_STATUSES[order && order.status];
+    return !!(order && order.id);
+}
+
+/* 物流公司 + 联络人联动；编辑订单、发货弹层共用。 */
+function populateCarrierContactSelects(carrierEl, contactEl, carriers, selectedCarrierId, selectedContactId) {
+    var selectedId = String(selectedCarrierId || '');
+    var list = (carriers || []).filter(function (carrier) {
+        return carrier.is_active || String(carrier.id) === selectedId;
+    });
+    carrierEl.innerHTML = '<option value="">请选择</option>' + list.map(function (carrier) {
+        return '<option value="' + carrier.id + '">' + esc(carrier.name) +
+            (carrier.is_active === false ? '（已停用）' : '') + '</option>';
+    }).join('');
+    carrierEl.value = selectedId;
+
+    function refreshContacts(contactId) {
+        var carrier = list.filter(function (item) {
+            return String(item.id) === String(carrierEl.value || '');
+        })[0];
+        var contacts = (carrier && carrier.contacts) || [];
+        contactEl.innerHTML = contacts.length
+            ? '<option value="">请选择联络人</option>' + contacts.map(function (contact) {
+                return '<option value="' + contact.id + '">' + esc(contact.name) +
+                    (contact.phone ? ' · ' + esc(contact.phone) : '') + '</option>';
+            }).join('')
+            : '<option value="">' +
+              esc(carrier ? '该物流公司尚未设置联络人' : '请先选择物流公司') +
+              '</option>';
+        contactEl.value = contactId ? String(contactId) : '';
+        contactEl.disabled = !carrier || !contacts.length;
+    }
+
+    refreshContacts(selectedContactId);
+    carrierEl.onchange = function () { refreshContacts(''); };
 }
 
 function orderStatusBadge(status, label) {
@@ -181,6 +212,8 @@ function viewOrderDetail(root, rawId) {
             ['产品配置', order.product_config_snapshot || '—'],
             ['物流方式', order.logistics_mode_label],
             ['承运公司', (order.carrier && (order.carrier.name || order.carrier.company)) || '不指定'],
+            ['物流联络人', order.carrier_contact_name || '—'],
+            ['联络电话', order.carrier_contact_phone || '—'],
             ['运单号', order.tracking_number || order.tracking_no || '待补'],
             ['创建时间', fmtDateTime(order.created_at)],
             ['完成时间', order.completed_at ? fmtDateTime(order.completed_at) : '—']
@@ -293,12 +326,7 @@ function viewOrderDetail(root, rawId) {
                 actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
             }
         }
-        if (canEditOrder(order)) {
-            actionBtns += '<button type="button" class="btn" id="btnEditOrder">修改订单</button>';
-        } else {
-            actionBtns += '<button type="button" class="btn" disabled ' +
-                'title="订单已发货，不能再修改">修改订单</button>';
-        }
+        actionBtns += '<button type="button" class="btn" id="btnEditOrder">修改订单</button>';
         if (order.status === 'completed') {
             actionBtns += '<button type="button" class="btn" id="btnAddAftersale">＋ 添加售后</button>';
         } else {
@@ -355,6 +383,10 @@ function viewOrderDetail(root, rawId) {
                 ['电话', order.receiver_phone],
                 ['收货地址', order.receiver_address],
                 ['物流方式', order.logistics_mode_label],
+                ['承运公司', (order.carrier && (order.carrier.name || order.carrier.company)) || '不指定'],
+                ['物流联络人', order.carrier_contact_name
+                    ? order.carrier_contact_name + (order.carrier_contact_phone ? ' · ' + order.carrier_contact_phone : '')
+                    : '—'],
                 ['物流费用', order.logistics_fee ? money(order.logistics_fee) : '0'],
                 ['运单号', order.tracking_number || order.tracking_no]
             ]) +
@@ -388,36 +420,39 @@ function viewOrderDetail(root, rawId) {
     });
 }
 
-/* ---------------- 修改订单：已发货前可改配送信息、运单号和备注 ---------------- */
+/* ---------------- 修改订单：商品/价格继承字段只读，其余订单信息可改 ---------------- */
 function openOrderEditModal(order) {
-    if (!canEditOrder(order)) {
-        toast('订单已发货，不能再修改', true);
-        return;
-    }
-
     var modal = createOrderModal('修改订单');
-    var selfDelivery = order.logistics_mode === 'self';
-    var shippingFields = selfDelivery
-        ? '<p class="small muted">当前为自提订单，不需要收货信息。</p>'
-        : '<div class="field"><label>收件人 *</label>' +
-          '<input name="receiver_name" maxlength="32" required value="' +
-          esc(order.receiver_name || '') + '"></div>' +
-          '<div class="field"><label>收货电话 *</label>' +
-          '<input name="receiver_phone" maxlength="32" inputmode="tel" required value="' +
-          esc(order.receiver_phone || '') + '"></div>' +
-          '<div class="field field-wide"><label>收货地址 *</label>' +
-          '<input name="receiver_address" maxlength="200" required value="' +
-          esc(order.receiver_address || '') + '"></div>';
 
     modal.querySelector('.modal-body').innerHTML =
         '<form id="orderEditForm" class="form-modal form-grid" autocomplete="off">' +
-        '<p class="small muted field-wide">订单 ' + esc(order.order_no) + ' · 物流方式：' +
-        esc(order.logistics_mode_label || '未填写') +
-        '。发货后将不能继续修改。</p>' +
-        shippingFields +
-        '<div class="field' + (selfDelivery ? ' field-wide' : '') + '"><label>运单号</label>' +
+        '<p class="small muted field-wide">订单 ' + esc(order.order_no) +
+        '。产品明细、报价金额、优惠和商机来源保持只读；物流、收货、费用和备注可随时修改。</p>' +
+        '<div class="field"><label>物流方式</label><select name="logistics_mode">' +
+        LOGISTICS_MODE_OPTIONS.map(function (option) {
+            return '<option value="' + option[0] + '"' +
+                (order.logistics_mode === option[0] ? ' selected' : '') + '>' +
+                option[1] + '</option>';
+        }).join('') + '</select></div>' +
+        '<div class="field" data-ship><label>物流公司</label>' +
+        '<select name="carrier_id"><option value="">请选择</option></select></div>' +
+        '<div class="field" data-ship><label>物流公司联络人 *</label>' +
+        '<select name="carrier_contact_id"><option value="">请选择</option></select></div>' +
+        '<div class="field" data-ship><label>物流费用</label>' +
+        '<input name="logistics_fee" type="number" min="0" step="0.01" value="' +
+        (Number(order.logistics_fee) || 0) + '"></div>' +
+        '<div class="field" data-ship><label>运单号</label>' +
         '<input name="tracking_number" maxlength="64" placeholder="可后补" value="' +
         esc(order.tracking_number || order.tracking_no || '') + '"></div>' +
+        '<div class="field" data-ship><label>收件人 *</label>' +
+        '<input name="receiver_name" maxlength="32" value="' +
+        esc(order.receiver_name || '') + '"></div>' +
+        '<div class="field" data-ship><label>收货电话 *</label>' +
+        '<input name="receiver_phone" maxlength="32" inputmode="tel" value="' +
+        esc(order.receiver_phone || '') + '"></div>' +
+        '<div class="field field-wide" data-ship><label>收货地址 *</label>' +
+        '<input name="receiver_address" maxlength="200" value="' +
+        esc(order.receiver_address || '') + '"></div>' +
         '<div class="field field-wide"><label>订单备注</label>' +
         '<textarea name="note" maxlength="500" rows="3" placeholder="交付、安装或客户特别要求">' +
         esc(order.note || '') + '</textarea></div>' +
@@ -426,19 +461,54 @@ function openOrderEditModal(order) {
         '</form>';
 
     var form = $('#orderEditForm', modal);
+    var modeEl = form.querySelector('[name="logistics_mode"]');
+    var carrierEl = form.querySelector('[name="carrier_id"]');
+    var contactEl = form.querySelector('[name="carrier_contact_id"]');
+    var feeEl = form.querySelector('[name="logistics_fee"]');
+    var trackingEl = form.querySelector('[name="tracking_number"]');
+    var shipFields = $$('[data-ship]', modal);
+
+    function refreshMode() {
+        var needsShipping = modeEl.value !== 'self';
+        shipFields.forEach(function (field) { field.hidden = !needsShipping; });
+    }
+    modeEl.addEventListener('change', refreshMode);
+    refreshMode();
+
+    api('/carriers').then(function (carriers) {
+        populateCarrierContactSelects(
+            carrierEl, contactEl, carriers, order.carrier_id, order.carrier_contact_id
+        );
+    }).catch(function () {
+        toast('物流公司加载失败，请稍后重试', true);
+    });
+
     modal.querySelector('.modal-cancel').addEventListener('click', function () {
         if (modal.parentNode) { document.body.removeChild(modal); }
     });
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
+        var mode = modeEl.value;
         var payload = {
-            tracking_number: String(form.querySelector('[name="tracking_number"]').value || '').trim() || null,
-            note: String(form.querySelector('[name="note"]').value || '').trim() || null,
+            logistics_mode: mode,
+            carrier_id: null,
+            carrier_contact_id: null,
+            logistics_fee: 0,
+            tracking_number: null,
             receiver_name: null,
             receiver_phone: null,
-            receiver_address: null
+            receiver_address: null,
+            note: String(form.querySelector('[name="note"]').value || '').trim() || null
         };
-        if (!selfDelivery) {
+        if (mode !== 'self') {
+            if (!carrierEl.value) {
+                toast('请选择物流公司', true);
+                return;
+            }
+            if (!contactEl.value) {
+                toast('请选择物流公司的联络人；没有联络人请先到物流页维护', true);
+                return;
+            }
             payload.receiver_name = String(form.querySelector('[name="receiver_name"]').value || '').trim();
             payload.receiver_phone = String(form.querySelector('[name="receiver_phone"]').value || '').trim();
             payload.receiver_address = String(form.querySelector('[name="receiver_address"]').value || '').trim();
@@ -446,6 +516,10 @@ function openOrderEditModal(order) {
                 toast('请填全收件人、收货电话和收货地址', true);
                 return;
             }
+            payload.carrier_id = Number(carrierEl.value);
+            payload.carrier_contact_id = Number(contactEl.value);
+            payload.logistics_fee = Number(feeEl.value) || 0;
+            payload.tracking_number = String(trackingEl.value || '').trim() || null;
         }
         var btn = form.querySelector('button[type="submit"]');
         btn.disabled = true;
@@ -549,7 +623,7 @@ function transitionOrder(order, toStatus, extra, confirmText) {
     }).catch(function (err) { toast(err.message, true); });
 }
 
-/* 发货：填物流方式 / 承运 / 运单号 */
+/* 发货：确认物流方式、承运公司、联络人和运单号 */
 function showShipModal(order) {
     var modal = createOrderModal('发货');
     modal.querySelector('.modal-body').innerHTML = '<form id="shipForm" class="form-modal form-grid">' +
@@ -564,26 +638,52 @@ function showShipModal(order) {
         '<input name="logistics_fee" type="number" min="0" step="0.01" value="' + (order.logistics_fee || 0) + '"></div>' +
         '</div>' +
         '<div class="row-2">' +
-        '<div class="field"><label>承运公司 ID（可空）</label>' +
-        '<input name="carrier_id" type="number" min="1" placeholder="物流公司 id"></div>' +
+        '<div class="field"><label>承运公司</label>' +
+        '<select name="carrier_id"><option value="">请选择</option></select></div>' +
+        '<div class="field"><label>物流公司联络人 *</label>' +
+        '<select name="carrier_contact_id"><option value="">请选择</option></select></div>' +
+        '</div>' +
+        '<div class="row-2">' +
         '<div class="field"><label>运单号</label>' +
         '<input name="tracking_number" maxlength="64" value="' + esc(order.tracking_number || '') + '"></div>' +
+        '<div class="field"><label>备注</label><textarea name="note" maxlength="500">' +
+        esc(order.note || '') + '</textarea></div>' +
         '</div>' +
-        '<div class="field"><label>备注</label><textarea name="note" maxlength="500"></textarea></div>' +
         '<div class="form-actions"><button type="submit" class="btn btn-primary">确认发货</button></div>' +
         '</form>';
 
     var form = $('#shipForm', modal);
+    var modeEl = form.querySelector('[name="logistics_mode"]');
+    var carrierEl = form.querySelector('[name="carrier_id"]');
+    var contactEl = form.querySelector('[name="carrier_contact_id"]');
+
+    api('/carriers').then(function (carriers) {
+        populateCarrierContactSelects(
+            carrierEl, contactEl, carriers, order.carrier_id, order.carrier_contact_id
+        );
+    }).catch(function () {
+        toast('物流公司加载失败，请稍后重试', true);
+    });
+
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
+        var mode = modeEl.value;
+        if (mode !== 'self') {
+            if (!carrierEl.value) { toast('请选择物流公司', true); return; }
+            if (!contactEl.value) { toast('请选择物流公司的联络人', true); return; }
+            if (!String(form.querySelector('[name="tracking_number"]').value || '').trim()) {
+                toast('使用物流公司时必须填写运单号', true);
+                return;
+            }
+        }
         var extra = {
-            logistics_mode: form.querySelector('[name="logistics_mode"]').value,
+            logistics_mode: mode,
+            carrier_id: mode === 'self' ? null : Number(carrierEl.value),
+            carrier_contact_id: mode === 'self' ? null : Number(contactEl.value),
             logistics_fee: numOrNull(form.querySelector('[name="logistics_fee"]').value) || 0,
             tracking_number: String(form.querySelector('[name="tracking_number"]').value || '').trim() || null,
             note: String(form.querySelector('[name="note"]').value || '').trim() || null
         };
-        var carrierId = numOrNull(form.querySelector('[name="carrier_id"]').value);
-        if (carrierId) { extra.carrier_id = carrierId; }
         document.body.removeChild(modal);
         transitionOrder(order, 'shipped', extra, '发货');
     });

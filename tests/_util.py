@@ -43,6 +43,7 @@ def reset_data() -> None:
         for table in (
             "aftersale_status_log", "aftersales", "order_status_log", "orders",
             "order_items", "attachments", "follow_ups", "quote_items", "deal_quotes",
+            "carrier_contacts", "carriers",
             "deal_items", "deals", "customer_tags",
             "lead_tags", "leads", "customers", "tags", "sessions", "import_log", "products",
         ):
@@ -214,6 +215,8 @@ class ApiTestCase(unittest.TestCase):
     def create_carrier(self, name: str = "顺丰快运", **payload) -> dict:
         """建物流公司；同名已存在时直接复用（测试用例常多次调用）。"""
         body = {"name": name}
+        if not any(key in payload for key in ("contacts", "contact_person", "phone")):
+            body["contacts"] = [{"name": "物流联络人", "phone": "13900000000", "tags": []}]
         body.update(payload)
         resp = self.client.post("/api/crm/carriers", json=body)
         if resp.status_code == 409:

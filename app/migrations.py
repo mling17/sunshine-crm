@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_014"
-SCHEMA_USER_VERSION = 14
+MIGRATION_VERSION = "v2_015"
+SCHEMA_USER_VERSION = 15
 
 
 def default_db_path() -> Path:
@@ -567,6 +567,15 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("orders.receiver_name",    _col_guard("orders", "receiver_name"),    "ALTER TABLE orders ADD COLUMN receiver_name TEXT"),
     ("orders.receiver_phone",   _col_guard("orders", "receiver_phone"),   "ALTER TABLE orders ADD COLUMN receiver_phone TEXT"),
     ("orders.receiver_address", _col_guard("orders", "receiver_address"), "ALTER TABLE orders ADD COLUMN receiver_address TEXT"),
+    ("orders.carrier_contact_id",
+     _col_guard("orders", "carrier_contact_id"),
+     "ALTER TABLE orders ADD COLUMN carrier_contact_id INTEGER"),
+    ("orders.carrier_contact_name",
+     _col_guard("orders", "carrier_contact_name"),
+     "ALTER TABLE orders ADD COLUMN carrier_contact_name TEXT"),
+    ("orders.carrier_contact_phone",
+     _col_guard("orders", "carrier_contact_phone"),
+     "ALTER TABLE orders ADD COLUMN carrier_contact_phone TEXT"),
     # 15.4 follow_ups +2（统一跟进扩为对象履历）
     ("follow_ups.kind",   _col_guard("follow_ups", "kind"),   "ALTER TABLE follow_ups ADD COLUMN kind TEXT NOT NULL DEFAULT 'follow'"),
     ("follow_ups.detail", _col_guard("follow_ups", "detail"), "ALTER TABLE follow_ups ADD COLUMN detail TEXT"),
@@ -1024,6 +1033,32 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_014', datetime('now'), '商机手动标签与报价待确认/金额自动标签')"),
     ("user_version v2_014", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 31. v2_015：订单物流联络人快照 ----------
+    ("orders.carrier_contact_backfill_v2_015",
+     _once("v2_015", "orders", "carriers", "carrier_contacts"),
+     """
+     UPDATE orders
+     SET carrier_contact_id = (
+           SELECT cc.id FROM carrier_contacts cc
+           WHERE cc.carrier_id = orders.carrier_id AND cc.is_delete = 0
+           ORDER BY cc.sort, cc.id LIMIT 1
+         ),
+         carrier_contact_name = (
+           SELECT cc.name FROM carrier_contacts cc
+           WHERE cc.carrier_id = orders.carrier_id AND cc.is_delete = 0
+           ORDER BY cc.sort, cc.id LIMIT 1
+         ),
+         carrier_contact_phone = (
+           SELECT cc.phone FROM carrier_contacts cc
+           WHERE cc.carrier_id = orders.carrier_id AND cc.is_delete = 0
+           ORDER BY cc.sort, cc.id LIMIT 1
+         )
+     WHERE carrier_id IS NOT NULL AND carrier_contact_id IS NULL
+     """),
+    ("schema_migrations v2_015", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_015', datetime('now'), '订单物流联络人快照与订单自有信息可编辑')"),
+    ("user_version v2_015", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -1155,6 +1190,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
             "product_id", "product_code_snapshot", "product_name_snapshot",
             "product_config_snapshot", "product_total", "discount_amount",
             "product_payable", "customer_confirmed_at", "quote_id",
+            "carrier_contact_id", "carrier_contact_name", "carrier_contact_phone",
         ),
         "follow_ups": ("object_type", "object_id", "method", "quote_id"),
         "attachments": ("object_type", "object_id", "follow_up_id"),

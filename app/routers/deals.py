@@ -42,7 +42,7 @@ from app.models import (
 from app.product_catalog import config_summary, get_product, product_snapshot
 from app.routers.auth import require_auth
 from app.security import now_iso, now_local_iso
-from app.services import next_no
+from app.services import next_no, resolve_carrier_contact
 from app.timeline import add_entry, change_summary, entries_for
 
 router = APIRouter(
@@ -867,15 +867,15 @@ def _create_order(
             message="物流方式只能是 free（包邮）/ agent（代办）/ self（自提）",
         )
     carrier_id = payload.get("carrier_id")
+    carrier_contact = None
     if mode in ("free", "agent"):
         if not carrier_id:
             raise ApiError(
                 status_code=400, code="carrier_required", message="包邮 / 代办 必须选择物流公司"
             )
-        if conn.execute(
-            "SELECT 1 FROM carriers WHERE id = ?", (int(carrier_id),)
-        ).fetchone() is None:
-            raise ApiError(status_code=400, code="carrier_not_found", message="物流公司不存在")
+        carrier_contact = resolve_carrier_contact(
+            conn, carrier_id, payload.get("carrier_contact_id")
+        )
     else:
         carrier_id = None
 
@@ -947,10 +947,11 @@ def _create_order(
         " product_type, model, spec, amount, product_total, discount_amount,"
         " discount_reason, product_payable,"
         " deposit_amount, balance_amount, deposit_paid, balance_paid, logistics_mode, carrier_id,"
+        " carrier_contact_id, carrier_contact_name, carrier_contact_phone,"
         " logistics_fee, tracking_no, address_id, receiver_name, receiver_phone, receiver_address,"
         " status, note, owner, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?,"
-        " ?, ?, ?, ?, ?)",
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?,"
+        " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             order_no,
             deal["customer_id"],
@@ -972,6 +973,9 @@ def _create_order(
             balance,
             mode,
             carrier_id,
+            carrier_contact["id"] if carrier_contact else None,
+            carrier_contact["name"] if carrier_contact else None,
+            carrier_contact["phone"] if carrier_contact else None,
             fee,
             payload.get("tracking_number") or None,
             address_id,
@@ -1094,7 +1098,16 @@ def _create_order(
             "SELECT name FROM carriers WHERE id = ?", (carrier_id,)
         ).fetchone()
         carrier_name = carrier_row["name"] if carrier_row else None
-    logistics_text = LOGISTICS_MODE_LABELS[mode] + (f"/{carrier_name}" if carrier_name else "")
+    contact_text = (
+        f"/{carrier_contact['name']}({carrier_contact['phone']})"
+        if carrier_contact
+        else ""
+    )
+    logistics_text = (
+        LOGISTICS_MODE_LABELS[mode]
+        + (f"/{carrier_name}" if carrier_name else "")
+        + contact_text
+    )
 
     add_entry(
         conn,
@@ -1115,6 +1128,9 @@ def _create_order(
             "product_total": product_total,
             "discount_amount": discount,
             "logistics_fee": fee,
+            "carrier_contact_id": carrier_contact["id"] if carrier_contact else None,
+            "carrier_contact_name": carrier_contact["name"] if carrier_contact else None,
+            "carrier_contact_phone": carrier_contact["phone"] if carrier_contact else None,
             "amount": amount,
             "deposit": deposit,
             "balance": balance,

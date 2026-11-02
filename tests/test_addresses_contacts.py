@@ -115,7 +115,13 @@ class CarrierContactTest(ApiTestCase):
         self.assertEqual(again.json()["code"], "carrier_exists")
 
     def test_order_count_and_delete_protection(self):
-        carrier = self.client.post("/api/crm/carriers", json={"name": "济南专线"}).json()
+        carrier = self.client.post(
+            "/api/crm/carriers",
+            json={
+                "name": "济南专线",
+                "contacts": [{"name": "赵经理", "phone": "13700000001", "tags": []}],
+            },
+        ).json()
         self.assertEqual(carrier["order_count"], 0)
 
         c = self.create_customer(name="赵物流")
@@ -124,6 +130,7 @@ class CarrierContactTest(ApiTestCase):
         resp = self.client.post(
             f"/api/crm/deals/{deal['id']}/orders",
             json={"deposit": 1000, "logistics_mode": "agent", "carrier_id": carrier["id"],
+                  "carrier_contact_id": carrier["contacts"][0]["id"],
                   "logistics_fee": 300, "receiver_name": "赵物流", "receiver_phone": "13700000000",
                   "receiver_address": "济南市市中区"},
         )

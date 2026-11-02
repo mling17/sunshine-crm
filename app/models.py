@@ -846,8 +846,15 @@ class OrderIn(BaseModel):
 
 
 class OrderUpdate(BaseModel):
-    """更新订单（已发货前允许修改配送与备注）。"""
+    """更新订单自有的物流、配送和备注信息。
 
+    商品快照、报价金额、优惠和订单来源由商机 / 报价单继承，不在这里开放修改。
+    """
+
+    logistics_mode: LOGISTICS_MODE | None = None
+    carrier_id: Optional[int] = Field(default=None, gt=0)
+    carrier_contact_id: Optional[int] = Field(default=None, gt=0)
+    logistics_fee: float | None = Field(default=None, ge=0)
     tracking_number: OptionalText = Field(default=None, max_length=64)
     receiver_name: OptionalText = Field(default=None, max_length=32)
     receiver_phone: OptionalText = Field(default=None, max_length=32)
@@ -884,6 +891,9 @@ class OrderOut(BaseModel):
     owner: str | None = None
     paid_amount: float = 0.0
     carrier_id: int | None = None
+    carrier_contact_id: int | None = None
+    carrier_contact_name: str | None = None
+    carrier_contact_phone: str | None = None
     tracking_number: str | None = None
     receiver_name: str | None = None
     receiver_phone: str | None = None
@@ -949,6 +959,9 @@ class OrderDetailOut(BaseModel):
     owner: str | None = None
     paid_amount: float = 0.0
     carrier_id: int | None = None
+    carrier_contact_id: int | None = None
+    carrier_contact_name: str | None = None
+    carrier_contact_phone: str | None = None
     tracking_number: str | None = None
     created_at: str
     updated_at: str

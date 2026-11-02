@@ -23,7 +23,7 @@ from app.routers.auth import require_auth
 from app.timeline import add_entry, change_summary, entries_for
 from app.security import now_iso
 from app.errors import ApiError
-from app.services import read_images
+from app.services import order_logistics_updates, read_images
 
 router = APIRouter(
     prefix="/api/crm",
@@ -51,8 +51,15 @@ STATUS_REQUIRED_FIELDS = {
     "shipped": ["received_at"]
 }
 
-ORDER_EDIT_LOCKED_STATUSES = {"shipped", "completed"}
 ORDER_EDITABLE_COLUMNS = (
+    "logistics_mode",
+    "carrier_id",
+    "carrier_contact_id",
+    "carrier_contact_name",
+    "carrier_contact_phone",
+    "logistics_fee",
+    "amount",
+    "balance_amount",
     "tracking_no",
     "receiver_name",
     "receiver_phone",
@@ -171,7 +178,8 @@ def get_order(order_id: int) -> OrderDetailOut:
                  "tags": json.loads(c["tags"]) if c["tags"] else []}
                 for c in conn.execute(
                     "SELECT id, name, phone, tags FROM carrier_contacts"
-                    " WHERE carrier_id = ? ORDER BY sort, id", (row['carrier_id'],)
+                    " WHERE carrier_id = ? AND is_delete = 0 ORDER BY sort, id",
+                    (row['carrier_id'],)
                 ).fetchall()
             ]
         # 售后单（没有就是空列表，前端整块隐藏）
@@ -214,24 +222,18 @@ def create_order() -> OrderOut:
 
 @router.put("/orders/{order_id}", response_model=OrderOut)
 def update_order(order_id: int, payload: OrderUpdate) -> OrderOut:
-    """更新订单配送信息与备注；已发货后锁定。"""
+    """更新订单自有的物流、配送和备注；商品与报价快照保持只读。"""
     with db_conn() as conn:
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="订单不存在")
-
-        if row["status"] in ORDER_EDIT_LOCKED_STATUSES:
-            raise ApiError(
-                status_code=409,
-                code="order_locked",
-                message="订单已发货，不能再修改",
-            )
 
         updates = payload.model_dump(exclude_unset=True)
         db_updates = {
             "tracking_no" if key == "tracking_number" else key: value
             for key, value in updates.items()
         }
+        db_updates.update(order_logistics_updates(conn, row, updates))
         after = dict(row)
         after.update(db_updates)
 

@@ -1287,6 +1287,8 @@ function openDealOrderModal(deal, customerName, items, quote) {
         '</select></div>' +
         '<div class="field" data-ship hidden><label>物流公司 *</label>' +
         '<select name="carrier_id"><option value="">请选择</option></select></div>' +
+        '<div class="field order-field-wide" data-ship hidden><label>物流公司联络人 *</label>' +
+        '<select name="carrier_contact_id"><option value="">请先选择物流公司</option></select></div>' +
         '</div>' +
         '<div class="order-address-grid" data-ship hidden>' +
         '<div class="field"><label>收货人 *</label><input name="receiver_name" maxlength="32"></div>' +
@@ -1323,6 +1325,7 @@ function openDealOrderModal(deal, customerName, items, quote) {
     var balanceEl = form.querySelector('[name="balance"]');
     var modeEl = form.querySelector('[name="logistics_mode"]');
     var carrierEl = form.querySelector('[name="carrier_id"]');
+    var carrierContactEl = form.querySelector('[name="carrier_contact_id"]');
     var shipFields = $$('[data-ship]', modal);
 
     $$('.order-money-input.is-editable', modal).forEach(function (input) {
@@ -1362,12 +1365,31 @@ function openDealOrderModal(deal, customerName, items, quote) {
     refreshShip();
     refreshMoney();
 
-    /* 物流公司：只列启用的 */
+    /* 物流公司：只列启用的；联络人随物流公司联动 */
+    var carrierList = [];
+    function refreshCarrierContacts() {
+        var carrier = carrierList.filter(function (item) {
+            return String(item.id) === String(carrierEl.value || '');
+        })[0];
+        var contacts = (carrier && carrier.contacts) || [];
+        carrierContactEl.innerHTML = contacts.length
+            ? '<option value="">请选择联络人</option>' + contacts.map(function (contact) {
+                return '<option value="' + contact.id + '">' + esc(contact.name) +
+                    (contact.phone ? ' · ' + esc(contact.phone) : '') + '</option>';
+            }).join('')
+            : '<option value="">' +
+              esc(carrier ? '该物流公司尚未设置联络人，请先到物流页维护' : '请先选择物流公司') +
+              '</option>';
+        carrierContactEl.disabled = !carrier;
+    }
+    carrierEl.addEventListener('change', refreshCarrierContacts);
     api('/carriers').then(function (list) {
-        var active = (list || []).filter(function (c) { return c.is_active; });
+        carrierList = (list || []).filter(function (c) { return c.is_active; });
+        var active = carrierList;
         carrierEl.innerHTML = '<option value="">请选择</option>' + active.map(function (c) {
             return '<option value="' + c.id + '">' + esc(c.name) + '</option>';
         }).join('');
+        refreshCarrierContacts();
     }).catch(function () { /* 拉不到就留空，用户可先自提 */ });
 
     form.addEventListener('submit', function (ev) {
@@ -1397,6 +1419,11 @@ function openDealOrderModal(deal, customerName, items, quote) {
         if (mode !== 'self') {
             if (!carrierEl.value) { toast('包邮 / 代办要选物流公司', true); return; }
             payload.carrier_id = Number(carrierEl.value);
+            if (!carrierContactEl.value) {
+                toast('请选择物流公司的联络人；没有联络人请先到物流页维护', true);
+                return;
+            }
+            payload.carrier_contact_id = Number(carrierContactEl.value);
             var rn = String(form.querySelector('[name="receiver_name"]').value || '').trim();
             var rp = String(form.querySelector('[name="receiver_phone"]').value || '').trim();
             var ra = String(form.querySelector('[name="receiver_address"]').value || '').trim();

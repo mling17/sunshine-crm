@@ -68,6 +68,159 @@ def next_no(conn: Connection, table: str, column: str, prefix: str, day: str) ->
     return f"{prefix}-{digits}-{int(row['n']) + 1:03d}"
 
 
+def resolve_carrier_contact(conn: Connection, carrier_id, contact_id) -> dict:
+    """读取并校验订单选择的物流公司联络人。"""
+    if not carrier_id:
+        raise ApiError(
+            status_code=400,
+            code="carrier_required",
+            message="使用物流公司时必须选择物流公司",
+        )
+    if not contact_id:
+        raise ApiError(
+            status_code=400,
+            code="carrier_contact_required",
+            message="请选择物流公司的联络人",
+        )
+    carrier = conn.execute(
+        "SELECT id, name FROM carriers WHERE id = ? AND is_delete = 0",
+        (int(carrier_id),),
+    ).fetchone()
+    if carrier is None:
+        raise ApiError(
+            status_code=400,
+            code="carrier_not_found",
+            message="物流公司不存在",
+        )
+    contact = conn.execute(
+        "SELECT id, name, phone FROM carrier_contacts"
+        " WHERE id = ? AND carrier_id = ? AND is_delete = 0",
+        (int(contact_id), int(carrier_id)),
+    ).fetchone()
+    if contact is None:
+        raise ApiError(
+            status_code=400,
+            code="carrier_contact_not_found",
+            message="该联络人不属于所选物流公司，或已停用",
+        )
+    return {
+        "id": int(contact["id"]),
+        "name": contact["name"],
+        "phone": contact["phone"],
+        "carrier_id": int(carrier["id"]),
+        "carrier_name": carrier["name"],
+    }
+
+
+def order_logistics_updates(
+    conn: Connection,
+    order_row,
+    payload: dict,
+    *,
+    require_tracking: bool = False,
+) -> dict:
+    """把订单自有的物流字段归一化为数据库更新，并保持金额尾款一致。"""
+    logistics_keys = {
+        "logistics_mode",
+        "carrier_id",
+        "carrier_contact_id",
+        "logistics_fee",
+        "tracking_number",
+    }
+    if not require_tracking and not any(key in payload for key in logistics_keys):
+        return {}
+
+    order = dict(order_row)
+    mode = str(payload.get("logistics_mode") or order.get("logistics_mode") or "self").strip()
+    if mode not in ("free", "agent", "self"):
+        raise ApiError(
+            status_code=400,
+            code="invalid_logistics_mode",
+            message="物流方式只能是包邮、代办或自提",
+        )
+
+    tracking_number = payload.get("tracking_number", order.get("tracking_no"))
+    tracking_number = str(tracking_number or "").strip() or None
+    carrier_id = payload.get("carrier_id", order.get("carrier_id"))
+    contact_id = payload.get("carrier_contact_id", order.get("carrier_contact_id"))
+    contact = None
+
+    if mode == "self":
+        carrier_id = None
+        contact_id = None
+        fee = 0.0
+        tracking_number = tracking_number or "无"
+    else:
+        if require_tracking and not tracking_number:
+            raise ApiError(
+                status_code=400,
+                code="missing_tracking_number",
+                message="使用物流公司时必须填写运单号",
+            )
+        contact = resolve_carrier_contact(conn, carrier_id, contact_id)
+        carrier_id = contact["carrier_id"]
+        contact_id = contact["id"]
+        try:
+            fee = round(float(payload.get("logistics_fee", order.get("logistics_fee") or 0)), 2)
+        except (TypeError, ValueError) as exc:
+            raise ApiError(
+                status_code=400,
+                code="invalid_logistics_fee",
+                message="物流费用格式不正确",
+            ) from exc
+        if fee < 0:
+            raise ApiError(
+                status_code=400,
+                code="invalid_logistics_fee",
+                message="物流费用不能为负",
+            )
+
+    updates = {
+        "logistics_mode": mode,
+        "carrier_id": carrier_id,
+        "carrier_contact_id": contact_id,
+        "carrier_contact_name": contact["name"] if contact else None,
+        "carrier_contact_phone": contact["phone"] if contact else None,
+        "logistics_fee": fee,
+        "tracking_no": tracking_number,
+    }
+
+    if "logistics_fee" in payload or mode == "self":
+        product_total = round(float(order.get("product_total") or 0), 2)
+        discount = round(float(order.get("discount_amount") or 0), 2)
+        product_payable = round(float(order.get("product_payable") or 0), 2)
+        if product_payable <= 0 and product_total > 0:
+            product_payable = max(0.0, round(product_total - discount, 2))
+        if product_payable <= 0:
+            product_payable = max(
+                0.0,
+                round(float(order.get("amount") or 0) - float(order.get("logistics_fee") or 0), 2),
+            )
+        new_amount = round(product_payable + fee, 2)
+        paid = round(
+            float(order.get("deposit_paid") or 0) + float(order.get("balance_paid") or 0),
+            2,
+        )
+        if paid > new_amount:
+            raise ApiError(
+                status_code=409,
+                code="order_amount_below_paid",
+                message=f"修改后订单应收 ¥{new_amount:,.2f}，低于已收 ¥{paid:,.2f}",
+            )
+        deposit_due = order.get("deposit_amount")
+        if deposit_due is not None and round(float(deposit_due), 2) > new_amount:
+            raise ApiError(
+                status_code=400,
+                code="invalid_logistics_fee",
+                message="修改物流费用后，订单应收不能低于定金",
+            )
+        updates["amount"] = new_amount
+        if deposit_due is not None:
+            updates["balance_amount"] = round(new_amount - float(deposit_due), 2)
+
+    return updates
+
+
 def read_images(photos: list) -> list[tuple[str, str, str, bytes]]:
     """读取图片文件：空条目跳过、非图片 400、单张超 20MB 400、总数 >3 400。
 
@@ -599,58 +752,27 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             )
 
         elif to_status == "ready_to_ship":
-            # 发货准备逻辑
-            logistics_mode = payload.get("logistics_mode")
-            carrier_id = payload.get("carrier_id")
-            tracking_number = payload.get("tracking_number")
-            
-            # 根据物流方式验证必要字段
-            if logistics_mode in ("free", "agent"):
-                if not carrier_id:
-                    raise ApiError(
-                        status_code=400,
-                        code="missing_carrier",
-                        message="使用物流公司时必须指定物流公司ID"
-                    )
-                if not tracking_number:
-                    raise ApiError(
-                        status_code=400,
-                        code="missing_tracking_number",
-                        message="使用物流公司时必须填写运单号"
-                    )
-                # 验证物流公司是否存在
-                carrier_row = conn.execute(
-                    "SELECT * FROM carriers WHERE id = ?", 
-                    (carrier_id,)
-                ).fetchone()
-                if not carrier_row:
-                    raise ApiError(
-                        status_code=400,
-                        code="carrier_not_found",
-                        message="物流公司不存在"
-                    )
-            else:
-                # 自送模式
-                carrier_id = None
-                tracking_number = "无"
-            
-            # 更新订单物流信息
+            # 备货完成时沿用创建订单时填写的物流信息；允许本次补齐联络人/运单号。
+            updates = order_logistics_updates(
+                conn, order_row, payload, require_tracking=True
+            )
+            updates.update(status=to_status, updated_at=now_iso())
+            assignments = ", ".join(f"{column} = ?" for column in updates)
             conn.execute(
-                "UPDATE orders SET carrier_id = ?, tracking_no = ?, status = ?, updated_at = ? WHERE id = ?",
-                (
-                    carrier_id,
-                    tracking_number,
-                    to_status,
-                    now_iso(),
-                    order_id
-                )
+                f"UPDATE orders SET {assignments} WHERE id = ?",
+                [*updates.values(), order_id],
             )
             
         elif to_status == "shipped":
-            # 已发货：写发货时间
+            # 已发货：允许最后一次补正物流联络人、运单和费用，并写发货时间。
+            updates = order_logistics_updates(
+                conn, order_row, payload, require_tracking=True
+            )
+            updates.update(status=to_status, shipped_at=now_local_iso(), updated_at=now_iso())
+            assignments = ", ".join(f"{column} = ?" for column in updates)
             conn.execute(
-                "UPDATE orders SET status = ?, shipped_at = ?, updated_at = ? WHERE id = ?",
-                (to_status, now_local_iso(), now_iso(), order_id)
+                f"UPDATE orders SET {assignments} WHERE id = ?",
+                [*updates.values(), order_id],
             )
             
         elif to_status == "completed":
@@ -684,8 +806,9 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             note = note or f"收{'定金' if to_status == 'deposit_paid' else '尾款'} ¥{float(money or 0):,.2f}"
             detail = _json.dumps({"amount": float(money or 0)}, ensure_ascii=False)
         elif event_type == "ship":
-            note = note or f"已发货，运单号 {order_row['tracking_no'] or '—'}"
-            detail = _json.dumps({"tracking_no": order_row["tracking_no"]}, ensure_ascii=False)
+            tracking_no = updates.get("tracking_no", order_row["tracking_no"])
+            note = note or f"已发货，运单号 {tracking_no or '—'}"
+            detail = _json.dumps({"tracking_no": tracking_no}, ensure_ascii=False)
         else:
             detail = None
         conn.execute(

@@ -78,6 +78,20 @@ class TestMigrations(unittest.TestCase):
         self.assertTrue(expected <= tables, f"缺表：{expected - tables}")
         self.assertIn("trg_fu_object_fill", triggers)
 
+    def test_order_carrier_contact_columns_exist(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(orders)")
+            }
+        finally:
+            conn.close()
+        self.assertTrue(
+            {"carrier_contact_id", "carrier_contact_name", "carrier_contact_phone"}
+            <= columns
+        )
+
     def test_product_catalog_seeded_once(self):
         run_migrations(self.db, backup=False, verbose=False)
         run_migrations(self.db, backup=False, verbose=False)
