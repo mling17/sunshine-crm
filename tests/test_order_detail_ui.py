@@ -63,6 +63,55 @@ class OrderDetailUiTest(unittest.TestCase):
         self.assertIn("(afterSaleCount", detail)
         self.assertIn("var aftersalesHtml = afterSaleCount ?", detail)
         self.assertNotIn("暂无售后单", detail)
+        self.assertLess(
+            detail.index('id="orderPrimaryActions"'),
+            detail.index("var actionHost"),
+        )
+
+    def test_completed_order_uses_aftersale_followup_and_locked_tags(self):
+        detail = self.source[
+            self.source.index("function renderOrderDetail"):
+            self.source.index("/* ---------------- 修改订单")
+        ]
+        self.assertIn("order.status === 'completed'", detail)
+        self.assertIn("后续跟进请创建售后单", detail)
+        self.assertIn(
+            "orderTagsHtml(deal, order.status === 'completed')",
+            detail,
+        )
+        self.assertNotIn(
+            'disabled title="订单完成后才能申请售后">添加售后',
+            detail,
+        )
+        self.assertEqual(
+            detail.count("order.status !== 'completed'"),
+            2,
+            "完成订单不再显示跟进、修改订单按钮",
+        )
+        self.assertLess(
+            detail.index("售后数量 ' + afterSaleCount"),
+            detail.index("orderTagsHtml(deal, order.status === 'completed')"),
+            "售后数量必须排在订单标签前",
+        )
+
+        tags = self.source[
+            self.source.index("function orderTagsHtml"):
+            self.source.index("function orderFollowModal")
+        ]
+        self.assertIn("tag.deletable && !locked", tags)
+        self.assertIn("(!locked", tags)
+
+    def test_add_aftersale_modal_can_link_same_order_history(self):
+        modal = self.source[
+            self.source.index("function openAftersaleModal"):
+            self.source.index("/* ---------------- 通用状态推进")
+        ]
+        self.assertIn("openAftersaleModal(order, aftersales)", self.source)
+        self.assertIn("关联历史售后（可选）", modal)
+        self.assertIn('name="related_aftersale_id"', modal)
+        self.assertIn("related_aftersale_id: relatedId", modal)
+        self.assertIn("a.status === 'done'", modal)
+        self.assertIn("只能关联当前订单下已完成的历史售后单", modal)
 
     def test_logistics_handles_carrier_and_self_pickup(self):
         detail = self.source[
@@ -120,7 +169,7 @@ class OrderDetailUiTest(unittest.TestCase):
             self.assertIn(marker, self.css)
         self.assertIn('/crm/order-detail.css?v=20261102a5', self.index)
         self.assertIn("'/crm/order-detail.css'", self.sw)
-        self.assertIn("const CACHE = 'crm-shell-v54';", self.sw)
+        self.assertIn("const CACHE = 'crm-shell-v57';", self.sw)
         self.assertGreaterEqual(self.css.count("grid-template-columns: repeat(5,"), 3)
 
     def test_pending_customer_confirmation_is_not_a_frontend_state(self):

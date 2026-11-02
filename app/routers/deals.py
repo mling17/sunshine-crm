@@ -15,6 +15,7 @@ from app import dicts as dict_svc
 from app.deal_tags import (
     add_manual_tag,
     delete_manual_tag,
+    ensure_deal_tags_editable,
     list_deal_tags,
     sync_pending_quote_tags,
 )
@@ -341,6 +342,7 @@ def get_deal_tags(deal_id: int) -> list[DealTagOut]:
 def create_deal_tag(deal_id: int, payload: DealTagIn) -> list[DealTagOut]:
     with db_conn() as conn:
         _deal_row(conn, deal_id)
+        ensure_deal_tags_editable(conn, deal_id)
         return [
             DealTagOut(**row)
             for row in add_manual_tag(conn, deal_id, payload.name)
@@ -351,6 +353,7 @@ def create_deal_tag(deal_id: int, payload: DealTagIn) -> list[DealTagOut]:
 def remove_deal_tag(deal_id: int, tag_link_id: int) -> list[DealTagOut]:
     with db_conn() as conn:
         _deal_row(conn, deal_id)
+        ensure_deal_tags_editable(conn, deal_id)
         return [
             DealTagOut(**row)
             for row in delete_manual_tag(conn, deal_id, tag_link_id)

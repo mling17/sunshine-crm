@@ -92,6 +92,17 @@ class TestMigrations(unittest.TestCase):
             <= columns
         )
 
+    def test_aftersale_relation_column_exists(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(aftersales)")
+            }
+        finally:
+            conn.close()
+        self.assertIn("related_aftersale_id", columns)
+
     def test_product_catalog_seeded_once(self):
         run_migrations(self.db, backup=False, verbose=False)
         run_migrations(self.db, backup=False, verbose=False)

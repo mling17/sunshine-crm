@@ -363,13 +363,19 @@ async def create_follow_up(
                     message="商机已赢单或已流失，无法添加跟进"
                 )
         elif object_type == "order":
-            # 检查订单是否存在
+            # 已完成订单只读；后续沟通必须落到该订单的售后单。
             order = conn.execute(
-                "SELECT id FROM orders WHERE id = ? AND is_delete = 0",
+                "SELECT id, status, order_no FROM orders WHERE id = ? AND is_delete = 0",
                 (object_id_value,),
             ).fetchone()
             if order is None:
                 raise HTTPException(status_code=404, detail="订单不存在")
+            if order["status"] == "completed":
+                raise ApiError(
+                    status_code=409,
+                    code="order_completed_use_aftersale",
+                    message="订单已完成，不能继续跟进；如需继续处理，请创建售后单",
+                )
         elif object_type == "aftersale":
             # 检查售后单是否存在 + 状态守卫（PLANNER-V3 §6.4）
             aftersale = conn.execute(
@@ -491,6 +497,16 @@ async def create_follow_up(
                     "INSERT INTO aftersale_status_log (aftersale_id, from_status, to_status, note,"
                     " created_at) VALUES (?, 'pending', 'processing', ?, ?)",
                     (object_id_value, "记跟进后自动进入处理中", created_at),
+                )
+                from app.timeline import add_entry as _add_aftersale_entry
+
+                _add_aftersale_entry(
+                    conn,
+                    object_type="aftersale",
+                    object_id=object_id_value,
+                    kind="stage",
+                    content="状态变更：待处理 → 处理中",
+                    detail={"from": "pending", "to": "processing"},
                 )
 
         # 处理照片

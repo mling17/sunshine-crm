@@ -11,6 +11,20 @@ AUTO_TAG_SOURCE = "auto"
 MANUAL_TAG_SOURCE = "manual"
 
 
+def ensure_deal_tags_editable(conn, deal_id: int) -> None:
+    """订单完成后，订单标签只读，避免已完成订单继续变更分类。"""
+    order = conn.execute(
+        "SELECT status FROM orders WHERE deal_id = ? AND is_delete = 0",
+        (deal_id,),
+    ).fetchone()
+    if order is not None and order["status"] == "completed":
+        raise ApiError(
+            409,
+            "deal_tags_locked",
+            "订单已完成，标签已锁定，不能再添加或删除",
+        )
+
+
 def list_deal_tags(conn, deal_id: int) -> list[dict]:
     rows = conn.execute(
         "SELECT dt.id, t.name, dt.source"

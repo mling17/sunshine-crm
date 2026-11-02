@@ -43,6 +43,87 @@ class TestAftersales(ApiTestCase):
         self.assertEqual(data["type"], "repair")
         self.assertIn("AS-", data["no"])
 
+    def test_create_aftersale_can_link_previous_aftersale_from_same_order(self):
+        first_id = self._create_aftersale()
+        self.client.post(
+            "/api/crm/follow-ups",
+            data={
+                "object_type": "aftersale",
+                "object_id": str(first_id),
+                "content": "首次售后处理完成",
+            },
+        )
+        finished = self.client.post(
+            f"/api/crm/aftersales/{first_id}/finish",
+            json={"result": "首次问题已解决"},
+        )
+        self.assertEqual(finished.status_code, 200, finished.text)
+        resp = self.client.post(
+            "/api/crm/aftersales",
+            json={
+                "order_id": self.order["id"],
+                "type": "repair",
+                "description": "同一问题再次出现",
+                "related_aftersale_id": first_id,
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        created = resp.json()
+        self.assertEqual(created["related_aftersale_id"], first_id)
+        self.assertTrue(created["related_aftersale_no"].startswith("AS-"))
+        self.assertEqual(created["related_aftersale_status"], "done")
+
+        detail = self.client.get(f"/api/crm/aftersales/{created['id']}").json()
+        self.assertEqual(detail["related_aftersale_id"], first_id)
+        listed = self.client.get(
+            "/api/crm/aftersales", params={"order_id": self.order["id"]}
+        ).json()["items"]
+        linked = next(item for item in listed if item["id"] == created["id"])
+        self.assertEqual(linked["related_aftersale_no"], created["related_aftersale_no"])
+
+    def test_related_aftersale_must_belong_to_the_same_order(self):
+        first_id = self._create_aftersale()
+        self.client.post(
+            "/api/crm/follow-ups",
+            data={
+                "object_type": "aftersale",
+                "object_id": str(first_id),
+                "content": "处理历史售后",
+            },
+        )
+        self.client.post(
+            f"/api/crm/aftersales/{first_id}/finish",
+            json={"result": "已完成"},
+        )
+        other_customer = insert_customer(name="另一个客户", phone="13800000088")
+        other_order = insert_order(customer_id=other_customer["id"], amount=800.0)
+
+        resp = self.client.post(
+            "/api/crm/aftersales",
+            json={
+                "order_id": other_order["id"],
+                "type": "repair",
+                "description": "跨订单关联",
+                "related_aftersale_id": first_id,
+            },
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["code"], "related_aftersale_order_mismatch")
+
+    def test_related_aftersale_must_be_completed(self):
+        first_id = self._create_aftersale()
+        resp = self.client.post(
+            "/api/crm/aftersales",
+            json={
+                "order_id": self.order["id"],
+                "type": "repair",
+                "description": "重复问题",
+                "related_aftersale_id": first_id,
+            },
+        )
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertEqual(resp.json()["code"], "related_aftersale_not_completed")
+
     def test_create_aftersale_not_found_order(self):
         """测试创建售后单时订单不存在"""
         resp = self.client.post(
@@ -97,6 +178,8 @@ class TestAftersales(ApiTestCase):
         self.assertEqual(detail["status"], "processing")
         types = [t["type"] for t in detail.get("timeline", [])]
         self.assertIn("follow", types)
+        self.assertIn("create", types)
+        self.assertIn("stage", types)
 
     def test_finish_aftersale(self):
         """先记跟进（自动处理中）→ 标记完成 → 写 result/closed_at + 履历"""
@@ -116,6 +199,13 @@ class TestAftersales(ApiTestCase):
         self.assertEqual(done.status_code, 200, done.text)
         self.assertEqual(done.json()["status"], "done")
         self.assertTrue(done.json()["closed_at"])
+
+        locked = self.client.post(
+            f"/api/crm/aftersales/{aftersale_id}/finish", json={"result": "再次修改"}
+        )
+        self.assertEqual(locked.status_code, 409, locked.text)
+        detail = self.client.get(f"/api/crm/aftersales/{aftersale_id}").json()
+        self.assertEqual(detail["result"], "已修复")
 
     def test_finish_aftersale_missing_result(self):
         """测试完成售后单缺少处理结果"""

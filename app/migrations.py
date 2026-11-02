@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_016"
-SCHEMA_USER_VERSION = 15
+MIGRATION_VERSION = "v2_017"
+SCHEMA_USER_VERSION = 16
 
 
 def default_db_path() -> Path:
@@ -1078,6 +1078,15 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_016", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_016', datetime('now'), '客户已确认报价单不再转为作废')"),
+    # ---------- 33. v2_017：新售后单可关联同订单历史售后 ----------
+    ("aftersales.related_aftersale_id", _col_guard("aftersales", "related_aftersale_id"),
+     "ALTER TABLE aftersales ADD COLUMN related_aftersale_id INTEGER"),
+    ("idx_as_related", _tbl_guard("aftersales"),
+     "CREATE INDEX IF NOT EXISTS idx_as_related ON aftersales(related_aftersale_id)"),
+    ("schema_migrations v2_017", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_017', datetime('now'), '售后单可关联同订单历史售后')"),
+    ("user_version v2_017", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 

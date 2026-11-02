@@ -244,7 +244,7 @@ function orderDocumentFiles(order, timelineRecords) {
     return files;
 }
 
-function orderTagsHtml(deal) {
+function orderTagsHtml(deal, locked) {
     var tags = (deal && deal.tags) || [];
     if (!deal) {
         return '<span class="small muted">订单没有关联商机标签</span>';
@@ -252,14 +252,17 @@ function orderTagsHtml(deal) {
     return '<div class="order-tags" aria-label="订单标签">' + tags.map(function (tag) {
         return '<span class="order-tag' + (tag.source === 'auto' ? ' is-auto' : '') + '">' +
             esc(tag.name) +
-            (tag.deletable
+            (tag.deletable && !locked
                 ? '<button type="button" class="order-tag-remove" data-deal-tag-remove="' +
                   tag.id + '" title="删除标签" aria-label="删除标签 ' + esc(tag.name) + '">×</button>'
                 : '') +
             '</span>';
     }).join('') +
-        '<button type="button" class="order-tag-add" data-deal-tag-add="' + deal.id +
-        '" title="添加标签" aria-label="添加标签">＋</button></div>';
+        (!locked
+            ? '<button type="button" class="order-tag-add" data-deal-tag-add="' + deal.id +
+              '" title="添加标签" aria-label="添加标签">＋</button>'
+            : '') +
+        '</div>';
 }
 
 function orderFollowModal(order) {
@@ -385,9 +388,10 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
             '<div class="order-command-identity">' +
                 '<a class="crumb" href="#/orders">‹ 订单</a>' +
                 '<span class="order-command-no">' + esc(order.order_no) + '</span>' +
-                '<div class="order-tags-row">' + orderTagsHtml(deal) + '</div>' +
                 (afterSaleCount
                     ? '<span class="badge warn">售后数量 ' + afterSaleCount + '</span>' : '') +
+                '<div class="order-tags-row">' +
+                    orderTagsHtml(deal, order.status === 'completed') + '</div>' +
             '</div>' +
             '<div class="order-command-state"><span>订单状态</span>' +
                 orderStatusBadge(order.status, order.status_label) + '</div>' +
@@ -540,7 +544,10 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
         '<div class="card-head"><div><h2>跟进履历 <span class="badge muted">' +
             timelineRecords.length + '</span></h2><p class="order-section-copy">' +
             '人工跟进、状态变更、收付款、物流和售后记录统一展示</p></div>' +
-            '<button type="button" class="btn btn-sm btn-primary" id="btnOrderFollow">＋ 记一条跟进</button></div>' +
+            (order.status === 'completed'
+                ? '<span class="small muted">订单已完成，后续跟进请创建售后单</span>'
+                : '<button type="button" class="btn btn-sm btn-primary" id="btnOrderFollow">＋ 记一条跟进</button>') +
+            '</div>' +
         timelineHtml(timelineRecords) +
     '</section>';
 
@@ -556,14 +563,14 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
     if (next) {
         actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
     }
-    actionBtns += '<button type="button" class="btn" id="btnOrderSummaryFollow">＋ 跟进</button>';
+    if (order.status !== 'completed') {
+        actionBtns += '<button type="button" class="btn" id="btnOrderSummaryFollow">＋ 跟进</button>';
+    }
     if (order.status !== 'completed') {
         actionBtns += '<button type="button" class="btn" id="btnEditOrder">修改订单</button>';
     }
     if (order.status === 'completed') {
         actionBtns += '<button type="button" class="btn" id="btnAddAftersaleTop">＋ 添加售后</button>';
-    } else {
-        actionBtns += '<button type="button" class="btn" disabled title="订单完成后才能申请售后">添加售后</button>';
     }
     actionHost.innerHTML = actionBtns;
 
@@ -585,7 +592,11 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
 
     ['#btnAddAftersale', '#btnAddAftersaleTop'].forEach(function (selector) {
         var button = $(selector, root);
-        if (button) { button.addEventListener('click', function () { openAftersaleModal(order); }); }
+        if (button) {
+            button.addEventListener('click', function () {
+                openAftersaleModal(order, aftersales);
+            });
+        }
     });
 
     var editOrderBtn = $('#btnEditOrder', root);
@@ -710,7 +721,21 @@ function openOrderEditModal(order) {
 }
 
 /* ---------------- 添加售后（订单已完成才允许；售后单只能这么创建） ---------------- */
-function openAftersaleModal(order) {
+function openAftersaleModal(order, aftersales) {
+    var completedHistory = (aftersales || []).filter(function (a) {
+        return a.status === 'done';
+    });
+    var historyOptions = completedHistory.map(function (a) {
+        var summary = [a.no, a.type_label || aftersaleTypeLabel(a.type, a.type_other),
+            a.status_label || aftersaleStatusLabel(a.status)].filter(Boolean).join(' · ');
+        return '<option value="' + a.id + '">' + esc(summary) + '</option>';
+    }).join('');
+    var historyField = historyOptions
+        ? '<div class="field field-wide"><label>关联历史售后（可选）</label>' +
+          '<select name="related_aftersale_id"><option value="">不关联</option>' +
+          historyOptions + '</select>' +
+          '<p class="small muted">只能关联当前订单下已完成的历史售后单，便于追溯同类问题。</p></div>'
+        : '';
     var modal = createOrderModal('添加售后');
     modal.querySelector('.modal-body').innerHTML =
         '<form id="asNewForm" class="form-modal form-grid" autocomplete="off">' +
@@ -721,6 +746,7 @@ function openAftersaleModal(order) {
         '<div class="field"><label>问题描述 *</label>' +
         '<textarea name="description" maxlength="1000" rows="3" required ' +
         'placeholder="客户反馈的问题、现象、期望怎么处理"></textarea></div>' +
+        historyField +
         '<div class="form-actions"><button type="submit" class="btn btn-primary">创建售后单</button></div>' +
         '</form>';
 
@@ -730,12 +756,19 @@ function openAftersaleModal(order) {
         var btn = form.querySelector('button[type="submit"]');
         var type = String(form.querySelector('[name="type"]').value || '');
         var desc = String(form.querySelector('[name="description"]').value || '').trim();
+        var relatedEl = form.querySelector('[name="related_aftersale_id"]');
+        var relatedId = relatedEl && relatedEl.value ? Number(relatedEl.value) : null;
         if (!type) { toast('请选择售后类型', true); return; }
         if (!desc) { toast('请填写问题描述', true); return; }
         btn.disabled = true;
         api('/aftersales', {
             method: 'POST',
-            body: { order_id: order.id, type: type, description: desc }
+            body: {
+                order_id: order.id,
+                type: type,
+                description: desc,
+                related_aftersale_id: relatedId
+            }
         }).then(function (res) {
             toast('售后单已创建');
             if (modal.parentNode) { document.body.removeChild(modal); }

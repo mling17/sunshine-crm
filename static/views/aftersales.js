@@ -3,7 +3,7 @@
  * 定稿口径：
  *   · 列表用表格 + 状态 Tab；**没有「新建售后单」**（售后单从「订单 → 已完成 → 添加售后」生成）
  *   · 列表操作只有「跟进」；已完成后跟进按钮置灰不可点，直接点「售后单号」看详情
- *   · 详情 = 信息卡 + 跟进履历 + 记一条；待处理记一条后后端自动转「处理中」；
+ *   · 详情 = 信息卡 + 跟进履历；跟进走与线索页一致的弹层，待处理提交后自动转「处理中」；
  *     处理中可「标记完成」；已完成 / 已拒绝不再允许跟进（后端也会拦）
  */
 
@@ -25,7 +25,7 @@ function viewAftersales(root, route) {
         var items = (res && res.items) || [];
 
         var tabs = [['', '全部'], ['pending', '待处理'], ['processing', '处理中'],
-            ['done', '已完成'], ['rejected', '已拒绝']];
+            ['done', '已完成']];
         var tabHtml = tabs.map(function (t) {
             return '<button type="button" class="tab-btn' + (status === t[0] ? ' active' : '') +
                 '" data-status="' + t[0] + '">' + t[1] + '</button>';
@@ -109,10 +109,11 @@ function viewAftersaleDetail(root, rawId) {
 
     return Promise.all([
         api('/aftersales/' + id),
-        api('/follow-ups?object_type=aftersale&object_id=' + id).catch(function () { return []; })
+        api('/follow-ups?object_type=aftersale&object_id=' + id + '&include_system=true')
+            .catch(function () { return []; })
     ]).then(function (all) {
         var a = all[0];
-        var followUps = all[1] || [];
+        var records = followupRecordsFromApi(all[1] || []);
 
         if (!a) {
             root.innerHTML = '<div class="card">售后单不存在，<a href="#/aftersales">回售后列表</a></div>';
@@ -120,45 +121,27 @@ function viewAftersaleDetail(root, rawId) {
         }
 
         var finished = (a.status === 'done' || a.status === 'rejected');
-        var recordsHtml = followUps.length
-            ? followUps.map(function (fu) {
-                return followupItemHtml(fu, { withDelete: false, showCustomer: false });
-            }).join('')
-            : '<p class="empty">还没有跟进记录</p>';
-
         var actionsHtml;
         if (a.status === 'pending') {
-            actionsHtml = '<span class="small muted">待处理：在下面写一条跟进，售后单会自动进入「处理中」</span>';
+            actionsHtml = '<span class="small muted">待处理：记一条跟进后，售后单会自动进入「处理中」</span>';
         } else if (a.status === 'processing') {
             actionsHtml = '<button type="button" class="btn btn-sm btn-primary" id="asFinish">标记完成</button>' +
-                '<span class="small muted">处理完点这里收口，收口后不能再加跟进</span>';
+                '<span class="small muted">处理完点这里收口；完成后售后单锁定，只能查看</span>';
         } else if (a.status === 'done') {
-            actionsHtml = '<span class="small muted">已完成，不能再添加跟进记录</span>';
+            actionsHtml = '<span class="small muted">已完成：售后单已锁定，只能查看，不能修改或添加跟进</span>';
         } else {
             actionsHtml = '<span class="small muted">已拒绝，不能再添加跟进记录</span>';
         }
 
-        var followForm = finished ? '' :
-            '<form id="asFollowForm" class="card form-grid" autocomplete="off" style="margin-top:10px">' +
-            '<div class="field"><label>跟进内容 *（≤2000 字）</label>' +
-            '<textarea name="content" maxlength="2000" required ' +
-            'placeholder="和客户沟通了什么？处理到哪一步了？"></textarea></div>' +
-            '<div class="row-2">' +
-            '<div class="field"><label>跟进方式</label>' +
-            '<select name="method">' + dictOptions('follow_method', 'wechat') + '</select></div>' +
-            '<div class="field"><label>下次跟进日期</label>' +
-            '<input type="date" name="next_date"></div>' +
-            '</div>' +
-            '<div class="field"><label>照片 / 附件（可选，最多 ' + MAX_PHOTOS + ' 个）</label>' +
-            '<input type="file" name="files" multiple></div>' +
-            '<div class="form-actions"><button type="submit" class="btn btn-primary">保存跟进</button></div>' +
-            '</form>';
-
-        root.innerHTML =
-            '<div class="card">' +
-            '<div class="card-head"><h2><a href="#/aftersales">‹ 售后</a> / ' + esc(a.no) + '</h2>' +
-            aftersaleStatusBadge(a.status, a.status_label) + '</div>' +
-            infoGrid([
+        renderEntityFollowPage(root, {
+            backHash: '#/aftersales',
+            backLabel: '售后',
+            title: a.no,
+            titleHtml: '<div class="entity-title-main"><h2>' +
+                '<a class="crumb" href="#/aftersales">‹ 售后</a> / ' +
+                esc(a.no) + '</h2></div>',
+            badgesHtml: aftersaleStatusBadge(a.status, a.status_label),
+            infoHtml: infoGrid([
                 ['关联订单', a.order_id
                     ? '<a href="#/orders/' + a.order_id + '">' + esc(a.order_no || ('订单 #' + a.order_id)) + ' ›</a>'
                     : '—', true],
@@ -167,50 +150,51 @@ function viewAftersaleDetail(root, rawId) {
                     : esc(a.customer_name || '—'), true],
                 ['类型', aftersaleTypeLabel(a.type, a.type_other)],
                 ['状态', aftersaleStatusBadge(a.status, a.status_label), true],
+                ['关联历史售后', a.related_aftersale_id
+                    ? '<a href="#/aftersales/' + a.related_aftersale_id + '">' +
+                      esc(a.related_aftersale_no || ('售后单 #' + a.related_aftersale_id)) +
+                      '</a> · ' + esc(AFTERSALE_STATUS_LABEL[a.related_aftersale_status] ||
+                        a.related_aftersale_status || '') : '未关联', true],
                 ['创建时间', fmtDateTime(a.created_at)],
                 ['完成时间', a.closed_at ? fmtDateTime(a.closed_at) : '—'],
                 ['问题描述', a.description],
                 ['处理结果', a.result || (a.reject_reason ? '拒绝原因：' + a.reject_reason : '')]
-            ]) +
-            '<div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap;margin-top:10px">' +
-            actionsHtml + '</div>' +
-            '</div>' +
-            '<div class="card">' +
-            '<div class="card-head"><h2>跟进履历（' + followUps.length + '）</h2></div>' +
-            recordsHtml +
-            followForm +
-            '</div>';
-
-        var finishBtn = $('#asFinish', root);
-        if (finishBtn) {
-            finishBtn.addEventListener('click', function () { openAftersaleFinish(a); });
-        }
-
-        var form = $('#asFollowForm', root);
-        if (form) {
-            form.addEventListener('submit', function (ev) {
-                ev.preventDefault();
-                var btn = form.querySelector('button[type="submit"]');
-                var content = String(form.querySelector('[name="content"]').value || '').trim();
-                if (!content) { toast('跟进内容不能为空', true); return; }
+            ]),
+            actionsHtml: actionsHtml,
+            placeholder: '和客户沟通了什么？问题处理到哪一步了？下一步做什么？',
+            modalTitle: '记一条售后跟进 · ' + a.no,
+            addLabel: '＋ 记一条跟进',
+            canFollow: !finished,
+            lockedText: a.status === 'done'
+                ? '已完成：售后单已锁定，只能查看，不能修改或添加跟进'
+                : '已拒绝，不能再添加跟进记录',
+            records: records,
+            extraHtml: filesCardHtml(
+                collectFiles(records),
+                '这个售后单还没有上传现场照片、维修凭证或其它资料'
+            ),
+            onSubmit: function (p) {
                 var fd = new FormData();
                 fd.append('object_type', 'aftersale');
                 fd.append('object_id', String(a.id));
-                fd.append('content', content);
-                fd.append('method', form.querySelector('[name="method"]').value || 'wechat');
-                var nextDate = form.querySelector('[name="next_date"]').value;
-                if (nextDate) { fd.append('next_date', nextDate); }
-                var files = form.querySelector('[name="files"]').files;
-                for (var i = 0; i < files.length && i < MAX_PHOTOS; i++) { fd.append('files', files[i]); }
-                btn.disabled = true;
+                fd.append('content', p.content);
+                fd.append('method', p.method || 'wechat');
+                if (p.next_date) { fd.append('next_date', p.next_date); }
+                (p.files || []).forEach(function (f) {
+                    if (f.file) { fd.append('files', f.file); }
+                });
                 api('/follow-ups', { method: 'POST', body: fd }).then(function () {
                     toast('已记录跟进');
                     return render();
                 }).catch(function (err) {
                     toast(err.message, true);
-                    btn.disabled = false;
                 });
-            });
+            }
+        });
+
+        var finishBtn = $('#asFinish', root);
+        if (finishBtn) {
+            finishBtn.addEventListener('click', function () { openAftersaleFinish(a); });
         }
     });
 }

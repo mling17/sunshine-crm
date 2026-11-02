@@ -45,7 +45,6 @@ class FormLayoutStructureTest(unittest.TestCase):
             ],
             "dashboard.js": '<form id="quickFuForm" class="form-grid"',
             "aftersales.js": [
-                '<form id="asFollowForm" class="card form-grid"',
                 '<form id="asFinishForm" class="form-grid"',
             ],
         }

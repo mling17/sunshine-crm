@@ -1096,6 +1096,8 @@ class AftersaleIn(BaseModel):
     type: str = Field(min_length=1, max_length=16)
     type_other: OptionalText = Field(default=None, max_length=64)
     description: CleanName = Field(min_length=1, max_length=1000)
+    #: 可关联同一订单下已有的历史售后单。
+    related_aftersale_id: int | None = Field(default=None, gt=0)
 
 
 class AftersaleUpdate(BaseModel):
@@ -1113,6 +1115,8 @@ class AftersaleOut(BaseModel):
 
     id: int
     no: str
+    order_id: int | None = None
+    customer_id: int | None = None
     type: str
     type_label: str | None = None
     type_other: str | None = None
@@ -1126,6 +1130,9 @@ class AftersaleOut(BaseModel):
     updated_at: str
     order_no: str | None = None
     customer_name: str | None = None
+    related_aftersale_id: int | None = None
+    related_aftersale_no: str | None = None
+    related_aftersale_status: str | None = None
 
     @model_validator(mode="after")
     def _fill_labels(self) -> "AftersaleOut":

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from sqlite3 import IntegrityError
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -27,6 +28,43 @@ router = APIRouter(
     dependencies=[Depends(require_auth)],
 )
 
+_AFTERSALE_SELECT = """
+    SELECT a.id, a.no, a.order_id, a.customer_id, a.type, a.type_other,
+           a.description, a.status, a.reject_reason, a.result, a.closed_at,
+           a.created_at, a.updated_at, a.related_aftersale_id,
+           o.order_no, c.name AS customer_name,
+           ra.no AS related_aftersale_no,
+           ra.status AS related_aftersale_status
+      FROM aftersales a
+      JOIN orders o ON o.id = a.order_id
+      JOIN customers c ON c.id = a.customer_id
+      LEFT JOIN aftersales ra
+        ON ra.id = a.related_aftersale_id AND ra.is_delete = 0
+"""
+
+
+def _aftersale_out(row) -> AftersaleOut:
+    return AftersaleOut(
+        id=row["id"],
+        no=row["no"],
+        order_id=row["order_id"],
+        customer_id=row["customer_id"],
+        type=row["type"],
+        type_other=row["type_other"],
+        description=row["description"],
+        status=row["status"],
+        reject_reason=row["reject_reason"],
+        result=row["result"],
+        closed_at=row["closed_at"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        order_no=row["order_no"],
+        customer_name=row["customer_name"],
+        related_aftersale_id=row["related_aftersale_id"],
+        related_aftersale_no=row["related_aftersale_no"],
+        related_aftersale_status=row["related_aftersale_status"],
+    )
+
 
 @router.post("", response_model=AftersaleOut)
 def create_aftersale(payload: AftersaleIn) -> AftersaleOut:
@@ -40,7 +78,8 @@ def create_aftersale(payload: AftersaleIn) -> AftersaleOut:
     with db_conn() as conn:
         # 检查订单是否存在 + 必须已完成才能报售后（PLANNER-V3 §5.8）
         order = conn.execute(
-            "SELECT id, status FROM orders WHERE id = ?", (payload.order_id,)
+            "SELECT id, status, customer_id FROM orders WHERE id = ? AND is_delete = 0",
+            (payload.order_id,),
         ).fetchone()
         if not order:
             raise ApiError(
@@ -54,23 +93,51 @@ def create_aftersale(payload: AftersaleIn) -> AftersaleOut:
                 code="order_not_completed",
                 message="订单完成后才能添加售后",
             )
+
+        if payload.related_aftersale_id is not None:
+            related = conn.execute(
+                """
+                SELECT id, order_id, status
+                  FROM aftersales
+                 WHERE id = ? AND is_delete = 0
+                """,
+                (payload.related_aftersale_id,),
+            ).fetchone()
+            if not related:
+                raise ApiError(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    code="related_aftersale_not_found",
+                    message="关联的历史售后单不存在",
+                )
+            if int(related["order_id"]) != int(payload.order_id):
+                raise ApiError(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    code="related_aftersale_order_mismatch",
+                    message="只能关联当前订单下的历史售后单",
+                )
+            if related["status"] != "done":
+                raise ApiError(
+                    status_code=status.HTTP_409_CONFLICT,
+                    code="related_aftersale_not_completed",
+                    message="只能关联已完成的历史售后单",
+                )
         
         # 生成售后单号
         day = datetime.now().strftime("%Y%m%d")
         no = next_no(conn, "aftersales", "no", "AS", day)
         
         # 获取订单对应的客户ID
-        customer_id = conn.execute(
-            "SELECT customer_id FROM orders WHERE id = ?", (payload.order_id,)
-        ).fetchone()["customer_id"]
+        customer_id = order["customer_id"]
+        now = datetime.now().isoformat()
         
         # 插入售后单
         try:
-            conn.execute(
+            cur = conn.execute(
                 """
                 INSERT INTO aftersales (no, order_id, customer_id, type, type_other, 
-                                       description, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       description, status, related_aftersale_id,
+                                       created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     no,
@@ -80,20 +147,21 @@ def create_aftersale(payload: AftersaleIn) -> AftersaleOut:
                     payload.type_other,
                     payload.description,
                     "pending",
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
+                    payload.related_aftersale_id,
+                    now,
+                    now,
                 )
             )
-            conn.commit()
         except IntegrityError:
             # 并发冲突，重试一次
             conn.rollback()
             no = next_no(conn, "aftersales", "no", "AS", day)
-            conn.execute(
+            cur = conn.execute(
                 """
                 INSERT INTO aftersales (no, order_id, customer_id, type, type_other, 
-                                       description, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       description, status, related_aftersale_id,
+                                       created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     no,
@@ -103,41 +171,34 @@ def create_aftersale(payload: AftersaleIn) -> AftersaleOut:
                     payload.type_other,
                     payload.description,
                     "pending",
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
+                    payload.related_aftersale_id,
+                    now,
+                    now,
                 )
             )
-            conn.commit()
+
+        from app.timeline import add_entry
+
+        add_entry(
+            conn,
+            object_type="aftersale",
+            object_id=int(cur.lastrowid or 0),
+            kind="create",
+            content=(
+                "创建售后单"
+                + (f"（关联历史售后 #{payload.related_aftersale_id}）"
+                   if payload.related_aftersale_id else "")
+            ),
+        )
+        conn.commit()
         
         # 查询返回结果
         row = conn.execute(
-            """
-            SELECT a.id, a.no, a.type, a.type_other, a.description, a.status, 
-                   a.reject_reason, a.result, a.closed_at, a.created_at, a.updated_at,
-                   o.order_no, c.name AS customer_name
-            FROM aftersales a
-            JOIN orders o ON o.id = a.order_id
-            JOIN customers c ON c.id = a.customer_id
-            WHERE a.no = ?
-            """,
-            (no,)
+            _AFTERSALE_SELECT + " WHERE a.id = ?",
+            (int(cur.lastrowid or 0),),
         ).fetchone()
         
-        return AftersaleOut(
-            id=row["id"],
-            no=row["no"],
-            type=row["type"],
-            type_other=row["type_other"],
-            description=row["description"],
-            status=row["status"],
-            reject_reason=row["reject_reason"],
-            result=row["result"],
-            closed_at=row["closed_at"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            order_no=row["order_no"],
-            customer_name=row["customer_name"]
-        )
+        return _aftersale_out(row)
 
 
 @router.get("/{id}", response_model=AftersaleDetailOut)
@@ -146,15 +207,7 @@ def get_aftersale_detail(id: int) -> AftersaleDetailOut:
     with db_conn() as conn:
         # 查询售后单基础信息
         row = conn.execute(
-            """
-            SELECT a.id, a.no, a.type, a.type_other, a.description, a.status, 
-                   a.reject_reason, a.result, a.closed_at, a.created_at, a.updated_at,
-                   o.id AS order_id, o.order_no, c.name AS customer_name
-            FROM aftersales a
-            JOIN orders o ON o.id = a.order_id
-            JOIN customers c ON c.id = a.customer_id
-            WHERE a.id = ?
-            """,
+            _AFTERSALE_SELECT + " WHERE a.id = ?",
             (id,)
         ).fetchone()
         
@@ -195,6 +248,8 @@ def get_aftersale_detail(id: int) -> AftersaleDetailOut:
             materials=materials,
             id=row["id"],
             no=row["no"],
+            order_id=row["order_id"],
+            customer_id=row["customer_id"],
             type=row["type"],
             type_other=row["type_other"],
             description=row["description"],
@@ -204,10 +259,12 @@ def get_aftersale_detail(id: int) -> AftersaleDetailOut:
             closed_at=row["closed_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
-            order_id=row["order_id"],
             order_no=row["order_no"],
             customer_name=row["customer_name"],
-            status_log=status_logs
+            related_aftersale_id=row["related_aftersale_id"],
+            related_aftersale_no=row["related_aftersale_no"],
+            related_aftersale_status=row["related_aftersale_status"],
+            status_logs=status_logs,
         )
 
 
@@ -262,37 +319,14 @@ def list_aftersales(
         
         # 查询分页数据
         offset = (page - 1) * size
-        data_query = f"""
-            SELECT a.id, a.no, a.type, a.type_other, a.description, a.status, 
-                   a.reject_reason, a.result, a.closed_at, a.created_at, a.updated_at,
-                   o.order_no, c.name AS customer_name
-            FROM aftersales a
-            JOIN orders o ON o.id = a.order_id
-            JOIN customers c ON c.id = a.customer_id
-            {where_clause}
-            ORDER BY a.created_at DESC
-            LIMIT ? OFFSET ?
-        """
+        data_query = (
+            _AFTERSALE_SELECT
+            + f" {where_clause}"
+            + " ORDER BY a.created_at DESC LIMIT ? OFFSET ?"
+        )
         rows = conn.execute(data_query, params + [size, offset]).fetchall()
         
-        items = [
-            AftersaleOut(
-                id=row["id"],
-                no=row["no"],
-                type=row["type"],
-                type_other=row["type_other"],
-                description=row["description"],
-                status=row["status"],
-                reject_reason=row["reject_reason"],
-                result=row["result"],
-                closed_at=row["closed_at"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                order_no=row["order_no"],
-                customer_name=row["customer_name"]
-            )
-            for row in rows
-        ]
+        items = [_aftersale_out(row) for row in rows]
         
         return AftersaleListOut(
             items=items,
@@ -367,33 +401,11 @@ def finish_aftersale(id: int, payload: AftersaleUpdate) -> AftersaleOut:
         
         # 查询返回结果
         row = conn.execute(
-            """
-            SELECT a.id, a.no, a.type, a.type_other, a.description, a.status, 
-                   a.reject_reason, a.result, a.closed_at, a.created_at, a.updated_at,
-                   o.order_no, c.name AS customer_name
-            FROM aftersales a
-            JOIN orders o ON o.id = a.order_id
-            JOIN customers c ON c.id = a.customer_id
-            WHERE a.id = ?
-            """,
+            _AFTERSALE_SELECT + " WHERE a.id = ?",
             (id,)
         ).fetchone()
         
-        return AftersaleOut(
-            id=row["id"],
-            no=row["no"],
-            type=row["type"],
-            type_other=row["type_other"],
-            description=row["description"],
-            status=row["status"],
-            reject_reason=row["reject_reason"],
-            result=row["result"],
-            closed_at=row["closed_at"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            order_no=row["order_no"],
-            customer_name=row["customer_name"]
-        )
+        return _aftersale_out(row)
 
 
 @router.post("/{id}/reject", response_model=dict)
