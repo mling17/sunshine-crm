@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#102641">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23102641'/%3E%3Cpath d='m14 48 18-34 18 34H14Z' fill='none' stroke='white' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M23 38h18M32 20v26' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+  <title>工作台与统计 · CRM 交互演示</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="demo-ribbon">
+    <span class="demo-ribbon-dot"></span>
+    <b>交互演示</b>
+    <span>数据均为模拟，刷新后恢复初始状态</span>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="#/dashboard" aria-label="返回工作台">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" role="img">
+          <path d="M4 17.5 12 4l8 13.5H4Z"></path>
+          <path d="M8.1 13h7.8M12 6.8v10.7"></path>
+        </svg>
+      </span>
+      <span class="brand-copy">
+        <b>天窗天幕</b>
+        <small>CRM · DESIGN PREVIEW</small>
+      </span>
+    </a>
+
+    <nav class="main-nav" aria-label="演示页面切换">
+      <button type="button" class="nav-item is-active" data-page="dashboard">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"></path>
+        </svg>
+        工作台
+      </button>
+      <button type="button" class="nav-item" data-page="stats">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 20V10m7 10V4m7 16v-7"></path>
+          <path d="M3 20h18"></path>
+        </svg>
+        统计
+      </button>
+    </nav>
+
+    <div class="topbar-actions">
+      <button type="button" class="icon-button" id="moneyToggle" aria-label="切换金额显示" title="切换金额显示">
+        <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+          <circle cx="12" cy="12" r="2.6"></circle>
+        </svg>
+        <svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m4 4 16 16M10.6 6.1A9 9 0 0 1 12 6c6 0 9.5 6 9.5 6a15 15 0 0 1-2.2 2.8M6.2 7.8A17 17 0 0 0 2.5 12s3.5 6 9.5 6a9 9 0 0 0 3.6-.7"></path>
+        </svg>
+      </button>
+      <span class="user-chip">
+        <span class="avatar">陈</span>
+        <span class="user-copy"><b>陈明</b><small>销售账号</small></span>
+      </span>
+    </div>
+  </header>
+
+  <main id="app" class="app-shell" aria-live="polite"></main>
+
+  <div id="modalRoot"></div>
+  <div id="drawerRoot"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
