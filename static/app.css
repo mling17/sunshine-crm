@@ -1536,7 +1536,7 @@ tbody tr:last-child td { border-bottom: none; }
   th, td { padding: 8px 10px; }
 }
 
-/* 订单状态进度：只使用状态色彩区分，不显示圆点。 */
+/* 订单状态进度：已完成绿色、当前蓝色、未到灰色，不显示圆点。 */
 .progress-bar {
   display: flex;
   gap: 6px;
@@ -1548,11 +1548,11 @@ tbody tr:last-child td { border-bottom: none; }
   flex: 1 0 76px;
   min-width: 76px;
   padding: 7px 8px;
-  border: 1px solid transparent;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   text-align: center;
   background: #f3f4f6;
-  color: #6b7280;
+  color: #8a94a3;
   transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 .progress-bar .step-label {
@@ -1561,17 +1561,16 @@ tbody tr:last-child td { border-bottom: none; }
   line-height: 1.35;
   white-space: normal;
 }
-.progress-bar .step[data-status="pending_confirmation"] { background: #fff0f5; border-color: #f0c9d8; color: #9d3f62; }
-.progress-bar .step[data-status="pending_payment"] { background: #fff1ed; border-color: #f2c9bd; color: #a84431; }
-.progress-bar .step[data-status="deposit_paid"] { background: #e9f8f7; border-color: #bfe3df; color: #0b6b63; }
-.progress-bar .step[data-status="producing"] { background: #eef0ff; border-color: #d0d4f3; color: #4e52a1; }
-.progress-bar .step[data-status="balance_paid"] { background: #f7edff; border-color: #e1cdf1; color: #744292; }
-.progress-bar .step[data-status="ready_to_ship"] { background: #fff7df; border-color: #eedba4; color: #7f6300; }
-.progress-bar .step[data-status="shipped"] { background: #eaf3ff; border-color: #c9ddf6; color: #235f9c; }
-.progress-bar .step[data-status="completed"] { background: #e9f8f1; border-color: #c4ead7; color: #087955; }
+.progress-bar .step.done {
+  border-color: #c4ead7;
+  background: #e9f8f1;
+  color: #087955;
+}
 .progress-bar .step.active {
-  border-color: currentColor;
-  box-shadow: 0 3px 10px rgba(31, 67, 116, .14);
+  border-color: #9fc0ed;
+  background: #eaf2ff;
+  color: #1c5fbb;
+  box-shadow: 0 3px 10px rgba(28, 95, 187, .16);
   font-weight: 700;
   transform: translateY(-1px);
 }

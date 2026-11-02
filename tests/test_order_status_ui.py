@@ -7,16 +7,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ORDER_STATUSES = (
-    "pending_confirmation",
-    "pending_payment",
-    "deposit_paid",
-    "producing",
-    "balance_paid",
-    "ready_to_ship",
-    "shipped",
-    "completed",
-)
 
 
 class OrderStatusUiTest(unittest.TestCase):
@@ -24,17 +14,34 @@ class OrderStatusUiTest(unittest.TestCase):
         self.source = (ROOT / "static/views/orders.js").read_text(encoding="utf-8")
         self.css = (ROOT / "static/app.css").read_text(encoding="utf-8")
 
-    def test_progress_steps_expose_status_for_color_mapping(self):
+    def _rule(self, selector: str) -> str:
+        match = re.search(
+            rf"(?ms)^{re.escape(selector)}\s*\{{(.*?)^\}}",
+            self.css,
+        )
+        self.assertIsNotNone(match, f"missing CSS rule: {selector}")
+        return match.group(1)
+
+    def test_progress_uses_done_current_and_pending_colors(self):
         progress = self.source[
             self.source.index("var progressHtml"):
             self.source.index("/* 关联商机")
         ]
-        self.assertIn('data-status="\' + p[0] + \'"', progress)
-        for status in ORDER_STATUSES:
-            self.assertIn(
-                f'.progress-bar .step[data-status="{status}"]',
-                self.css,
-            )
+        self.assertIn(
+            "i === stepIdx ? ' active' : (i < stepIdx ? ' done' : '')",
+            progress,
+        )
+
+        pending = self._rule(".progress-bar .step")
+        done = self._rule(".progress-bar .step.done")
+        active = self._rule(".progress-bar .step.active")
+        self.assertIn("background: #f3f4f6", pending)
+        self.assertIn("color: #8a94a3", pending)
+        self.assertIn("background: #e9f8f1", done)
+        self.assertIn("color: #087955", done)
+        self.assertIn("background: #eaf2ff", active)
+        self.assertIn("color: #1c5fbb", active)
+        self.assertNotIn("data-status=\"pending_", self.css)
 
     def test_progress_bar_has_no_dot_overlay_or_duplicate_layout(self):
         self.assertNotIn(".progress-bar .step::after", self.css)
@@ -43,8 +50,9 @@ class OrderStatusUiTest(unittest.TestCase):
             len(re.findall(r"(?m)^\.progress-bar\s*\{", self.css)),
             1,
         )
-        self.assertIn(".progress-bar .step.active", self.css)
-        self.assertIn("border-color: currentColor", self.css)
+        active = self._rule(".progress-bar .step.active")
+        self.assertIn("box-shadow:", active)
+        self.assertIn("font-weight: 700", active)
 
 
 if __name__ == "__main__":

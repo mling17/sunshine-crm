@@ -188,8 +188,8 @@ function viewOrderDetail(root, rawId) {
         var stepIdx = ORDER_STATUS.map(function (p) { return p[0]; }).indexOf(order.status);
         var progressHtml = '<div class="progress-bar">' + ORDER_STATUS.map(function (p, i) {
             var cls = 'step' + (i === stepIdx ? ' active' : (i < stepIdx ? ' done' : ''));
-            return '<div class="' + cls + '" data-status="' + p[0] + '">' +
-                '<div class="step-label">' + esc(p[1]) + '</div></div>';
+            return '<div class="' + cls + '"><div class="step-label">' +
+                esc(p[1]) + '</div></div>';
         }).join('') + '</div>';
 
         /* 关联商机（能点回去） */
