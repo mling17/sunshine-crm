@@ -28,6 +28,16 @@ class DashboardStatsDemoTest(unittest.TestCase):
         self.assertIn("openFollowupModal", script)
         self.assertIn("renderSources", script)
         self.assertIn("renderFunnel", script)
+        self.assertIn("renderTrendCombo", script)
+        self.assertIn("renderDonut", script)
+        self.assertIn("renderStageSteps", script)
+        self.assertIn("renderOrderPipeline", script)
+        self.assertIn("renderAftersales", script)
+
+        self.assertNotIn("snapshot-row", script)
+        self.assertNotIn("snapshotItem", script)
+        self.assertNotIn("本月快照", script)
+        self.assertNotIn("snapshot-row", styles)
 
         self.assertIn("@media (max-width: 760px)", styles)
         self.assertIn("prefers-reduced-motion", styles)

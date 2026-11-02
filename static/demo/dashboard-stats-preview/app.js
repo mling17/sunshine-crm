@@ -632,24 +632,17 @@
               </div>
             </section>
           </div>
+
+          <section class="card activity-card">
+            <div class="card-head">
+              <div class="card-title"><h2>最近动态</h2></div>
+              <span class="card-meta">跟进、收款、订单与售后混排</span>
+            </div>
+            <div class="activity-list">
+              ${state.activities.map(activityRow).join("")}
+            </div>
+          </section>
         </div>
-
-        <section class="snapshot-row" aria-label="本月快照">
-          ${snapshotItem(icons.lead, "本月新增线索", "12")}
-          ${snapshotItem(icons.customer, "本月新增客户", "8")}
-          ${snapshotItem(icons.won, "本月成交单数", "3 单")}
-          ${snapshotItem(icons.chart, "本月成交金额", formatMoney(32500))}
-        </section>
-
-        <section class="card activity-card">
-          <div class="card-head">
-            <div class="card-title"><h2>最近动态</h2></div>
-            <span class="card-meta">跟进、收款、订单与售后混排</span>
-          </div>
-          <div class="activity-list">
-            ${state.activities.map(activityRow).join("")}
-          </div>
-        </section>
       </section>
     `;
   }
@@ -710,15 +703,6 @@
         </span>
         <span class="service-age">${urgent ? `超时 ${item.age} 天` : item.status}</span>
       </button>
-    `;
-  }
-
-  function snapshotItem(icon, label, value) {
-    return `
-      <div class="snapshot-item">
-        <span class="snapshot-icon">${icon}</span>
-        <span class="snapshot-copy"><small>${label}</small><b>${value}</b></span>
-      </div>
     `;
   }
 
@@ -783,8 +767,24 @@
     `;
   }
 
-  function renderBarChart(trend) {
-    const max = Math.max(...trend.values, 1);
+  function renderTrendCombo(trend) {
+    const width = 1000;
+    const plotLeft = 40;
+    const plotRight = 970;
+    const plotTop = 34;
+    const plotBottom = 258;
+    const countTop = 48;
+    const countBottom = 226;
+    const maxAmount = Math.max(...trend.values, 1);
+    const maxCount = Math.max(...trend.counts, 1);
+    const band = (plotRight - plotLeft) / trend.labels.length;
+    const barWidth = Math.min(58, band * 0.48);
+    const centers = trend.labels.map((_, index) => plotLeft + band * (index + 0.5));
+    const linePoints = centers.map((center, index) => {
+      const value = Number(trend.counts[index]) || 0;
+      const y = countBottom - (value / maxCount) * (countBottom - countTop);
+      return `${center.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
     return `
       <section class="card chart-card">
         <div class="card-head">
@@ -796,25 +796,48 @@
         <div class="chart-body">
           <div class="trend-total">
             <b>${formatMoney(trend.values.reduce((sum, value) => sum + value, 0))}</b>
-            <span>成交金额</span>
+            <span>成交金额 · ${trend.counts.reduce((sum, value) => sum + value, 0)} 单</span>
           </div>
-          <div class="bar-chart" role="img" aria-label="${escapeHtml(trend.title)}">
-            ${trend.labels.map((label, index) => {
-              const value = trend.values[index];
-              const height = Math.max((value / max) * 136, value ? 7 : 2);
-              return `
-                <div class="bar-col" title="${escapeHtml(label)}：${formatMoney(value)}，${trend.counts[index] || 0} 单">
-                  <span class="bar-value">${formatMoney(value, true)}</span>
-                  <span class="bar${index === trend.labels.length - 1 ? " highlight" : ""}" style="height:${height}px"></span>
-                  <span class="bar-label">${escapeHtml(label)}</span>
-                </div>
-              `;
-            }).join("")}
+          <div class="combo-chart-wrap">
+            <svg class="combo-chart-svg" viewBox="0 0 ${width} 310" role="img" aria-label="${escapeHtml(trend.title)}">
+              <g class="svg-grid">
+                ${[0, 1, 2, 3].map((index) => {
+                  const y = plotTop + ((plotBottom - plotTop) / 3) * index;
+                  return `<line x1="${plotLeft}" y1="${y}" x2="${plotRight}" y2="${y}"></line>`;
+                }).join("")}
+              </g>
+              ${trend.labels.map((label, index) => {
+                const value = trend.values[index];
+                const count = trend.counts[index] || 0;
+                const barHeight = value ? Math.max((value / maxAmount) * (plotBottom - plotTop), 8) : 2;
+                const x = centers[index] - barWidth / 2;
+                const y = plotBottom - barHeight;
+                const tip = `${label}：${formatMoney(value)}，${count} 单`;
+                return `
+                  <g class="svg-series-item" data-action="chart-detail" data-tip="${escapeHtml(tip)}">
+                    <title>${escapeHtml(tip)}</title>
+                    <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}"
+                      rx="7" class="svg-bar${index === trend.labels.length - 1 ? " highlight" : ""}"></rect>
+                    <rect x="${(centers[index] - band / 2).toFixed(1)}" y="${plotTop}" width="${band.toFixed(1)}" height="${plotBottom - plotTop}"
+                      class="chart-hit-area"></rect>
+                    <text x="${centers[index].toFixed(1)}" y="${Math.max(y - 11, 18).toFixed(1)}" class="svg-bar-label">${formatMoney(value, true)}</text>
+                    <text x="${centers[index].toFixed(1)}" y="291" class="svg-axis-label">${escapeHtml(label)}</text>
+                  </g>
+                `;
+              }).join("")}
+              <polyline class="svg-count-line" points="${linePoints}"></polyline>
+              ${centers.map((center, index) => {
+                const count = trend.counts[index] || 0;
+                const y = countBottom - (count / maxCount) * (countBottom - countTop);
+                return `<circle class="svg-count-dot" cx="${center.toFixed(1)}" cy="${y.toFixed(1)}" r="5"></circle>`;
+              }).join("")}
+            </svg>
           </div>
           <div class="chart-legend">
-            <span><i class="legend-dot"></i>历史成交</span>
-            <span><i class="legend-dot green"></i>当前</span>
-            <span>柱状区域悬停可查看单数</span>
+            <span><i class="legend-dot"></i>成交金额</span>
+            <span><i class="legend-line"></i>成交单数</span>
+            <span><i class="legend-dot green"></i>当前周期</span>
+            <span>悬停或点击查看明细</span>
           </div>
         </div>
       </section>
@@ -829,17 +852,20 @@
           <div class="card-title"><h2>销售漏斗</h2></div>
           <span class="card-meta">按本期线索追踪当前结果</span>
         </div>
-        <div class="funnel-body">
+        <div class="funnel-body stepped-funnel">
           ${funnel.map((item, index) => {
             const previous = index === 0 ? null : funnel[index - 1].value;
             const stepRate = index === 0 ? null : previous ? Math.round((item.value / previous) * 100) : 0;
+            const width = Math.max((item.value / top) * 100, item.value ? 22 : 10);
             return `
-              <div class="funnel-row">
-                <span class="funnel-label">${escapeHtml(item.label)}</span>
-                <div class="funnel-track">
-                  <div class="funnel-fill" style="width:${Math.max((item.value / top) * 100, item.value ? 14 : 5)}%">${item.value}</div>
+              <div class="stepped-funnel-row" data-action="chart-detail" data-tip="${escapeHtml(item.label)}：${item.value}${index === 0 ? "" : `，较上一层 ${stepRate}%`}">
+                <span class="stepped-funnel-label">${escapeHtml(item.label)}</span>
+                <div class="stepped-funnel-visual">
+                  <div class="stepped-funnel-band" style="width:${width.toFixed(1)}%">
+                    <span>${item.value}</span>
+                  </div>
                 </div>
-                <span class="funnel-rate">${index === 0 ? "起点" : `${stepRate}%`}</span>
+                <span class="stepped-funnel-rate">${index === 0 ? "起点" : `${stepRate}%`}</span>
               </div>
             `;
           }).join("")}
@@ -853,13 +879,88 @@
     `;
   }
 
+  const chartColors = {
+    blue: "#2569e8",
+    green: "#138a64",
+    amber: "#d88a18",
+    red: "#d64545",
+    violet: "#7656d8",
+    cyan: "#16849e",
+    grey: "#8c98a8"
+  };
+
+  function renderDonut(items, valueGetter, centerLabel, formatValue) {
+    const values = items.map(valueGetter);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    let cursor = 0;
+    const segments = items.map((item, index) => {
+      const start = total ? (cursor / total) * 360 : 0;
+      cursor += values[index];
+      const end = total ? (cursor / total) * 360 : 360;
+      return `${chartColors[item.tone] || chartColors.grey} ${start.toFixed(1)}deg ${end.toFixed(1)}deg`;
+    }).join(", ");
+    return `
+      <div class="donut-panel">
+        <div class="donut-chart" style="background:${total ? `conic-gradient(${segments})` : "#edf1f5"}">
+          <div class="donut-hole">
+            <b>${formatValue(total)}</b>
+            <span>${escapeHtml(centerLabel)}</span>
+          </div>
+        </div>
+        <div class="donut-legend">
+          ${items.map((item, index) => `
+            <button type="button" class="donut-legend-item" data-action="chart-detail"
+              data-tip="${escapeHtml(item.name || item.label)}：${formatValue(values[index])}，${total ? Math.round(values[index] / total * 100) : 0}%">
+              <i style="background:${chartColors[item.tone] || chartColors.grey}"></i>
+              <span>${escapeHtml(item.name || item.label)}</span>
+              <b>${total ? Math.round(values[index] / total * 100) : 0}%</b>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
   function renderSources(sources) {
     const totalAmount = sources.reduce((sum, item) => sum + item.amount, 0);
+    const maxLeads = Math.max(...sources.map((item) => item.leads), 1);
     return `
       <section class="card stats-panel">
         <div class="card-head">
-          <div class="card-title"><h2>客源表现</h2></div>
-          <span class="card-meta">按来源对比获取、转化与成交结果</span>
+          <div class="card-title"><h2>客源分析</h2></div>
+          <span class="card-meta">成交结构 + 获客转化对比</span>
+        </div>
+        <div class="source-chart-grid">
+          <div class="source-donut-block">
+            <div class="subchart-head">
+              <b>成交金额来源</b>
+              <span>按来源成交额占比</span>
+            </div>
+            ${renderDonut(sources, (item) => item.amount, "成交金额", (value) => formatMoney(value, true))}
+          </div>
+          <div class="source-compare-block">
+            <div class="subchart-head">
+              <b>获客与转化</b>
+              <span><i class="legend-dot"></i>新增线索　<i class="legend-dot green"></i>已转化</span>
+            </div>
+            <div class="source-compare-list">
+              ${sources.map((item) => `
+                <button type="button" class="source-compare-row" data-action="chart-detail"
+                  data-tip="${escapeHtml(item.name)}：新增 ${item.leads} 条，转化 ${item.converted} 条，转化率 ${item.rate}%">
+                  <span class="source-compare-name"><i class="source-mark ${item.tone}"></i>${escapeHtml(item.name)}</span>
+                  <span class="source-compare-bars">
+                    <i class="source-compare-bar leads" style="width:${(item.leads / maxLeads) * 100}%"></i>
+                    <i class="source-compare-bar converted" style="width:${(item.converted / maxLeads) * 100}%"></i>
+                  </span>
+                  <span class="source-compare-count">${item.leads} / ${item.converted}</span>
+                </button>
+              `).join("")}
+            </div>
+          </div>
+        </div>
+        <div class="source-table-head">
+          <b>来源明细</b>
+          <span>金额单位：元</span>
         </div>
         <div class="table-wrap">
           <table class="data-table">
@@ -915,24 +1016,90 @@
     `;
   }
 
-  function renderDistribution(title, caption, items) {
+  function renderStageSteps(items) {
+    const max = Math.max(...items.map((item) => item.value), 1);
+    return `
+      <section class="card">
+        <div class="card-head">
+          <div class="card-title"><h2>商机阶段</h2></div>
+          <span class="card-meta">本期新建商机的当前阶段</span>
+        </div>
+        <div class="stage-step-chart">
+          ${items.map((item) => `
+            <button type="button" class="stage-step" data-action="chart-detail"
+              data-tip="${escapeHtml(item.label)}：${item.value} 个">
+              <span class="stage-step-value">${item.value}</span>
+              <span class="stage-step-bar ${item.tone}" style="height:${Math.max((item.value / max) * 100, 8)}%"></span>
+              <span class="stage-step-label">${escapeHtml(item.label)}</span>
+            </button>
+          `).join("")}
+          <svg class="stage-flow-line" viewBox="0 0 400 80" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M30 41 C90 15 120 15 160 34 S250 63 290 42 S340 20 370 25"></path>
+            <path d="m360 18 11 7-10 7"></path>
+          </svg>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderOrderPipeline(items) {
     const total = Math.max(items.reduce((sum, item) => sum + item.value, 0), 1);
     return `
       <section class="card">
         <div class="card-head">
-          <div class="card-title"><h2>${escapeHtml(title)}</h2></div>
-          <span class="card-meta">${escapeHtml(caption)}</span>
+          <div class="card-title"><h2>订单状态</h2></div>
+          <span class="card-meta">本期订单的当前履约进度</span>
         </div>
-        <div class="distribution-list">
-          ${items.map((item) => `
-            <div class="distribution-row">
-              <span class="distribution-label">${escapeHtml(item.label)}</span>
-              <span class="distribution-track">
-                <span class="distribution-fill ${item.tone || ""}" style="width:${Math.max((item.value / total) * 100, item.value ? 4 : 0)}%"></span>
-              </span>
-              <span class="distribution-count">${item.value}</span>
-            </div>
-          `).join("")}
+        <div class="pipeline-chart">
+          <div class="pipeline-total">
+            <b>${items.reduce((sum, item) => sum + item.value, 0)}</b>
+            <span>本期订单</span>
+          </div>
+          <div class="pipeline-bar" role="img" aria-label="订单状态分布">
+            ${items.map((item) => `
+              <button type="button" class="pipeline-segment ${item.tone}"
+                style="flex:${Math.max(item.value, 1)}"
+                data-action="chart-detail"
+                data-tip="${escapeHtml(item.label)}：${item.value} 单，占 ${Math.round(item.value / total * 100)}%"
+                title="${escapeHtml(item.label)}：${item.value} 单">
+                <span>${item.value}</span>
+              </button>
+            `).join("")}
+          </div>
+          <div class="pipeline-legend">
+            ${items.map((item) => `
+              <span><i style="background:${chartColors[item.tone] || chartColors.grey}"></i>${escapeHtml(item.label)} <b>${item.value}</b></span>
+            `).join("")}
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderAftersales(types, statuses, overdue) {
+    const statusTotal = Math.max(statuses.reduce((sum, item) => sum + item.value, 0), 1);
+    return `
+      <section class="card">
+        <div class="card-head">
+          <div class="card-title"><h2>售后分析</h2></div>
+          <span class="card-meta">${overdue} 单超过 3 天 SLA</span>
+        </div>
+        <div class="aftersale-chart-grid">
+          <div>
+            <div class="subchart-head"><b>售后类型</b><span>按单量占比</span></div>
+            ${renderDonut(types, (item) => item.value, "售后单", (value) => `${value} 单`)}
+          </div>
+          <div class="service-status-panel">
+            <div class="subchart-head"><b>处理状态</b><span>当前进度</span></div>
+            ${statuses.map((item) => `
+              <button type="button" class="service-status-row" data-action="chart-detail"
+                data-tip="${escapeHtml(item.label)}：${item.value} 单，占 ${Math.round(item.value / statusTotal * 100)}%">
+                <span>${escapeHtml(item.label)}</span>
+                <i><b class="${item.tone}" style="width:${Math.max((item.value / statusTotal) * 100, item.value ? 5 : 0)}%"></b></i>
+                <strong>${item.value}</strong>
+              </button>
+            `).join("")}
+          </div>
         </div>
       </section>
     `;
@@ -956,7 +1123,7 @@
         </div>
 
         <div class="stats-grid">
-          ${renderBarChart(data.trend)}
+          ${renderTrendCombo(data.trend)}
           ${renderFunnel(data.funnel)}
         </div>
 
@@ -964,12 +1131,12 @@
 
         <div class="stats-two">
           ${renderProductRanking(data.products)}
-          ${renderDistribution("商机阶段", "本期新建商机的当前阶段", data.dealStages)}
+          ${renderStageSteps(data.dealStages)}
         </div>
 
         <div class="stats-two">
-          ${renderDistribution("订单状态", "本期新建订单的当前进度", data.orderStatus)}
-          ${renderDistribution("售后类型", "本期新建售后单", data.serviceTypes)}
+          ${renderOrderPipeline(data.orderStatus)}
+          ${renderAftersales(data.serviceTypes, data.serviceStatus, data.summary.overdueAftersales)}
         </div>
 
         <details class="card methodology">
@@ -1267,6 +1434,11 @@
 
     if (action === "demo-jump") {
       showToast("演示版仅展示入口，不会跳转到真实订单");
+      return;
+    }
+
+    if (action === "chart-detail") {
+      showToast(actionEl.dataset.tip || "已选中图表数据");
       return;
     }
 
