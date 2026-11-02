@@ -47,6 +47,12 @@ class OrderDetailUiTest(unittest.TestCase):
         self.assertEqual(detail.count('class="order-logistics-fact"'), 5)
         self.assertNotIn("order-tags-label", detail)
         self.assertNotIn(">标签<", detail)
+        self.assertNotIn('<span class="badge ok">客户已确认</span>', detail)
+        self.assertLess(
+            detail.index('class="order-command-no"'),
+            detail.index('class="order-tags-row"'),
+        )
+        self.assertIn("flex: 0 1 auto;", self.css)
 
     def test_after_sale_metric_and_section_are_conditional(self):
         detail = self.source[
@@ -112,9 +118,9 @@ class OrderDetailUiTest(unittest.TestCase):
             "@media (max-width: 640px)",
         ):
             self.assertIn(marker, self.css)
-        self.assertIn('/crm/order-detail.css?v=20261102a2', self.index)
+        self.assertIn('/crm/order-detail.css?v=20261102a3', self.index)
         self.assertIn("'/crm/order-detail.css'", self.sw)
-        self.assertIn("const CACHE = 'crm-shell-v51';", self.sw)
+        self.assertIn("const CACHE = 'crm-shell-v52';", self.sw)
         self.assertGreaterEqual(self.css.count("grid-template-columns: repeat(5,"), 3)
 
     def test_pending_customer_confirmation_is_not_a_frontend_state(self):

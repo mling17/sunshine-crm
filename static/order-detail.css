@@ -148,32 +148,34 @@
 }
 
 .order-tags-row {
-  align-items: flex-start;
-  flex: 1 1 100%;
-  gap: 7px;
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .order-tags {
   display: flex;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   gap: 6px;
 }
 
 .order-tag {
   display: inline-flex;
-  min-height: 26px;
+  height: 22px;
   align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
+  gap: 4px;
+  padding: 0 7px;
   border: 1px solid #d5e2f4;
-  border-radius: 999px;
+  border-radius: 10px;
   background: #f2f7ff;
   color: #315f96;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .order-tag.is-auto {
@@ -183,20 +185,26 @@
 }
 
 .order-tag-remove {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
   padding: 0;
+  place-items: center;
   border: 0;
+  border-radius: 50%;
   background: transparent;
   color: currentColor;
   cursor: pointer;
   font: inherit;
+  font-size: 13px;
   opacity: .6;
 }
 
-.order-tag-remove:hover { opacity: 1; }
+.order-tag-remove:hover { background: #e3edf9; opacity: 1; }
 
 .order-tag-add {
-  width: 27px;
-  height: 27px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 1px dashed #a9bad0;
   border-radius: 50%;
@@ -204,7 +212,7 @@
   color: #55718f;
   cursor: pointer;
   line-height: 1;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .order-tag-add:hover {

@@ -385,11 +385,9 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
             '<div class="order-command-identity">' +
                 '<a class="crumb" href="#/orders">‹ 订单</a>' +
                 '<span class="order-command-no">' + esc(order.order_no) + '</span>' +
-                (order.customer_confirmed_at
-                    ? '<span class="badge ok">客户已确认</span>' : '') +
+                '<div class="order-tags-row">' + orderTagsHtml(deal) + '</div>' +
                 (afterSaleCount
                     ? '<span class="badge warn">售后数量 ' + afterSaleCount + '</span>' : '') +
-                '<div class="order-tags-row">' + orderTagsHtml(deal) + '</div>' +
             '</div>' +
             '<div class="order-command-state"><span>订单状态</span>' +
                 orderStatusBadge(order.status, order.status_label) + '</div>' +
