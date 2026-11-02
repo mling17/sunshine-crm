@@ -20,7 +20,7 @@ class OrderEditUiTest(unittest.TestCase):
         source = (ROOT / "static/views/orders.js").read_text(encoding="utf-8")
         edit = source[
             source.index("function openOrderEditModal"):
-            source.index("function showCustomerConfirmModal")
+            source.index("function openAftersaleModal")
         ]
         for marker in (
             "createOrderModal('修改订单')",

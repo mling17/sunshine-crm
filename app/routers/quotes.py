@@ -839,6 +839,12 @@ def void_quote(quote_id: int) -> QuoteOut:
             raise ApiError(409, "deal_locked", "商机已生成订单，不能作废报价单")
         if quote["status"] == "void":
             return _quote_out(conn, quote)
+        if quote["status"] == "confirmed":
+            raise ApiError(
+                409,
+                "quote_void_locked",
+                "客户已确认的报价单不能作废",
+            )
         conn.execute(
             "UPDATE deal_quotes SET status = 'void', updated_at = ? WHERE id = ?",
             (now_iso(), quote_id),
@@ -866,11 +872,17 @@ def delete_quote(quote_id: int) -> dict:
         deal = _deal(conn, quote["deal_id"])
         if deal["order_id"] is not None:
             raise ApiError(409, "deal_locked", "商机已生成订单，不能删除报价单")
+        if quote["status"] == "confirmed":
+            raise ApiError(
+                409,
+                "quote_delete_locked",
+                "客户已确认的报价单不能删除或作废",
+            )
         if quote["status"] not in ("draft", "void"):
             raise ApiError(
                 409,
                 "quote_delete_locked",
-                "「待客户确认」或「客户已确认」的报价单不能删除，请先作废",
+                "「待客户确认」的报价单不能删除，请先作废",
             )
         now = now_iso()
         deleted_detail = _quote_event_detail(conn, quote_id, "quote_deleted")

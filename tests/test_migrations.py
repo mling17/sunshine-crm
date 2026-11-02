@@ -273,6 +273,41 @@ class TestMigrationsIdempotent(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_confirmed_quote_restored_from_legacy_void_state(self):
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-11-02T10:00:00Z"
+        try:
+            customer_id = conn.execute(
+                "INSERT INTO customers (name, created_at, updated_at) VALUES (?, ?, ?)",
+                ("确认报价客户", now, now),
+            ).lastrowid
+            deal_id = conn.execute(
+                "INSERT INTO deals (customer_id, amount, stage, created_at, updated_at)"
+                " VALUES (?, 1000, 'won', ?, ?)",
+                (customer_id, now, now),
+            ).lastrowid
+            quote_id = conn.execute(
+                "INSERT INTO deal_quotes"
+                " (quote_no, deal_id, customer_id, title, status, amount,"
+                " confirmed_at, created_at, updated_at)"
+                " VALUES ('QT-LEGACY-VOID', ?, ?, '已确认报价', 'void', 1000, ?, ?, ?)",
+                (deal_id, customer_id, now, now, now),
+            ).lastrowid
+            conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_016'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        try:
+            status = conn.execute(
+                "SELECT status FROM deal_quotes WHERE id = ?", (quote_id,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(status, "confirmed")
+
     def test_domain_migration_runs_once(self):
         conn = sqlite3.connect(str(self.db))
         now = "2026-10-31T10:00:00Z"

@@ -134,9 +134,9 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("function openDealItemModal", self.deals)
         self.assertIn("function dealItemsCardHtml", self.deals)
         self.assertIn("/items", self.deals)
-        self.assertIn("showCustomerConfirmModal", self.orders)
-        self.assertIn("/confirm", self.orders)
-        self.assertIn("客户通过微信查看下单表", self.orders)
+        self.assertNotIn("showCustomerConfirmModal", self.orders)
+        self.assertNotIn("记录客户确认", self.orders)
+        self.assertNotIn("order-confirmation-note", self.orders)
 
     def test_quotation_upload_preview_and_followup_link_are_wired(self):
         for marker in (

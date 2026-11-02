@@ -32,7 +32,7 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_015"
+MIGRATION_VERSION = "v2_016"
 SCHEMA_USER_VERSION = 15
 
 
@@ -1059,6 +1059,25 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_015', datetime('now'), '订单物流联络人快照与订单自有信息可编辑')"),
     ("user_version v2_015", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 32. v2_016：客户已确认报价单保持确认态 ----------
+    ("deal_quotes.restore_confirmed_v2_016",
+     _once("v2_016", "deal_quotes"),
+     """
+     UPDATE deal_quotes
+     SET status = 'confirmed', updated_at = datetime('now')
+     WHERE status = 'void'
+       AND confirmed_at IS NOT NULL
+       AND is_delete = 0
+       AND NOT EXISTS (
+         SELECT 1 FROM deal_quotes current
+         WHERE current.deal_id = deal_quotes.deal_id
+           AND current.status = 'confirmed'
+           AND current.is_delete = 0
+       )
+     """),
+    ("schema_migrations v2_016", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_016', datetime('now'), '客户已确认报价单不再转为作废')"),
 ]
 
 

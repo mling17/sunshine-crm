@@ -10,7 +10,7 @@ var LOGISTICS_MODE_OPTIONS = [['free', '包邮'], ['agent', '代办'], ['self', 
 
 /* 下一步动作：状态 → [目标状态, 按钮文案] */
 var ORDER_NEXT_STEP = {
-    pending_confirmation: ['pending_payment', '记录客户确认'],
+    pending_confirmation: ['deposit_paid', '收定金'],
     pending_payment: ['deposit_paid', '收定金'],
     deposit_paid: ['producing', '开始生产'],
     producing: ['balance_paid', '收尾款'],
@@ -59,7 +59,20 @@ function populateCarrierContactSelects(carrierEl, contactEl, carriers, selectedC
 function orderStatusBadge(status, label) {
     var cls = status === 'completed' ? 'ok' :
         ((status === 'pending_confirmation' || status === 'pending_payment') ? 'warn' : 'muted');
-    return '<span class="badge ' + cls + '">' + esc(label || ORDER_STATUS_LABEL[status] || status) + '</span>';
+    var text = status === 'pending_confirmation'
+        ? '待支付'
+        : (label || ORDER_STATUS_LABEL[status] || status);
+    return '<span class="badge ' + cls + '">' + esc(text) + '</span>';
+}
+
+function orderVisibleStatuses() {
+    return ORDER_STATUS.filter(function (item) {
+        return item[0] !== 'pending_confirmation';
+    });
+}
+
+function orderUiStatusCode(status) {
+    return status === 'pending_confirmation' ? 'pending_payment' : status;
 }
 
 /* ---------------- 订单列表 ---------------- */
@@ -80,7 +93,7 @@ function viewOrders(root, route) {
         var orders = Array.isArray(res) ? res : ((res && res.items) || []);
         var total = Array.isArray(res) ? orders.length : ((res && res.total) || orders.length);
 
-        var tabs = [['', '全部']].concat(ORDER_STATUS);
+        var tabs = [['', '全部']].concat(orderVisibleStatuses());
         var tabHtml = tabs.map(function (t) {
             return '<button type="button" class="tab-btn' + (status === t[0] ? ' active' : '') +
                 '" data-status="' + t[0] + '">' + esc(t[1]) + '</button>';
@@ -329,9 +342,10 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
     var carrierName = (order.carrier && (order.carrier.name || order.carrier.company)) ||
         (deal && deal.carrier_name) || '未指定';
 
-    /* 进度条：走字典顺序（ORDER_STATUS 已由字典回填） */
-    var stepIdx = ORDER_STATUS.map(function (p) { return p[0]; }).indexOf(order.status);
-    var progressHtml = '<div class="progress-bar">' + ORDER_STATUS.map(function (p, i) {
+    /* 进度条：前端不再展示待客户确认，历史记录统一按待支付展示。 */
+    var visibleStatuses = orderVisibleStatuses();
+    var stepIdx = visibleStatuses.map(function (p) { return p[0]; }).indexOf(orderUiStatusCode(order.status));
+    var progressHtml = '<div class="progress-bar">' + visibleStatuses.map(function (p, i) {
         var cls = 'step' + (i === stepIdx ? ' active' : (i < stepIdx ? ' done' : ''));
         return '<div class="' + cls + '"><div class="step-label">' +
             esc(p[1]) + '</div></div>';
@@ -371,10 +385,11 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
             '<div class="order-command-identity">' +
                 '<a class="crumb" href="#/orders">‹ 订单</a>' +
                 '<span class="order-command-no">' + esc(order.order_no) + '</span>' +
-                '<span class="badge ' + (order.customer_confirmed_at ? 'ok' : 'warn') + '">' +
-                    (order.customer_confirmed_at ? '客户已确认' : '待客户确认') + '</span>' +
-                '<div class="order-tags-row"><span class="order-tags-label">标签</span>' +
-                    orderTagsHtml(deal) + '</div>' +
+                (order.customer_confirmed_at
+                    ? '<span class="badge ok">客户已确认</span>' : '') +
+                (afterSaleCount
+                    ? '<span class="badge warn">售后数量 ' + afterSaleCount + '</span>' : '') +
+                '<div class="order-tags-row">' + orderTagsHtml(deal) + '</div>' +
             '</div>' +
             '<div class="order-command-state"><span>订单状态</span>' +
                 orderStatusBadge(order.status, order.status_label) + '</div>' +
@@ -383,15 +398,17 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
             '<div class="order-metric order-metric-money">' +
                 '<span>订单金额</span><strong>' + money(totalAmount) + '</strong>' +
                 '<small>已收 ' + money(paidTotal) + ' · 未收 ' + money(unpaid) + '</small></div>' +
-            (afterSaleCount
-                ? '<div class="order-metric"><span>售后数量</span><strong>' + afterSaleCount +
-                  '</strong><small>已关联售后单</small></div>'
-                : '') +
             '<div class="order-metric"><span>物流方式</span><strong>' +
                 esc(order.logistics_mode_label || (isSelfPickup ? '自提' : '待确认')) +
                 '</strong><small>运费 ' + money(order.logistics_fee || 0) + '</small></div>' +
             '<div class="order-metric"><span>商机状态</span>' + opportunityStatus +
                 '<small>跟随报价单最高优先级</small></div>' +
+            '<div class="order-metric"><span>收付款</span><strong>' +
+                (unpaid ? '待收 ' + money(unpaid) : '已收清') +
+                '</strong><small>已收 ' + money(paidTotal) + '</small></div>' +
+            '<div class="order-metric order-metric-date"><span>创建时间</span><strong>' +
+                fmtDateTime(order.created_at).slice(0, 10) + '</strong><small>' +
+                esc(order.owner || '订单记录') + '</small></div>' +
         '</div>' +
         '<div class="order-context-grid">' +
             '<a class="order-context" href="#/customers/' + order.customer_id + '">' +
@@ -407,9 +424,21 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
             '<div class="order-context">' +
                 '<span>关联产品</span><b>' + esc(productSummary) + '</b><small>' +
                 (order.items || []).length + ' 项产品明细</small></div>' +
+            '<div class="order-context">' +
+                '<span>物流公司 / 联络人</span><b>' +
+                esc(isSelfPickup ? '客户自提' : carrierName) + '</b><small>' +
+                esc(isSelfPickup ? '无需物流公司联络人' :
+                    ((order.carrier_contact_name || '未指定联络人') +
+                    (order.carrier_contact_phone ? ' · ' + order.carrier_contact_phone : ''))) +
+                '</small></div>' +
         '</div>' +
         '<div class="order-logistics-strip">' +
-            '<div>' + logisticsContact + '</div>' +
+            '<div class="order-logistics-fact"><span>收件人</span><b>' +
+                esc(order.receiver_name || '—') + '</b></div>' +
+            '<div class="order-logistics-fact"><span>联系电话</span><b>' +
+                esc(order.receiver_phone || '—') + '</b></div>' +
+            '<div class="order-logistics-fact"><span>收货地址</span><b>' +
+                esc(order.receiver_address || '—') + '</b></div>' +
             '<div class="order-logistics-fact"><span>发货日期</span><b>' +
                 (shippedAt ? fmtDateTime(shippedAt).slice(0, 10) : '待发货') + '</b></div>' +
             '<div class="order-logistics-fact"><span>运单号</span><b>' +
@@ -417,15 +446,6 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
                 '</b></div>' +
         '</div>' +
         progressHtml +
-        '<div class="order-confirmation-note">' +
-            '<span class="badge ' + (order.customer_confirmed_at ? 'ok' : 'warn') + '">客户确认</span>' +
-            '<span>' + esc(order.customer_confirmation_note ||
-                (order.customer_confirmed_at
-                    ? '客户通过微信查看下单表并确认；优惠和物流等条件已同步确认'
-                    : '等待客户确认报价单与下单表')) + '</span>' +
-            (order.customer_confirmed_at
-                ? '<small>' + fmtDateTime(order.customer_confirmed_at) + '</small>' : '') +
-        '</div>' +
         '<div class="order-primary-actions" id="orderPrimaryActions"></div>' +
     '</section>';
 
@@ -535,11 +555,7 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
     var actionHost = $('#orderPrimaryActions', root);
     var next = ORDER_NEXT_STEP[order.status];
     var actionBtns = '';
-    if (order.status === 'pending_confirmation') {
-        actionBtns += '<button type="button" class="btn btn-primary" id="btnConfirmCustomer">' +
-            '记录客户确认</button>';
-    }
-    if (next && order.status !== 'pending_confirmation') {
+    if (next) {
         actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
     }
     actionBtns += '<button type="button" class="btn" id="btnOrderSummaryFollow">＋ 跟进</button>';
@@ -560,11 +576,6 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
             if (target === 'shipped') { showShipModal(order); return; }
             transitionOrder(order, target, {}, next[1]);
         });
-    }
-
-    var confirmBtn = $('#btnConfirmCustomer', root);
-    if (confirmBtn) {
-        confirmBtn.addEventListener('click', function () { showCustomerConfirmModal(order); });
     }
 
     ['#btnOrderFollow', '#btnOrderSummaryFollow'].forEach(function (selector) {
@@ -696,47 +707,6 @@ function openOrderEditModal(order) {
             btn.disabled = false;
         });
     });
-}
-
-/* ---------------- 客户确认：下单表在微信发出，截图/说明作为确认凭证 ---------------- */
-function showCustomerConfirmModal(order) {
-    var modal = createOrderModal('记录客户确认');
-    modal.querySelector('.modal-body').innerHTML =
-        '<form id="customerConfirmForm" class="form-modal form-grid" autocomplete="off">' +
-        '<p class="small muted">订单 ' + esc(order.order_no) + '。<br>' +
-        '请确认客户已经查看下单表，并通过微信确认了产品参数、优惠和物流等协商条件。</p>' +
-        '<div class="field"><label>确认说明</label>' +
-        '<textarea name="note" maxlength="500" rows="3" ' +
-        'placeholder="例如：客户已确认下单表；整单优惠 500 元；运费 300 元由我方收取"></textarea></div>' +
-        '<div class="field"><label>微信确认截图 / 下单表回传（最多 3 张）</label>' +
-        '<input type="file" name="screenshots" accept="image/*" multiple></div>' +
-        '<p class="small muted">确认后订单进入「待支付」，商机同时记录为成交。</p>' +
-        '<div class="form-actions"><button type="submit" class="btn btn-primary">' +
-        '客户已确认</button></div></form>';
-
-    var form = modal.querySelector('#customerConfirmForm');
-    form.addEventListener('submit', function (ev) {
-        ev.preventDefault();
-        if (!window.confirm('确认客户已经同意这张订单的产品、优惠和物流条件？')) { return; }
-        var btn = form.querySelector('button[type="submit"]');
-        btn.disabled = true;
-        var fd = new FormData();
-        var note = String(form.querySelector('[name="note"]').value || '').trim();
-        fd.append('note', note || '客户已通过微信确认下单表及协商条件');
-        var files = form.querySelector('[name="screenshots"]').files;
-        for (var i = 0; i < files.length && i < 3; i++) {
-            fd.append('screenshots', files[i]);
-        }
-        api('/orders/' + order.id + '/confirm', { method: 'POST', body: fd }).then(function () {
-            toast('已记录客户确认，订单进入待支付');
-            document.body.removeChild(modal);
-            return render();
-        }).catch(function (err) {
-            toast(err.message, true);
-            btn.disabled = false;
-        });
-    });
-    document.body.appendChild(modal);
 }
 
 /* ---------------- 添加售后（订单已完成才允许；售后单只能这么创建） ---------------- */
@@ -879,7 +849,12 @@ function showDepositPayment(order) {
         if (note) { fd.append('note', note); }
         var files = form.querySelector('[name="screenshots"]').files;
         for (var i = 0; i < files.length && i < 3; i++) { fd.append('screenshots', files[i]); }
-        api('/orders/' + order.id + '/pay-deposit', { method: 'POST', body: fd }).then(function () {
+        var ready = order.status === 'pending_confirmation'
+            ? api('/orders/' + order.id + '/confirm', { method: 'POST', body: new FormData() })
+            : Promise.resolve();
+        ready.then(function () {
+            return api('/orders/' + order.id + '/pay-deposit', { method: 'POST', body: fd });
+        }).then(function () {
             toast('定金已记录');
             document.body.removeChild(modal);
             return render();

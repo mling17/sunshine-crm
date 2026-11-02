@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class OrderDetailUiTest(unittest.TestCase):
     def setUp(self):
         self.source = (ROOT / "static/views/orders.js").read_text(encoding="utf-8")
+        self.deals = (ROOT / "static/views/deals.js").read_text(encoding="utf-8")
         self.css = (ROOT / "static/order-detail.css").read_text(encoding="utf-8")
         self.index = (ROOT / "static/index.html").read_text(encoding="utf-8")
         self.sw = (ROOT / "static/sw.js").read_text(encoding="utf-8")
@@ -34,9 +35,18 @@ class OrderDetailUiTest(unittest.TestCase):
             "运单号",
         ):
             self.assertIn(marker, detail)
-        self.assertLess(detail.index("订单金额"), detail.index("售后数量"))
-        self.assertLess(detail.index("售后数量"), detail.index("物流方式"))
+        self.assertIn("afterSaleCount", detail)
+        self.assertLess(detail.index("订单金额"), detail.index("物流方式"))
         self.assertLess(detail.index("物流方式"), detail.index("商机状态"))
+        self.assertEqual(
+            detail.count('<div class="order-metric">') +
+            detail.count('<div class="order-metric '),
+            5,
+        )
+        self.assertEqual(detail.count('class="order-context"'), 5)
+        self.assertEqual(detail.count('class="order-logistics-fact"'), 5)
+        self.assertNotIn("order-tags-label", detail)
+        self.assertNotIn(">标签<", detail)
 
     def test_after_sale_metric_and_section_are_conditional(self):
         detail = self.source[
@@ -102,9 +112,29 @@ class OrderDetailUiTest(unittest.TestCase):
             "@media (max-width: 640px)",
         ):
             self.assertIn(marker, self.css)
-        self.assertIn('/crm/order-detail.css?v=20261102a1', self.index)
+        self.assertIn('/crm/order-detail.css?v=20261102a2', self.index)
         self.assertIn("'/crm/order-detail.css'", self.sw)
-        self.assertIn("const CACHE = 'crm-shell-v50';", self.sw)
+        self.assertIn("const CACHE = 'crm-shell-v51';", self.sw)
+        self.assertGreaterEqual(self.css.count("grid-template-columns: repeat(5,"), 3)
+
+    def test_pending_customer_confirmation_is_not_a_frontend_state(self):
+        self.assertIn("return item[0] !== 'pending_confirmation';", self.source)
+        self.assertIn("return status === 'pending_confirmation' ? 'pending_payment' : status;", self.source)
+        self.assertNotIn("showCustomerConfirmModal", self.source)
+        self.assertNotIn("记录客户确认", self.source)
+        self.assertNotIn('class="order-confirmation-note"', self.source)
+        self.assertNotIn(".order-confirmation-note", self.css)
+
+    def test_confirmed_quote_has_no_void_action(self):
+        quote_cards = self.deals[
+            self.deals.index("function quoteCardsHtml"):
+            self.deals.index("function dealTagsHtml")
+        ]
+        self.assertIn(
+            "(quote.status === 'draft' || quote.status === 'pending')",
+            quote_cards,
+        )
+        self.assertNotIn("quote.status !== 'void'", quote_cards)
 
 
 if __name__ == "__main__":

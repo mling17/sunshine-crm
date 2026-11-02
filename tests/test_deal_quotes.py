@@ -244,7 +244,7 @@ class DealQuoteTest(ApiTestCase):
         source_after_order = next(
             item for item in quotes_after_order if item["id"] == quote["id"]
         )
-        self.assertEqual(source_after_order["status"], "void")
+        self.assertEqual(source_after_order["status"], "confirmed")
         self.assertEqual(source_after_order["order_id"], data["order"]["id"])
 
     def test_quote_confirmation_with_screenshot_returns_file_url(self):
@@ -576,19 +576,21 @@ class DealQuoteTest(ApiTestCase):
         )
 
         voided_confirmed = self.client.post(f"/api/crm/quotes/{quote['id']}/void")
-        self.assertEqual(voided_confirmed.status_code, 200, voided_confirmed.text)
+        self.assertEqual(voided_confirmed.status_code, 409, voided_confirmed.text)
+        self.assertEqual(voided_confirmed.json()["code"], "quote_void_locked")
         self.assertEqual(
             self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
-            "lost",
+            "won",
         )
 
         removed = self.client.delete(f"/api/crm/quotes/{second['id']}")
         self.assertEqual(removed.status_code, 200, removed.text)
         removed_confirmed = self.client.delete(f"/api/crm/quotes/{quote['id']}")
-        self.assertEqual(removed_confirmed.status_code, 200, removed_confirmed.text)
+        self.assertEqual(removed_confirmed.status_code, 409, removed_confirmed.text)
+        self.assertEqual(removed_confirmed.json()["code"], "quote_delete_locked")
         deal_after = self.client.get(f"/api/crm/deals/{deal['id']}").json()
-        self.assertEqual(deal_after["stage"], "quote")
-        self.assertEqual(deal_after["amount"], 0.0)
+        self.assertEqual(deal_after["stage"], "won")
+        self.assertEqual(deal_after["amount"], 25.5)
 
     def test_pending_and_confirmed_quotes_cannot_be_deleted(self):
         _, deal, quote = self._quote_with_item()
@@ -605,7 +607,7 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(confirmed_delete.status_code, 409, confirmed_delete.text)
         self.assertEqual(confirmed_delete.json()["code"], "quote_delete_locked")
 
-    def test_generating_order_voids_all_non_void_quotes(self):
+    def test_generating_order_voids_only_unconfirmed_quotes(self):
         _, deal, quote = self._quote_with_item()
         alternative = self.client.post(
             f"/api/crm/deals/{deal['id']}/quotes",
@@ -627,9 +629,10 @@ class DealQuoteTest(ApiTestCase):
 
         quotes = self.client.get(f"/api/crm/deals/{deal['id']}/quotes").json()
         self.assertTrue(quotes)
-        self.assertEqual({item["status"] for item in quotes}, {"void"})
         source = next(item for item in quotes if item["id"] == quote["id"])
         alternative = next(item for item in quotes if item["id"] == alternative["id"])
+        self.assertEqual(source["status"], "confirmed")
+        self.assertEqual(alternative["status"], "void")
         self.assertEqual(source["order_id"], order["id"])
         self.assertIsNone(alternative["order_id"])
 
@@ -642,7 +645,7 @@ class DealQuoteTest(ApiTestCase):
             {item["status_after"] for item in auto_void["detail"]["quotes"]},
             {"void"},
         )
-        self.assertIn(quote["quote_no"], auto_void["content"])
+        self.assertNotIn(quote["quote_no"], auto_void["content"])
         self.assertIn(alternative["quote_no"], auto_void["content"])
 
     def test_quote_name_is_required(self):

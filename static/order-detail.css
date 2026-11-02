@@ -86,7 +86,7 @@
 
 .order-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -138,6 +138,10 @@
   font-size: 24px;
 }
 
+.order-metric-date strong {
+  font-size: 15px;
+}
+
 .order-metric .badge {
   align-self: flex-start;
   margin: 2px 0;
@@ -148,14 +152,6 @@
   flex: 1 1 100%;
   gap: 7px;
   min-width: 0;
-}
-
-.order-tags-label {
-  flex: none;
-  padding-top: 4px;
-  color: var(--order-muted);
-  font-size: 11px;
-  font-weight: 600;
 }
 
 .order-tags {
@@ -218,7 +214,7 @@
 
 .order-context-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
 }
@@ -254,7 +250,7 @@ a.order-context:hover {
 
 .order-logistics-strip {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(115px, .7fr) minmax(150px, .9fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
 }
@@ -320,28 +316,6 @@ a.order-context:hover {
 .order-command-card .progress-bar .step {
   border-radius: 999px;
   padding: 6px 9px;
-}
-
-.order-confirmation-note {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 11px;
-  border-left: 3px solid #b8cbe2;
-  border-radius: 0 8px 8px 0;
-  background: #f7f9fc;
-  color: #45566b;
-  font-size: 12px;
-}
-
-.order-confirmation-note > span:nth-child(2) {
-  min-width: 0;
-  flex: 1;
-}
-
-.order-confirmation-note small {
-  color: #8390a1;
-  white-space: nowrap;
 }
 
 .order-primary-actions {
@@ -576,17 +550,14 @@ a.order-context:hover {
 }
 
 @media (max-width: 860px) {
+  .order-metrics,
   .order-context-grid,
   .order-payment-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .order-logistics-strip {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .order-logistics-strip > div:first-child {
-    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -630,22 +601,8 @@ a.order-context:hover {
     grid-template-columns: 1fr;
   }
 
-  .order-logistics-strip > div:first-child {
-    grid-column: auto;
-  }
-
   .order-primary-actions .btn {
     flex: 1 1 calc(50% - 6px);
-  }
-
-  .order-confirmation-note {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .order-confirmation-note small {
-    width: 100%;
-    padding-left: 2px;
   }
 
   .order-quote-items {

@@ -166,7 +166,8 @@ function quoteCardsHtml(deal, quotes) {
         if (quote.order_id) {
             actions += '<a class="btn btn-sm btn-primary" href="#/orders/' + quote.order_id + '">查看订单</a> ';
         }
-        if (!quote.order_id && quote.status !== 'void' && !deal.order_id) {
+        if (!quote.order_id && !deal.order_id &&
+            (quote.status === 'draft' || quote.status === 'pending')) {
             actions += '<button type="button" class="btn btn-sm btn-outline-danger" data-quote-void="' +
                 quote.id + '">作废</button> ';
         }

@@ -1004,14 +1004,14 @@ def _create_order(
 
     auto_void_quotes = conn.execute(
         "SELECT id, quote_no, status FROM deal_quotes"
-        " WHERE deal_id = ? AND is_delete = 0 AND status <> 'void'"
+        " WHERE deal_id = ? AND is_delete = 0 AND status NOT IN ('void', 'confirmed')"
         " ORDER BY id",
         (deal_id,),
     ).fetchall()
     if auto_void_quotes:
         conn.execute(
             "UPDATE deal_quotes SET status = 'void', updated_at = ?"
-            " WHERE deal_id = ? AND is_delete = 0 AND status <> 'void'",
+            " WHERE deal_id = ? AND is_delete = 0 AND status NOT IN ('void', 'confirmed')",
             (now, deal_id),
         )
         sync_pending_quote_tags(conn, deal_id)
@@ -1024,7 +1024,7 @@ def _create_order(
             deal_id=deal_id,
             quote_id=quote_id,
             content=(
-                f"生成订单 {order_no}，系统自动作废 "
+                f"生成订单 {order_no}，系统自动作废未确认报价单 "
                 + "、".join(row["quote_no"] for row in auto_void_quotes)
             ),
             detail={
