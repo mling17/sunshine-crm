@@ -26,8 +26,8 @@ class DealTagHeaderUiTest(unittest.TestCase):
         self.assertNotIn("flex: 1 1 100%", tags)
 
     def test_asset_versions_are_updated_for_header_layout(self):
-        self.assertIn('/crm/app.css?v=20261102a5', self.index)
-        self.assertIn("const CACHE = 'crm-shell-v53';", self.sw)
+        self.assertIn('/crm/app.css?v=20261102a6', self.index)
+        self.assertIn("const CACHE = 'crm-shell-v54';", self.sw)
 
 
 if __name__ == "__main__":

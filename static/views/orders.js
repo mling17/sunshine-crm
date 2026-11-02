@@ -557,7 +557,9 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
         actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
     }
     actionBtns += '<button type="button" class="btn" id="btnOrderSummaryFollow">＋ 跟进</button>';
-    actionBtns += '<button type="button" class="btn" id="btnEditOrder">修改订单</button>';
+    if (order.status !== 'completed') {
+        actionBtns += '<button type="button" class="btn" id="btnEditOrder">修改订单</button>';
+    }
     if (order.status === 'completed') {
         actionBtns += '<button type="button" class="btn" id="btnAddAftersaleTop">＋ 添加售后</button>';
     } else {

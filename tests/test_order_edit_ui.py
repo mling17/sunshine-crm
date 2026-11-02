@@ -9,11 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class OrderEditUiTest(unittest.TestCase):
-    def test_order_detail_exposes_edit_button_without_status_lock(self):
+    def test_completed_order_hides_edit_button(self):
         source = (ROOT / "static/views/orders.js").read_text(encoding="utf-8")
-        self.assertNotIn("ORDER_EDIT_LOCKED_STATUSES", source)
-        self.assertNotIn("订单已发货，不能再修改", source)
         self.assertIn("function canEditOrder(order)", source)
+        self.assertIn("if (order.status !== 'completed') {", source)
         self.assertIn("id=\"btnEditOrder\">修改订单</button>", source)
 
     def test_edit_modal_updates_all_order_owned_fields(self):
