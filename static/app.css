@@ -415,24 +415,26 @@
 }
 .deal-overview-name:hover { color: #1f5fbf; }
 .deal-tags {
-  display: flex;
-  flex: 1 1 100%;
+  display: inline-flex;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .deal-tag {
   display: inline-flex;
+  height: 22px;
   align-items: center;
   gap: 4px;
-  min-height: 26px;
-  padding: 3px 9px;
+  padding: 0 7px;
   border: 1px solid #dbe6f3;
-  border-radius: 999px;
+  border-radius: 10px;
   background: #f5f9fe;
   color: #4f6380;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 .deal-tag-system { background: #f1f5fa; color: #53677f; }
@@ -440,8 +442,8 @@
 .deal-tag-manual { border-color: #d5e2f4; background: #f2f7ff; color: #315f96; }
 .deal-tag-remove {
   display: inline-grid;
-  width: 17px;
-  height: 17px;
+  width: 14px;
+  height: 14px;
   padding: 0;
   place-items: center;
   border: 0;
@@ -449,13 +451,14 @@
   background: transparent;
   color: #6e7d90;
   cursor: pointer;
+  font-size: 13px;
   line-height: 1;
 }
 .deal-tag-remove:hover { background: #e3edf9; color: #b13646; }
 .deal-tag-add {
   display: inline-grid;
-  width: 27px;
-  height: 27px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   place-items: center;
   border: 1px dashed #aebfd3;
@@ -463,7 +466,7 @@
   background: #fff;
   color: #4c6683;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
 }
 .deal-tag-add:hover { border-style: solid; border-color: #5f82aa; background: #f4f8fd; color: #184e8a; }
