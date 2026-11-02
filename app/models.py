@@ -846,19 +846,13 @@ class OrderIn(BaseModel):
 
 
 class OrderUpdate(BaseModel):
-    """更新订单。"""
+    """更新订单（已发货前允许修改配送与备注）。"""
 
-    customer_id: Optional[int] = Field(default=None, gt=0)
-    deal_id: Optional[int] = Field(default=None, gt=0)
-    product_type: OptionalText = Field(default=None, max_length=32)
-    model: OptionalText = Field(default=None, max_length=64)
-    spec: SpecText = Field(default=None, max_length=200)
-    amount: Optional[float] = Field(default=None, ge=0)
-    owner: OptionalText = Field(default=None, max_length=32)
-    # 新增字段
-    paid_amount: Optional[float] = Field(default=None, ge=0)
-    carrier_id: Optional[int] = Field(default=None, gt=0)
     tracking_number: OptionalText = Field(default=None, max_length=64)
+    receiver_name: OptionalText = Field(default=None, max_length=32)
+    receiver_phone: OptionalText = Field(default=None, max_length=32)
+    receiver_address: OptionalText = Field(default=None, max_length=200)
+    note: OptionalText = Field(default=None, max_length=500)
 
 
 class OrderOut(BaseModel):
@@ -891,6 +885,10 @@ class OrderOut(BaseModel):
     paid_amount: float = 0.0
     carrier_id: int | None = None
     tracking_number: str | None = None
+    receiver_name: str | None = None
+    receiver_phone: str | None = None
+    receiver_address: str | None = None
+    note: str | None = None
     created_at: str
     updated_at: str
 
@@ -972,6 +970,7 @@ class OrderDetailOut(BaseModel):
     receiver_phone: str | None = None
     receiver_address: str | None = None
     tracking_no: str | None = None
+    note: str | None = None
     carrier_contacts: list[dict] = Field(default_factory=list)
     aftersales: list[dict] = Field(default_factory=list)
     deal: dict | None = None

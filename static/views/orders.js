@@ -19,6 +19,12 @@ var ORDER_NEXT_STEP = {
     shipped: ['completed', '确认收货']
 };
 
+var ORDER_EDIT_LOCKED_STATUSES = { shipped: true, completed: true };
+
+function canEditOrder(order) {
+    return !ORDER_EDIT_LOCKED_STATUSES[order && order.status];
+}
+
 function orderStatusBadge(status, label) {
     var cls = status === 'completed' ? 'ok' :
         ((status === 'pending_confirmation' || status === 'pending_payment') ? 'warn' : 'muted');
@@ -287,6 +293,12 @@ function viewOrderDetail(root, rawId) {
                 actionBtns += '<button type="button" class="btn btn-primary" id="btnNextAction">' + next[1] + '</button>';
             }
         }
+        if (canEditOrder(order)) {
+            actionBtns += '<button type="button" class="btn" id="btnEditOrder">修改订单</button>';
+        } else {
+            actionBtns += '<button type="button" class="btn" disabled ' +
+                'title="订单已发货，不能再修改">修改订单</button>';
+        }
         if (order.status === 'completed') {
             actionBtns += '<button type="button" class="btn" id="btnAddAftersale">＋ 添加售后</button>';
         } else {
@@ -368,6 +380,83 @@ function viewOrderDetail(root, rawId) {
 
         var addAsBtn = $('#btnAddAftersale', root);
         if (addAsBtn) { addAsBtn.addEventListener('click', function () { openAftersaleModal(order); }); }
+
+        var editOrderBtn = $('#btnEditOrder', root);
+        if (editOrderBtn) {
+            editOrderBtn.addEventListener('click', function () { openOrderEditModal(order); });
+        }
+    });
+}
+
+/* ---------------- 修改订单：已发货前可改配送信息、运单号和备注 ---------------- */
+function openOrderEditModal(order) {
+    if (!canEditOrder(order)) {
+        toast('订单已发货，不能再修改', true);
+        return;
+    }
+
+    var modal = createOrderModal('修改订单');
+    var selfDelivery = order.logistics_mode === 'self';
+    var shippingFields = selfDelivery
+        ? '<p class="small muted">当前为自提订单，不需要收货信息。</p>'
+        : '<div class="field"><label>收件人 *</label>' +
+          '<input name="receiver_name" maxlength="32" required value="' +
+          esc(order.receiver_name || '') + '"></div>' +
+          '<div class="field"><label>收货电话 *</label>' +
+          '<input name="receiver_phone" maxlength="32" inputmode="tel" required value="' +
+          esc(order.receiver_phone || '') + '"></div>' +
+          '<div class="field field-wide"><label>收货地址 *</label>' +
+          '<input name="receiver_address" maxlength="200" required value="' +
+          esc(order.receiver_address || '') + '"></div>';
+
+    modal.querySelector('.modal-body').innerHTML =
+        '<form id="orderEditForm" class="form-modal form-grid" autocomplete="off">' +
+        '<p class="small muted field-wide">订单 ' + esc(order.order_no) + ' · 物流方式：' +
+        esc(order.logistics_mode_label || '未填写') +
+        '。发货后将不能继续修改。</p>' +
+        shippingFields +
+        '<div class="field' + (selfDelivery ? ' field-wide' : '') + '"><label>运单号</label>' +
+        '<input name="tracking_number" maxlength="64" placeholder="可后补" value="' +
+        esc(order.tracking_number || order.tracking_no || '') + '"></div>' +
+        '<div class="field field-wide"><label>订单备注</label>' +
+        '<textarea name="note" maxlength="500" rows="3" placeholder="交付、安装或客户特别要求">' +
+        esc(order.note || '') + '</textarea></div>' +
+        '<div class="form-actions field-wide"><button type="button" class="btn modal-cancel">取消</button>' +
+        '<button type="submit" class="btn btn-primary">保存修改</button></div>' +
+        '</form>';
+
+    var form = $('#orderEditForm', modal);
+    modal.querySelector('.modal-cancel').addEventListener('click', function () {
+        if (modal.parentNode) { document.body.removeChild(modal); }
+    });
+    form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var payload = {
+            tracking_number: String(form.querySelector('[name="tracking_number"]').value || '').trim() || null,
+            note: String(form.querySelector('[name="note"]').value || '').trim() || null,
+            receiver_name: null,
+            receiver_phone: null,
+            receiver_address: null
+        };
+        if (!selfDelivery) {
+            payload.receiver_name = String(form.querySelector('[name="receiver_name"]').value || '').trim();
+            payload.receiver_phone = String(form.querySelector('[name="receiver_phone"]').value || '').trim();
+            payload.receiver_address = String(form.querySelector('[name="receiver_address"]').value || '').trim();
+            if (!payload.receiver_name || !payload.receiver_phone || !payload.receiver_address) {
+                toast('请填全收件人、收货电话和收货地址', true);
+                return;
+            }
+        }
+        var btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        api('/orders/' + order.id, { method: 'PUT', body: payload }).then(function () {
+            toast('订单已修改');
+            if (modal.parentNode) { document.body.removeChild(modal); }
+            return render();
+        }).catch(function (err) {
+            toast(err.message, true);
+            btn.disabled = false;
+        });
     });
 }
 

@@ -5,6 +5,8 @@ import unittest
 
 from tests._util import ApiTestCase
 
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+
 
 class OrderTimelineTest(ApiTestCase):
     def _order(self, amount: float = 10000.0, deposit: float = 3000.0):
@@ -68,6 +70,24 @@ class OrderTimelineTest(ApiTestCase):
         self.assertIn(again.status_code, (400, 409), again.text)
         self.assertIn(again.json()["code"], ("already_paid", "invalid_transition"))
 
+    def test_deposit_screenshot_keeps_order_detail_available(self):
+        order = self._order()
+        paid = self.client.post(
+            f"/api/crm/orders/{order['id']}/pay-deposit",
+            data={"amount": "3000"},
+            files={"screenshots": ("deposit.png", PNG, "image/png")},
+        )
+        self.assertEqual(paid.status_code, 200, paid.text)
+
+        detail = self.client.get(f"/api/crm/orders/{order['id']}")
+        self.assertEqual(detail.status_code, 200, detail.text)
+        attachments = detail.json()["attachments"]
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(
+            attachments[0]["url"],
+            f"/api/crm/attachments/{attachments[0]['id']}",
+        )
+
     def test_balance_requires_deposit_first(self):
         order = self._order()
         bad = self._pay_balance(order["id"], 7000.0)
@@ -119,6 +139,48 @@ class OrderTimelineTest(ApiTestCase):
         detail = self.client.get(f"/api/crm/orders/{order['id']}").json()
         self.assertIsNotNone(detail["deal"])
         self.assertEqual(detail["deal"]["stage"], "won")
+
+    def test_update_order_delivery_before_shipping_and_record_history(self):
+        order = self._order()
+        updated = self.client.put(
+            f"/api/crm/orders/{order['id']}",
+            json={
+                "receiver_name": "李接收",
+                "receiver_phone": "13900001111",
+                "receiver_address": "济南市历下区新地址 1 号",
+                "tracking_number": "SF-EDIT-001",
+                "note": "周六上午送货",
+            },
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["receiver_name"], "李接收")
+        self.assertEqual(updated.json()["tracking_number"], "SF-EDIT-001")
+
+        detail = self.client.get(f"/api/crm/orders/{order['id']}").json()
+        self.assertEqual(detail["receiver_phone"], "13900001111")
+        self.assertEqual(detail["note"], "周六上午送货")
+        latest = detail["status_log"][-1]
+        self.assertEqual(latest["event_type"], "address")
+        self.assertIn("修改订单", latest["note"])
+        self.assertIn("收件人", latest["note"])
+
+    def test_update_order_is_rejected_after_shipping(self):
+        order = self._order()
+        with self.db_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET status = 'shipped' WHERE id = ?",
+                (order["id"],),
+            )
+
+        resp = self.client.put(
+            f"/api/crm/orders/{order['id']}",
+            json={"receiver_address": "不应写入的新地址"},
+        )
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertEqual(resp.json()["code"], "order_locked")
+
+        detail = self.client.get(f"/api/crm/orders/{order['id']}").json()
+        self.assertEqual(detail["receiver_address"], "济南市历下区")
 
 
 if __name__ == "__main__":

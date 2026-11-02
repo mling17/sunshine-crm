@@ -36,6 +36,7 @@ class FormLayoutStructureTest(unittest.TestCase):
                 '<form id="shipForm" class="form-modal form-grid"',
                 '<form id="depositForm" class="form-modal form-grid"',
                 '<form id="balanceForm" class="form-modal form-grid"',
+                '<form id="orderEditForm" class="form-modal form-grid"',
             ],
             "logistics.js": '<form id="carrierFormEl" class="form-grid"',
             "followups.js": '<form id="fuForm" class="form-grid"',

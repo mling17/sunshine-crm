@@ -20,7 +20,7 @@ from app.models import (
     AttachmentOut, OrderStatusLogOut, OrderTransitionIn, OrderTransitionOut
 )
 from app.routers.auth import require_auth
-from app.timeline import add_entry, entries_for
+from app.timeline import add_entry, change_summary, entries_for
 from app.security import now_iso
 from app.errors import ApiError
 from app.services import read_images
@@ -50,6 +50,22 @@ STATUS_REQUIRED_FIELDS = {
     "ready_to_ship": ["logistics_mode", "carrier_id", "tracking_number"],
     "shipped": ["received_at"]
 }
+
+ORDER_EDIT_LOCKED_STATUSES = {"shipped", "completed"}
+ORDER_EDITABLE_COLUMNS = (
+    "tracking_no",
+    "receiver_name",
+    "receiver_phone",
+    "receiver_address",
+    "note",
+)
+
+
+def _attachment_out(row) -> AttachmentOut:
+    return AttachmentOut(
+        **dict(row),
+        url=f"/api/crm/attachments/{row['id']}",
+    )
 
 
 @router.get("/orders", response_model=list[OrderOut])
@@ -127,7 +143,7 @@ def get_order(order_id: int) -> OrderDetailOut:
             order_dict.get("logistics_mode")
         )
         order_dict['status_log'] = [OrderStatusLogOut(**dict(log)) for log in status_logs]
-        order_dict['attachments'] = [AttachmentOut(**dict(attach)) for attach in attachments]
+        order_dict['attachments'] = [_attachment_out(attach) for attach in attachments]
         order_dict['carrier'] = dict(carrier_row) if carrier_row else None
         order_dict["items"] = [
             dict(item)
@@ -139,7 +155,7 @@ def get_order(order_id: int) -> OrderDetailOut:
         ]
         order_dict["item_count"] = len(order_dict["items"])
         order_dict["confirmation_files"] = [
-            AttachmentOut(**dict(attach))
+            _attachment_out(attach)
             for attach in conn.execute(
                 "SELECT * FROM attachments"
                 " WHERE object_type = 'order_confirmation' AND object_id = ?"
@@ -198,28 +214,71 @@ def create_order() -> OrderOut:
 
 @router.put("/orders/{order_id}", response_model=OrderOut)
 def update_order(order_id: int, payload: OrderUpdate) -> OrderOut:
-    """更新订单"""
+    """更新订单配送信息与备注；已发货后锁定。"""
     with db_conn() as conn:
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="订单不存在")
-        
-        # 检查是否冻结（订单状态不允许修改）
-        # 实际上订单状态由状态转换函数控制，这里只允许修改非状态字段
+
+        if row["status"] in ORDER_EDIT_LOCKED_STATUSES:
+            raise ApiError(
+                status_code=409,
+                code="order_locked",
+                message="订单已发货，不能再修改",
+            )
+
         updates = payload.model_dump(exclude_unset=True)
-        
-        # 过滤掉状态字段
-        updates.pop('status', None)
-        
-        if updates:
-            assignments = ", ".join(f"{column} = ?" for column in updates)
+        db_updates = {
+            "tracking_no" if key == "tracking_number" else key: value
+            for key, value in updates.items()
+        }
+        after = dict(row)
+        after.update(db_updates)
+
+        if after.get("logistics_mode") != "self" and not all(
+            after.get(column)
+            for column in ("receiver_name", "receiver_phone", "receiver_address")
+        ):
+            raise ApiError(
+                status_code=400,
+                code="receiver_required",
+                message="请填全收件人、收货电话和收货地址",
+            )
+
+        changed_lines, changed_detail = change_summary(
+            dict(row), after, ORDER_EDITABLE_COLUMNS
+        )
+        if changed_lines:
+            assignments = ", ".join(f"{column} = ?" for column in db_updates)
             conn.execute(
                 f"UPDATE orders SET {assignments}, updated_at = ? WHERE id = ?",
-                [*updates.values(), now_iso(), order_id],
+                [*db_updates.values(), now_iso(), order_id],
             )
-        
+            event_type = (
+                "address"
+                if any(
+                    key in changed_detail
+                    for key in ("receiver_name", "receiver_phone", "receiver_address")
+                )
+                else "change"
+            )
+            conn.execute(
+                "INSERT INTO order_status_log"
+                " (order_id, from_status, to_status, event_type, note, detail, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    order_id,
+                    row["status"],
+                    row["status"],
+                    event_type,
+                    "修改订单：" + "；".join(changed_lines),
+                    json.dumps(changed_detail, ensure_ascii=False),
+                    now_iso(),
+                ),
+            )
+
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-    
+
     return OrderOut(**dict(row))
 
 

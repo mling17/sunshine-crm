@@ -48,6 +48,10 @@ FIELD_LABELS = {
     "deposit": "定金",
     "balance": "尾款",
     "drive_type": "手动/电动",
+    "tracking_no": "运单号",
+    "receiver_name": "收件人",
+    "receiver_phone": "收货电话",
+    "receiver_address": "收货地址",
 }
 
 #: 枚举字段在履历中显示中文，detail 仍保存原始值供程序使用。
