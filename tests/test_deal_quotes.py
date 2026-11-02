@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import unittest
+import zipfile
 from pathlib import Path
+
+from openpyxl import load_workbook
 
 from tests._util import ApiTestCase
 
@@ -11,6 +15,25 @@ from tests._util import ApiTestCase
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_FORM = ROOT / "app/data/product_forms/TS-003.xlsx"
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+
+
+def _form_with_updated_visible_text() -> bytes:
+    source = SAMPLE_FORM.read_bytes()
+    workbook = load_workbook(io.BytesIO(source), read_only=True, data_only=True)
+    target = workbook.worksheets[0]["A2"].value
+    workbook.close()
+    old = str(target).encode("utf-8")
+    new = (str(target) + "（更新）").encode("utf-8")
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(source)) as source_zip:
+        with zipfile.ZipFile(output, "w") as target_zip:
+            for info in source_zip.infolist():
+                content = source_zip.read(info.filename)
+                if info.filename == "xl/sharedStrings.xml":
+                    content = content.replace(old, new, 1)
+                target_zip.writestr(info, content)
+    return output.getvalue()
 
 
 class DealQuoteTest(ApiTestCase):
@@ -380,6 +403,58 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(changed_quote["items"][0]["amount"], 88.88)
         self.assertEqual(changed_quote["items"][0]["recognized_total"], 20.0)
         self.assertTrue(changed_quote["items"][0]["form_preview_url"])
+
+    def test_replaced_form_preview_uses_new_versioned_url(self):
+        _, _, quote = self._quote_with_item()
+        item = quote["items"][0]
+        old_preview_url = item["form_preview_url"]
+        old_preview = self.client.get(old_preview_url)
+        self.assertEqual(old_preview.status_code, 200, old_preview.text)
+
+        form_bytes = _form_with_updated_visible_text()
+
+        preview = self.client.post(
+            "/api/crm/quotes/form-preview",
+            data={"product_id": str(item["product_id"])},
+            files={
+                "form_file": (
+                    "更新后的下单表.xlsx",
+                    form_bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        preview_data = preview.json()
+
+        changed = self.client.put(
+            f"/api/crm/quotes/items/{item['id']}",
+            data={
+                "product_id": str(item["product_id"]),
+                "preview_token": preview_data["preview_token"],
+                "amount": "26.00",
+            },
+            files={
+                "form_file": (
+                    "更新后的下单表.xlsx",
+                    form_bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(changed.status_code, 200, changed.text)
+        changed_item = changed.json()["items"][0]
+        self.assertEqual(changed_item["amount"], 26.0)
+        self.assertNotEqual(changed_item["form_preview_url"], old_preview_url)
+        self.assertIn(
+            "v=" + preview_data["preview_token"],
+            changed_item["form_preview_url"],
+        )
+
+        new_preview = self.client.get(changed_item["form_preview_url"])
+        self.assertEqual(new_preview.status_code, 200, new_preview.text)
+        self.assertNotEqual(new_preview.content, old_preview.content)
+        self.assertIn("no-cache", new_preview.headers["cache-control"])
 
     def test_quote_priority_void_and_delete_refresh_deal_status(self):
         _, deal, quote = self._quote_with_item()

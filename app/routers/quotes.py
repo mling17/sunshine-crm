@@ -86,6 +86,17 @@ def _assert_editable(conn, quote_id: int):
     return quote, deal
 
 
+def _form_preview_url(data: dict) -> str | None:
+    preview_key = data.get("form_preview_storage_key")
+    if not preview_key or not resolve_upload_path(
+        preview_key, must_exist=False
+    ).is_file():
+        return None
+    url = f"/api/crm/quotes/items/{data['id']}/form-preview"
+    version = data.get("form_sha256")
+    return f"{url}?v={version}" if version else url
+
+
 def _item_out(conn, row) -> QuoteItemOut:
     data = dict(row)
     raw_content = data.pop("form_content_json", None)
@@ -105,12 +116,7 @@ def _item_out(conn, row) -> QuoteItemOut:
     data["form_url"] = (
         f"/api/crm/quotes/items/{data['id']}/form" if data["form_available"] else None
     )
-    preview_key = data.get("form_preview_storage_key")
-    data["form_preview_url"] = (
-        f"/api/crm/quotes/items/{data['id']}/form-preview"
-        if preview_key and resolve_upload_path(preview_key, must_exist=False).is_file()
-        else None
-    )
+    data["form_preview_url"] = _form_preview_url(data)
     data["template_url"] = (
         f"/api/crm/products/{data['product_id']}/form-file"
         if product and product["form_storage_key"]
@@ -221,12 +227,6 @@ def _quote_timeline_item(row) -> dict:
         data.get("form_storage_key")
         and resolve_upload_path(data["form_storage_key"], must_exist=False).is_file()
     )
-    preview_available = bool(
-        data.get("form_preview_storage_key")
-        and resolve_upload_path(
-            data["form_preview_storage_key"], must_exist=False
-        ).is_file()
-    )
     return {
         "id": int(data["id"]),
         "product_id": int(data["product_id"]),
@@ -247,11 +247,7 @@ def _quote_timeline_item(row) -> dict:
         "form_url": (
             f"/api/crm/quotes/items/{data['id']}/form" if form_available else None
         ),
-        "form_preview_url": (
-            f"/api/crm/quotes/items/{data['id']}/form-preview"
-            if preview_available
-            else None
-        ),
+        "form_preview_url": _form_preview_url(data),
         "a1_value": data.get("a1_value"),
         "amount_cell": data.get("amount_cell"),
         **_form_summary(data.get("form_content_json")),
@@ -1060,7 +1056,9 @@ def get_saved_form_preview(item_id: int) -> FileResponse:
         path,
         media_type="image/png",
         headers={
-            "Cache-Control": "private, max-age=86400",
+            # The item URL is stable across replacements; force revalidation so
+            # an unchanged URL can never keep showing the previous form image.
+            "Cache-Control": "private, no-cache, max-age=0",
             "X-Content-Type-Options": "nosniff",
         },
     )
