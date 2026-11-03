@@ -77,8 +77,8 @@ uvicorn app.main:app --host 127.0.0.1 --port 8010
 
 ## 部署要点
 
-1. 后端：`ops/crm-api.service` 拷到 `/etc/systemd/system/` → `systemctl daemon-reload && systemctl restart crm-api`
-2. 前端：`bash ops/deploy-frontend.sh`（把 `static/` 同步到 nginx 目录并自检）
+1. Docker：在项目根目录按 [`DEPLOYMENT.md`](DEPLOYMENT.md) 构建并启动，镜像可独立提供前端和 API
+2. 传统部署：后端用 `ops/crm-api.service`，前端用 `bash ops/deploy-frontend.sh`
 3. **改前端必须同步升版本号**：`static/index.html` 里所有 `?v=` 与 `static/sw.js` 的缓存名一起升，否则浏览器混版会让页面报 `dictOptions is not defined`（表现为「点按钮没反应」）
 4. 反向代理：`ops/nginx-crm-location.conf`（把 `/crm/` 静态与 `/crm/api/` → `127.0.0.1:8010` 一起配好）
 

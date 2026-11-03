@@ -1,144 +1,155 @@
-# CRM V2 部署文档
+# 天窗天幕 CRM · Docker 部署
 
-## 环境要求
+镜像内包含 FastAPI、静态前端和运行时目录，一个容器即可提供完整服务：
 
-- Python 3.10+
-- SQLite 3.35+
-- 512MB 内存（推荐 1GB）
+- 页面：`http://<服务器IP>:8010/crm/`
+- 健康检查：`http://<服务器IP>:8010/health`
+- 数据：SQLite 数据库、附件和备份统一保存在命名卷 `sunshine-crm-data`
 
-## 部署步骤
+## 1. 构建镜像
 
-### 1. 准备工作
-
-```bash
-# 进入项目目录
-cd /opt/data/crm
-
-# 创建必要的目录
-mkdir -p /opt/data/crm/uploads /opt/data/crm/backups
-```
-
-### 2. 构建 Docker 镜像
+在项目根目录（本文件所在目录）执行：
 
 ```bash
-# 构建镜像
-docker build -t crm-v2 .
-
-# 或者使用 docker-compose
-docker-compose build
+docker build --pull -t sunshine-crm:1.0.0 .
 ```
 
-### 3. 启动服务
+如果在 x86_64 Windows/macOS 上为 Ubuntu x86_64 服务器构建，可明确指定架构：
 
 ```bash
-# 使用 docker-compose 启动
-docker-compose up -d
-
-# 或者直接运行
-docker run -d \
-  --name crm-v2 \
-  -p 8010:8010 \
-  -v /opt/data/crm/crm.db:/opt/data/crm/crm.db \
-  -v /opt/data/crm/backups:/opt/data/crm/backups \
-  -v /opt/data/crm/uploads:/opt/data/crm/uploads \
-  -e ADMIN_USERNAME=chen \
-  -e ADMIN_PASSWORD=your_secure_password \
-  crm-v2
+docker build --pull --platform linux/amd64 -t sunshine-crm:1.0.0 .
 ```
 
-### 4. 数据库迁移
+## 2. 离线传输镜像
 
-首次启动或升级时会自动执行迁移：
+在构建机导出：
 
 ```bash
-# 查看迁移状态
-docker exec crm-v2 python3 -m app.migrations --db /opt/data/crm/crm.db
-
-# 手动执行迁移（如果需要）
-docker exec crm-v2 python3 -m app.migrations
+docker save sunshine-crm:1.0.0 | gzip -1 > sunshine-crm-1.0.0-amd64.tar.gz
 ```
 
-### 5. 验证部署
+把 `sunshine-crm-1.0.0-amd64.tar.gz` 和项目中的
+`docker-compose.yml`、`.env.example` 上传到 Ubuntu 服务器。服务器导入：
 
 ```bash
-# 检查服务状态
-curl http://localhost:8010/health
-
-# 检查 API 端点
-curl http://localhost:8010/api/crm/health
+gzip -dc sunshine-crm-1.0.0-amd64.tar.gz | docker load
 ```
 
-## 配置说明
+也可以把源码直接上传服务器，在服务器执行第 1 节的 `docker build`，不传输镜像文件。
 
-### 环境变量
+## 3. 启动
+
+Ubuntu 需要 Docker Engine 与 Compose 插件：
+
+```bash
+docker --version
+docker compose version
+```
+
+在 Compose 文件所在目录准备密钥：
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# 编辑 .env，至少把 ADMIN_PASSWORD 改为高强度密码
+docker compose up -d
+```
+
+首次启动会自动建表、执行数据库迁移，并在数据库没有用户时创建管理员。
+之后修改 `ADMIN_PASSWORD` 不会覆盖数据库里已有账号的密码。
+
+如果已有旧数据，先把备份恢复为命名卷内的
+`/opt/data/crm/crm.db` 和 `/opt/data/crm/uploads/`，再启动新容器。
+
+## 4. 验证
+
+```bash
+docker compose ps
+docker inspect --format '{{.State.Health.Status}}' sunshine-crm
+curl -fsS http://127.0.0.1:8010/health
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/crm/
+docker compose logs --tail=100 crm
+```
+
+预期容器状态为 `running`、健康状态为 `healthy`，两个 HTTP 检查均返回 `200`。
+
+## 5. 环境变量
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| CRM_DB | 数据库文件路径 | `/opt/data/crm/crm.db` |
-| CRM_UPLOADS | 上传文件目录 | `/opt/data/crm/uploads` |
-| ADMIN_USERNAME | 管理员用户名 | `chen` |
-| ADMIN_PASSWORD | 管理员密码 | `test123` |
+| `ADMIN_USERNAME` | 首次建库时的管理员账号 | `admin` |
+| `ADMIN_PASSWORD` | 首次建库时的管理员密码，Compose 强制要求设置 | 无 |
+| `CRM_IMAGE` | 镜像名 | `sunshine-crm:latest` |
+| `CRM_BIND_ADDRESS` | 宿主机监听地址 | `0.0.0.0` |
+| `CRM_PORT` | 宿主机端口 | `8010` |
+| `COOKIE_SECURE` | HTTPS 下设为 `1`；仅 HTTP 时保持 `0` | `0` |
+| `TZ` | 业务时区 | `Asia/Shanghai` |
 
-### 目录结构
+容器内部固定使用：
 
+```text
+CRM_DB=/opt/data/crm/crm.db
+CRM_UPLOADS=/opt/data/crm/uploads
 ```
-/opt/data/crm/
-├── crm.db              # 主数据库文件
-├── backups/            # 备份目录
-└── uploads/           # 上传文件目录
-```
 
-## 回滚说明
+如只允许本机 nginx 访问容器，可把 `.env` 中
+`CRM_BIND_ADDRESS` 改成 `127.0.0.1`。
 
-如需回滚到 V1 版本：
+## 6. 数据备份与恢复
+
+容器内已有备份脚本，可生成 SQLite 一致快照和附件归档：
 
 ```bash
-# 停止服务
-docker-compose down
-
-# 恢复备份（如果有）
-cp /opt/data/crm/backups/crm-pre-v2-*.db /opt/data/crm/crm.db
-
-# 切换到 V1 代码
-git checkout v1
-
-# 重启服务
-docker-compose up -d
+docker exec sunshine-crm python ops/backup.py --no-offsite
+docker cp sunshine-crm:/opt/data/crm/backups ./backups
 ```
 
-## 常见问题
+建议用宿主机 cron 每天执行一次，并把导出的 `backups/` 同步到另一台机器。
 
-### 1. 数据库权限问题
+恢复前先停止服务，并保留当前数据卷备份：
 
 ```bash
-# 确保目录权限正确
-sudo chown -R $(whoami) /opt/data/crm
-sudo chmod -R 755 /opt/data/crm
+docker compose stop crm
+docker cp sunshine-crm:/opt/data/crm ./crm-data-before-restore
 ```
 
-### 2. 端口占用
+将旧备份解包后，用 `docker cp` 覆盖停止状态容器内的
+`/opt/data/crm/crm.db` 与 `/opt/data/crm/uploads/`，再执行
+`docker compose up -d`。不要在服务运行时用 `docker cp` 或 `cp` 覆盖 SQLite 数据库。
+
+## 7. 升级与回滚
+
+升级：
 
 ```bash
+# 先把新版本构建/导入为新标签，例如 sunshine-crm:1.0.1
+sed -i 's#^CRM_IMAGE=.*#CRM_IMAGE=sunshine-crm:1.0.1#' .env
+docker compose up -d --no-build
+```
+
+回滚：
+
+```bash
+sed -i 's#^CRM_IMAGE=.*#CRM_IMAGE=sunshine-crm:1.0.0#' .env
+docker compose up -d --no-build
+```
+
+数据卷不会因替换镜像而删除。只有明确执行 `docker compose down -v` 才会删除数据卷。
+
+## 8. 常见问题
+
+```bash
+# 查看配置和环境变量是否符合预期
+docker compose config
+
+# 查看启动、迁移和错误日志
+docker compose logs -f crm
+
 # 检查端口占用
-lsof -i :8010
+sudo ss -lntp | grep ':8010'
 
-# 杀死占用进程
-kill -9 $(lsof -t -i :8010)
+# 确认数据卷位置
+docker volume inspect sunshine-crm-data
 ```
 
-### 3. 迁移失败
-
-```bash
-# 查看迁移日志
-docker logs crm-v2
-
-# 手动清理并重试
-docker exec crm-v2 rm -f /opt/data/crm/crm.db
-docker exec crm-v2 python3 -m app.migrations
-```
-
-## 监控指标
-
-- `/health` - 健康检查
-- 数据库大小监控
-- 上传文件目录空间监控
+HTTP 状态码为 `307` 且 Location 是 `/crm/` 时属于正常重定向。

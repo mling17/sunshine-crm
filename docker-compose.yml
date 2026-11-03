@@ -1,18 +1,32 @@
-version: '3.8'
-
 services:
   crm:
-    build: .
-    container_name: crm-v2
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${CRM_IMAGE:-sunshine-crm:latest}
+    container_name: sunshine-crm
+    init: true
     ports:
-      - "8000:8000"
+      - "${CRM_BIND_ADDRESS:-0.0.0.0}:${CRM_PORT:-8010}:8010"
     volumes:
-      - ./crm.db:/opt/data/crm/crm.db
-      - ./backups:/opt/data/crm/backups
-      - ./uploads:/opt/data/crm/uploads
+      - crm-data:/opt/data/crm
     environment:
-      - CRM_DB=/opt/data/crm/crm.db
-      - CRM_UPLOADS=/opt/data/crm/uploads
-      - ADMIN_USERNAME=chen
-      - ADMIN_PASSWORD=test123
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}"
+      CRM_DB: /opt/data/crm/crm.db
+      CRM_UPLOADS: /opt/data/crm/uploads
+      COOKIE_SECURE: "${COOKIE_SECURE:-0}"
+      TZ: "${TZ:-Asia/Shanghai}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
+    stop_grace_period: 15s
+
+volumes:
+  crm-data:
+    name: sunshine-crm-data

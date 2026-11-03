@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config.settings import settings
 from app.db import db_conn
@@ -86,6 +89,23 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="天窗天幕 CRM", version="1.0.0", lifespan=lifespan)
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+@app.middleware("http")
+async def serve_existing_crm_api_prefix(request: Request, call_next):
+    """兼容前端固定的 ``/crm/api/...`` 路径。
+
+    原部署由 nginx 去掉 ``/crm`` 前缀；独立容器没有 nginx，因此在 ASGI
+    路由前完成同一层重写，保证页面和 API 可由同一个镜像直接提供。
+    """
+    path = request.scope.get("path", "")
+    if path == "/crm/api" or path.startswith("/crm/api/"):
+        request.scope["path"] = path.removeprefix("/crm")
+        raw_path = request.scope.get("raw_path")
+        if raw_path:
+            request.scope["raw_path"] = raw_path.removeprefix(b"/crm")
+    return await call_next(request)
 
 # 与 learning_kb 保持一致（只为直连 8011 调试方便；生产走 nginx 同源代理）
 app.add_middleware(
@@ -121,3 +141,13 @@ app.include_router(aftersales.router)
 app.include_router(addresses.router)
 app.include_router(stats.router)
 app.include_router(dicts.router)
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/crm/")
+
+
+# 独立容器可直接访问 http://host:8010/crm/；nginx 部署仍可继续由 nginx
+# 提供静态文件，这里不会改变 /api/crm 接口。
+app.mount("/crm", StaticFiles(directory=STATIC_DIR, html=True), name="crm")
