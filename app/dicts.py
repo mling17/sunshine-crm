@@ -52,7 +52,7 @@ DICT_DESC = {
     "deal_stage":       "状态机：报价 → 待客户确认 → 成交 / 流失，只能改名",
     "order_status":     "状态机：8 态，只能改名/排序",
     "aftersale_status": "状态机：待处理 → 处理中 → 已完成",
-    "customer_type":    "个人 / 公司 / 其他，绑定「公司名是否必填」，只能改名",
+    "customer_type":    "个人 / 公司 / 其他，绑定「联系人是否必填」，只能改名",
     "follow_object":    "系统定义的跟进对象类型，只读",
 }
 

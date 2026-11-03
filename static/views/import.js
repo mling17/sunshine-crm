@@ -60,7 +60,7 @@ function viewImport(root) {
   if (result) {
     body += '<div class="card"><div class="card-head"><h2>导入结果</h2></div>' +
       '<p>成功导入 <b>' + result.imported + '</b> 行' +
-      (result.skipped ? '，跳过 <b>' + result.skipped + '</b> 行（姓名为空）' : '') +
+      (result.skipped ? '，跳过 <b>' + result.skipped + '</b> 行（名称为空）' : '') +
       '；文件共 ' + result.total_rows + ' 行。' +
       (result.mapping_reused ? '（本次复用了上次的列映射）' : '') + '</p>' +
       '<p><a href="#/customers">去看客户列表 →</a></p></div>';
@@ -116,7 +116,7 @@ function viewImport(root) {
         if (sel.value) { mapping[sel.getAttribute('data-imp-header')] = sel.value; }
       });
       var mapped = Object.keys(mapping).map(function (k) { return mapping[k]; });
-      if (mapped.indexOf('name') < 0) { toast('必须把某一列映射到「姓名」', true); return; }
+      if (mapped.indexOf('name') < 0) { toast('必须把某一列映射到「名称」', true); return; }
 
       commitBtn.disabled = true;
       commitBtn.textContent = '导入中…';

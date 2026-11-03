@@ -1,7 +1,7 @@
 """线索管理。
 
 设计要点（已拍板，别再改）：
-- 线索字段：手机号/微信号（至少填一个才能创建）、类型/公司名/来源/地区/标签/备注/意向等级
+- 线索字段：手机号/微信号（至少填一个才能创建）、类型/联系人/来源/地区/标签/备注/意向等级
 - 状态机：`新线索 → 跟进中 → 已转化 / 已失效`
 - 转化：建商机 + 新建客户（线索档案迁移）；去重：命中已有客户 → 提示
 - 跟进：挂在线索上的跟进记录（见 3.8 统一模型）
@@ -463,11 +463,11 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
         params = []
         field_updates: dict[str, object] = {}
         field_map = [
-            ("name", "姓名"),
+            ("name", "名称"),
             ("phone", "电话"),
             ("wechat", "微信"),
             ("lead_type", "类型"),
-            ("company_name", "公司名"),
+            ("company_name", "联系人"),
             ("source", "来源"),
             ("source_other", "来源补充"),
             ("location", "地区"),
@@ -477,7 +477,7 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
         ]
         sent_fields = lead_update.model_fields_set
         if "name" in sent_fields and lead_update.name is None:
-            raise ApiError(status_code=400, code="name_required", message="姓名不能为空")
+            raise ApiError(status_code=400, code="name_required", message="名称不能为空")
         if "source" in sent_fields and lead_update.source is None:
             raise ApiError(status_code=400, code="source_required", message="来源不能为空")
         for field, _label in field_map:

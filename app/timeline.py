@@ -24,12 +24,12 @@ KIND_LABELS = TIMELINE_TYPE_LABELS
 
 #: 编辑履历统一使用的中文字段名。未列出的字段仍会显示原名，避免静默漏记。
 FIELD_LABELS = {
-    "name": "姓名",
+    "name": "名称",
     "phone": "电话",
     "wechat": "微信",
     "lead_type": "类型",
     "customer_type": "客户类型",
-    "company_name": "公司名",
+    "company_name": "联系人",
     "source": "来源",
     "source_other": "来源补充",
     "location": "地区",

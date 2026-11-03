@@ -275,11 +275,13 @@ class LeadsTest(ApiTestCase):
         lead = self.create_lead(
             name="张伟",
             phone="13800138000",
+            company_name="旧联系人",
             note="旧备注",
             intent_level="medium",
         )
         resp = self.client.put(f"/api/crm/leads/{lead['id']}", json={
             "name": "张伟伟",
+            "company_name": "新联系人",
             "note": "新备注",
             "intent_level": "high",
         })
@@ -296,7 +298,8 @@ class LeadsTest(ApiTestCase):
         change = next(item for item in history if item["kind"] == "change")
         self.assertEqual(
             change["content"],
-            "姓名由「张伟」改为「张伟伟」；"
+            "名称由「张伟」改为「张伟伟」；"
+            "联系人由「旧联系人」改为「新联系人」；"
             "备注由「旧备注」改为「新备注」；"
             "意向由「中」改为「高」",
         )

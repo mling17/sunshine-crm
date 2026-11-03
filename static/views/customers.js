@@ -148,7 +148,7 @@ function openCustomerEdit(id, root) {
             ev.preventDefault();
             var btn = form.querySelector('button[type="submit"]');
             var payload = readCustomerForm(form);
-            if (!payload.name) { toast('姓名必填', true); return; }
+            if (!payload.name) { toast('名称必填', true); return; }
             btn.disabled = true;
             api('/customers/' + c.id, { method: 'PUT', body: payload }).then(function () {
                 invalidateCustomerIndex();
@@ -167,7 +167,7 @@ function customerFormHtml(customer) {
     var c = customer || {};
     return '<form class=\"customer-form form-grid\" autocomplete=\"off\">' +
         '<div class=\"row-2\">' +
-        '<div class=\"field\"><label>姓名 *</label>' +
+        '<div class=\"field\"><label>名称 *</label>' +
         '<input name=\"name\" type=\"text\" maxlength=\"64\" required value=\"' + esc(c.name || '') + '\"></div>' +
         '<div class=\"field\"><label>类型</label>' +
                 '<select name="customer_type">' + dictOptions('customer_type', c.customer_type || 'personal', '') + '</select></div>' +
@@ -178,7 +178,7 @@ function customerFormHtml(customer) {
         '<input name=\"wechat\" type=\"text\" maxlength=\"64\" value=\"' + esc(c.wechat || '') + '\"></div>' +
         '<div class=\"field\"><label>地区</label>' +
         '<input name=\"location\" type=\"text\" maxlength=\"200\" value=\"' + esc(c.location || '') + '\"></div>' +
-        '<div class=\"field\"><label>公司名</label>' +
+        '<div class=\"field\"><label>联系人</label>' +
         '<input name=\"company_name\" type=\"text\" maxlength=\"100\" value=\"' + esc(c.company_name || '') + '\"></div>' +
         '<div class=\"field\"><label>来源</label>' +
                 '<select name="source">' + dictOptions('customer_source', c.source, '请选择') + '</select></div>' +
@@ -186,10 +186,10 @@ function customerFormHtml(customer) {
         '<input name=\"source_other\" type=\"text\" maxlength=\"100\" value=\"' + esc(c.source_other || '') + '\"></div>' +
         '<div class=\"field\"><label>意向</label>' +
                 '<select name="intent_level">' + dictOptions('intent_level', c.intent_level || 'medium', '') + '</select></div>' +
-        '<div class=\"field\"><label>备注</label>' +
-        '<textarea name=\"note\" maxlength=\"500\">' + esc(c.note || '') + '</textarea></div>' +
         '<div class=\"field\"><label>标签（逗号分隔，如：重点、转介绍）</label>' +
         '<input name=\"tags\" type=\"text\" maxlength=\"400\" value=\"' + esc((c.tags || []).join('、')) + '\"></div>' +
+        '<div class=\"field\"><label>备注</label>' +
+        '<textarea name=\"note\" maxlength=\"500\">' + esc(c.note || '') + '</textarea></div>' +
         '<div class=\"form-actions\"><button type=\"submit\" class=\"btn btn-primary\">保存</button></div>' +
         '</form>';
 }
@@ -271,7 +271,7 @@ function viewCustomerDetail(root, rawId) {
             dealHtml +
             '</div>';
 
-        var contactParts = [c.primary_contact_name, c.primary_contact_phone,
+        var contactParts = [c.company_name, c.primary_contact_name, c.primary_contact_phone,
             c.primary_contact_wechat ? '微信 ' + c.primary_contact_wechat : ''].filter(Boolean);
         var actions =
             '<button type=\"button\" class=\"btn btn-sm\" id=\"toggleEditCustomer\">编辑客户</button>' +
@@ -293,7 +293,6 @@ function viewCustomerDetail(root, rawId) {
                 ['电话', c.phone || '—'],
                 ['微信', c.wechat || '—'],
                 ['地区', c.location || '—'],
-                ['公司名', c.company_name || '—'],
                 ['联系人', contactParts.join(' · ') || '—'],
                 ['来源', c.source ? (SOURCE_LABELS[c.source] || c.source) : '—'],
                 ['意向', c.intent_level ? (INTENT_LABELS[c.intent_level] || c.intent_level) : '—'],

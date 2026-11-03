@@ -49,7 +49,7 @@ router = APIRouter(
 
 #: 系统字段（唯一来源：校验、下拉、提示都从这里派生）
 FIELD_LABELS: dict[str, str] = {
-    "name": "姓名",
+    "name": "名称",
     "customer_type": "类型",
     "phone": "电话",
     "wechat": "微信",
@@ -64,6 +64,7 @@ SYSTEM_FIELDS = [
 
 #: 表头 → 系统字段的猜测表（只是建议值，前端仍可手改）
 HEADER_ALIASES: dict[str, str] = {
+    "名称": "name",
     "姓名": "name",
     "名字": "name",
     "客户姓名": "name",
@@ -290,7 +291,7 @@ def _normalize_mapping(raw: dict | None, headers: list[str]) -> dict[str, str]:
     if not isinstance(raw, dict) or not raw:
         raise HTTPException(
             status_code=400,
-            detail="请先做列映射：把 CSV 的列对应到系统字段（至少「姓名」）",
+            detail="请先做列映射：把 CSV 的列对应到系统字段（至少「名称」）",
         )
 
     mapping: dict[str, str] = {}
@@ -313,7 +314,7 @@ def _normalize_mapping(raw: dict | None, headers: list[str]) -> dict[str, str]:
         )
     if "name" not in mapping.values():
         raise HTTPException(
-            status_code=400, detail="必须把某一列映射到「姓名」，否则无法建客户"
+            status_code=400, detail="必须把某一列映射到「名称」，否则无法建客户"
         )
     return mapping
 
@@ -470,7 +471,7 @@ def download_leads_template() -> Response:
         str(item.get("label") or "") for item in type_records
     )
     rows = [
-        ["姓名", "类型", "电话", "微信", "地区", "来源", "备注"],
+        ["名称", "类型", "电话", "微信", "地区", "来源", "备注"],
         [
             "张三",
             personal_label,
@@ -499,7 +500,7 @@ def download_leads_template() -> Response:
             "",
             "填写说明：来源只能填写 " + allowed + "；类型只能填写 "
             + allowed_types + "，留空默认为" + other_label
-            + "。本行姓名为空，导入时会自动跳过。",
+            + "。本行名称为空，导入时会自动跳过。",
         ],
     ]
     output = io.StringIO(newline="")
@@ -601,7 +602,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
             if last_mapping is None:
                 raise HTTPException(
                     status_code=400,
-                    detail="还没有可复用的映射，请先做列映射（至少「姓名」）",
+                    detail="还没有可复用的映射，请先做列映射（至少「名称」）",
                 )
             mapping = _normalize_mapping(last_mapping, parsed.headers)
             mapping_reused = True

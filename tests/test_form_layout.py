@@ -181,6 +181,33 @@ class FormLayoutStructureTest(unittest.TestCase):
         mobile = self.css.split("@media (max-width: 640px)", 2)[-1]
         self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", mobile)
 
+    def test_lead_and_customer_use_name_and_contact_labels(self):
+        for filename in ("leads.js", "customers.js"):
+            source = self.views[filename]
+            with self.subTest(filename=filename):
+                self.assertIn("<label>名称 *</label>", source)
+                self.assertIn("<label>联系人</label>", source)
+                self.assertNotIn("<label>姓名 *</label>", source)
+                self.assertNotIn("<label>公司名</label>", source)
+
+    def test_customer_edit_tags_are_placed_to_the_right_of_intent(self):
+        source = self.views["customers.js"]
+        intent_pos = source.index('<div class="field"><label>意向</label>')
+        tags_pos = source.index('<div class="field"><label>标签（逗号分隔')
+        note_pos = source.index('<div class="field"><label>备注</label>')
+
+        self.assertLess(intent_pos, tags_pos)
+        self.assertLess(tags_pos, note_pos)
+        self.assertIn(".form-grid > .field", self.css)
+        self.assertIn("grid-column: auto;", self.css)
+
+    def test_customer_detail_has_one_contact_information_row(self):
+        source = self.views["customers.js"]
+        detail = source[source.index("function viewCustomerDetail"):]
+
+        self.assertEqual(detail.count("['联系人',"), 1)
+        self.assertIn("var contactParts = [c.company_name, c.primary_contact_name", detail)
+
     def test_product_creation_uses_generated_code_and_order_form_import(self):
         products = self.views["products.js"]
         for marker in (

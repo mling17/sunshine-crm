@@ -30,7 +30,7 @@ function viewLeads(root) {
         '<button type="button" class="btn btn-sm" id="btnImportLead">⇪ 批量导入</button>' +
         '</div></div>' +
         '<div class="searchbar">' +
-        '<input id="leadSearch" type="search" placeholder="搜姓名 / 电话 / 微信 / 地区" autocomplete="off" value="' + esc(st.q) + '">' +
+        '<input id="leadSearch" type="search" placeholder="搜名称 / 电话 / 微信 / 地区" autocomplete="off" value="' + esc(st.q) + '">' +
         '<button type="button" class="btn" id="leadSearchBtn">搜索</button>' +
         '</div>' +
         '<div class="tabs" id="leadTabs">' + tabHtml + '</div>' +
@@ -186,7 +186,7 @@ function leadFormHtml(lead) {
     var l = lead || {};
     return '<form class=\"lead-form form-grid\" autocomplete=\"off\">' +
         '<div class=\"row-2\">' +
-        '<div class=\"field\"><label>姓名 *</label>' +
+        '<div class=\"field\"><label>名称 *</label>' +
         '<input name=\"name\" type=\"text\" maxlength=\"64\" required value=\"' + esc(l.name || '') + '\"></div>' +
         '<div class=\"field\"><label>类型</label>' +
                 '<select name="lead_type">' + dictOptions('customer_type', l.lead_type || 'company') + '</select></div>' +
@@ -198,7 +198,7 @@ function leadFormHtml(lead) {
         '<input name=\"wechat\" type=\"text\" maxlength=\"64\" value=\"' + esc(l.wechat || '') + '\"></div>' +
         '</div>' +
         '<div class=\"row-2\">' +
-        '<div class=\"field\"><label>公司名</label>' +
+        '<div class=\"field\"><label>联系人</label>' +
         '<input name=\"company_name\" type=\"text\" maxlength=\"100\" value=\"' + esc(l.company_name || '') + '\"></div>' +
         '<div class=\"field\"><label>地区</label>' +
         '<input name=\"location\" type=\"text\" maxlength=\"200\" value=\"' + esc(l.location || '') + '\" placeholder=\"省份.城市\"></div>' +
@@ -285,7 +285,7 @@ function openLeadFormModal(root, lead) {
         ev.preventDefault();
         var payload = readLeadForm(form);
         if (!payload.name && !payload.phone && !payload.wechat) {
-            toast('姓名、手机或微信至少填一项', true);
+            toast('名称、手机或微信至少填一项', true);
             return;
         }
         /* 来源是后端必填（数据字典 customer_source），别让它以 400 的形式回来 */
@@ -397,7 +397,7 @@ function viewLeadDetail(root, rawId) {
                 ['地区', l.location],
                 ['微信号', l.wechat],
                 ['联系方式', l.phone],
-                ['公司名', l.company_name],
+                ['联系人', l.company_name],
                 ['建档时间', fmtDateTime(l.created_at)],
                 ['最近更新', fmtDateTime(l.updated_at)],
                 ['备注', l.note],
@@ -589,10 +589,10 @@ function showDuplicateHintModal(hint) {
  * demo 里那两颗按钮是假导入；这里是真链路：
  *   上传 CSV → POST /import/preview（表头 + 前 5 行 + 建议列映射，文件被后端缓存成 file_ref）
  *   → 核对/手改列映射 → POST /import/commit（file_ref + column_mapping）→ 写 customers 表。
- * 模板表头必须能命中后端 csvimport.HEADER_ALIASES 才会自动映射（姓名/电话/微信/地区/备注）。
+ * 模板表头必须能命中后端 csvimport.HEADER_ALIASES 才会自动映射（名称/电话/微信/地区/备注）。
  */
 var IMPORT_FIELDS_FALLBACK = [
-    { key: 'name', label: '姓名', required: true },
+    { key: 'name', label: '名称', required: true },
     { key: 'phone', label: '电话', required: false },
     { key: 'wechat', label: '微信', required: false },
     { key: 'location', label: '地区', required: false },
@@ -681,7 +681,7 @@ function openLeadImportModal(root) {
         '<button type="button" class="btn btn-link modal-close">×</button></div>' +
         '<div class="modal-body">' +
         '<ol class="small muted" style="padding-left:18px;line-height:1.9;margin-top:0">' +
-        '<li>下载模板 → 按列填好（<b>姓名必填</b>，电话和微信至少一个，来源必填）</li>' +
+        '<li>下载模板 → 按列填好（<b>名称必填</b>，电话和微信至少一个，来源必填）</li>' +
         '<li>模板已做成「全文本」格式（不会把手机号变成 1.38E+10）；填完另存为 CSV（逗号分隔）再上传</li>' +
         '<li>上传 → 核对列映射和前 5 行 → 确认导入（写进「线索池」）</li>' +
         '</ol>' +
@@ -712,13 +712,13 @@ function openLeadImportModal(root) {
         return mapping;
     }
 
-    /* 「姓名」必须映射；同一字段不能被两列同时占用（后端以字段为 key 建索引，会互相覆盖） */
+    /* 「名称」必须映射；同一字段不能被两列同时占用（后端以字段为 key 建索引，会互相覆盖） */
     function refreshGoState() {
         var mapping = readMapping();
         var used = Object.keys(mapping).map(function (k) { return mapping[k]; });
         var dup = used.filter(function (v, i) { return used.indexOf(v) !== i; });
         var msg = '';
-        if (used.indexOf('name') < 0) { msg = '必须把某一列映射到「姓名 *」'; }
+        if (used.indexOf('name') < 0) { msg = '必须把某一列映射到「名称 *」'; }
         else if (used.indexOf('source') < 0) { msg = '必须把某一列映射到「来源 *」'; }
         else if (dup.length) { msg = '同一字段被多列占用：' + dup.join('、'); }
         else if (pv && pv.file_ref && !pv.total_rows) { msg = '文件里只有表头，没有数据行'; }
@@ -778,7 +778,7 @@ function openLeadImportModal(root) {
             state.filters.status = '';
             state.filters.page = 1;
             var summary = '导入完成：成功 ' + res.imported + ' 行';
-            if (res.skipped) { summary += '，空姓名跳过 ' + res.skipped + ' 行'; }
+            if (res.skipped) { summary += '，空名称跳过 ' + res.skipped + ' 行'; }
             toast(summary);
             if (location.hash === '#/leads') { render(); }
             else { navigate('#/leads'); }

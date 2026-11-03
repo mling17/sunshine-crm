@@ -78,6 +78,15 @@ class CsvImportTest(ApiTestCase):
         self.assertRegex(body["file_ref"], r"^[0-9a-f]{32}$")
         self.assertIsNone(body["last_mapping"])
 
+    def test_preview_recognizes_name_header_and_uses_name_field_label(self):
+        resp = self.preview("名称,电话\n张伟,13800138000\n".encode("utf-8"))
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+
+        self.assertEqual(body["suggested_mapping"], {"名称": "name", "电话": "phone"})
+        name_field = next(field for field in body["system_fields"] if field["key"] == "name")
+        self.assertEqual(name_field["label"], "名称")
+
     def test_preview_decodes_gbk(self):
         resp = self.preview(CSV_GBK)
         self.assertEqual(resp.status_code, 200, resp.text)
@@ -220,7 +229,7 @@ class CsvImportTest(ApiTestCase):
             file_ref=preview["file_ref"], column_mapping={"电话": "phone"}
         )
         self.assertEqual(resp.status_code, 400, resp.text)
-        self.assertIn("姓名", resp.json()["detail"])
+        self.assertIn("名称", resp.json()["detail"])
 
     def test_commit_rejects_unknown_target_field(self):
         preview = self.preview().json()
@@ -419,7 +428,7 @@ class LeadCsvImportTest(ApiTestCase):
         template_rows = list(csv.reader(io.StringIO(first_text)))
         self.assertEqual(
             template_rows[0],
-            ['="姓名"', '="类型"', '="电话"', '="微信"',
+            ['="名称"', '="类型"', '="电话"', '="微信"',
              '="地区"', '="来源"', '="备注"'],
         )
         self.assertTrue(

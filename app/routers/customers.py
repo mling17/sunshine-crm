@@ -144,7 +144,7 @@ def _to_out(row, tags: list[str] | None = None) -> CustomerOut:
 
 @router.get("/customers", response_model=CustomerListOut)
 def list_customers(
-    search: str | None = Query(default=None, max_length=64, description="姓名/电话/地区模糊匹配"),
+    search: str | None = Query(default=None, max_length=64, description="名称/电话/地区模糊匹配"),
     tag: str | None = Query(default=None, max_length=32, description="按标签名精确筛选"),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
