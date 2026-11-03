@@ -392,6 +392,228 @@ function filesCardHtml(files, emptyText) {
     }).join('') + '</div></div>';
 }
 
+var FOLLOW_PHRASE_OBJECT_LABELS = {
+  lead: '线索',
+  customer: '客户',
+  deal: '商机',
+  order: '订单',
+  aftersale: '售后'
+};
+
+function followPhrasePanelHtml(objectType) {
+  if (!objectType || !FOLLOW_PHRASE_OBJECT_LABELS[objectType]) { return ''; }
+  var typeLabel = FOLLOW_PHRASE_OBJECT_LABELS[objectType];
+  return '<div class="follow-phrase-panel" data-follow-phrases>' +
+    '<div class="follow-phrase-head">' +
+      '<div class="follow-phrase-title"><strong>常用短语</strong>' +
+        '<span class="small muted">' + esc(typeLabel) + '专用</span></div>' +
+      '<button type="button" class="btn-link follow-phrase-manage" id="fuPhraseManage"' +
+        ' aria-expanded="false" aria-controls="fuPhraseManager">管理短语</button>' +
+    '</div>' +
+    '<span class="sr-only" id="fuPhraseStatus" role="status" aria-live="polite"></span>' +
+    '<div class="follow-phrase-chips" id="fuPhraseChips">' +
+      '<span class="small muted">正在加载…</span></div>' +
+    '<div class="follow-phrase-manager" id="fuPhraseManager" hidden>' +
+      '<label for="fuPhraseInput">新增' + esc(typeLabel) + '短语</label>' +
+      '<div class="follow-phrase-add">' +
+        '<input id="fuPhraseInput" type="text" maxlength="200" autocomplete="off"' +
+          ' placeholder="例如：已发送报价，等待客户确认">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="fuPhraseAdd">添加</button>' +
+      '</div>' +
+      '<p class="small muted follow-phrase-error" id="fuPhraseError" hidden></p>' +
+      '<div class="follow-phrase-manage-list" id="fuPhraseManageList"></div>' +
+      '<p class="small muted follow-phrase-tip">点击上方短语会插入当前光标位置；删除短语不会改动已保存的跟进。</p>' +
+    '</div>' +
+  '</div>';
+}
+
+function bindFollowPhrasePanel(modal, objectType, textarea) {
+  if (!objectType || !FOLLOW_PHRASE_OBJECT_LABELS[objectType]) { return; }
+  var chips = modal.querySelector('#fuPhraseChips');
+  var statusEl = modal.querySelector('#fuPhraseStatus');
+  var manageBtn = modal.querySelector('#fuPhraseManage');
+  var manager = modal.querySelector('#fuPhraseManager');
+  var manageList = modal.querySelector('#fuPhraseManageList');
+  var phraseInput = modal.querySelector('#fuPhraseInput');
+  var addBtn = modal.querySelector('#fuPhraseAdd');
+  var errorEl = modal.querySelector('#fuPhraseError');
+  var phrases = [];
+  var lastSelection = {
+    start: textarea.value.length,
+    end: textarea.value.length
+  };
+
+  function rememberSelection() {
+    lastSelection.start = textarea.selectionStart == null
+      ? textarea.value.length : textarea.selectionStart;
+    lastSelection.end = textarea.selectionEnd == null
+      ? lastSelection.start : textarea.selectionEnd;
+  }
+
+  ['click', 'keyup', 'select', 'input', 'focus'].forEach(function (name) {
+    textarea.addEventListener(name, rememberSelection);
+  });
+
+  function showError(message) {
+    if (!message) {
+      errorEl.hidden = true;
+      errorEl.textContent = '';
+      return;
+    }
+    errorEl.textContent = message;
+    errorEl.hidden = false;
+  }
+
+  function renderPhrases() {
+    if (!phrases.length) {
+      chips.innerHTML = '<span class="small muted">还没有短语，点“管理短语”添加。</span>';
+      manageList.innerHTML = '<p class="small muted">当前短语集为空。</p>';
+      return;
+    }
+    chips.innerHTML = phrases.map(function (phrase) {
+      return '<button type="button" class="follow-phrase-chip" data-phrase-id="' +
+        phrase.id + '" title="插入：' + esc(phrase.content) + '">' +
+        esc(phrase.content) + '</button>';
+    }).join('');
+    manageList.innerHTML = phrases.map(function (phrase) {
+      return '<div class="follow-phrase-manage-row">' +
+        '<span>' + esc(phrase.content) + '</span>' +
+        '<button type="button" class="btn-link danger" data-phrase-delete="' +
+          phrase.id + '" aria-label="删除短语：' + esc(phrase.content) + '">删除</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  function loadPhrases() {
+    chips.innerHTML = '<span class="small muted">正在加载…</span>';
+    statusEl.textContent = '正在加载常用短语';
+    showError('');
+    return api('/follow-up-phrases?object_type=' + encodeURIComponent(objectType))
+      .then(function (items) {
+        phrases = items || [];
+        renderPhrases();
+        statusEl.textContent = '已加载 ' + phrases.length + ' 条' +
+          FOLLOW_PHRASE_OBJECT_LABELS[objectType] + '短语';
+      })
+      .catch(function (err) {
+        phrases = [];
+        chips.innerHTML = '<span class="small muted">短语加载失败。</span>' +
+          '<button type="button" class="btn-link" id="fuPhraseRetry">重试</button>';
+        manageList.innerHTML = '';
+        var retry = modal.querySelector('#fuPhraseRetry');
+        if (retry) { retry.addEventListener('click', loadPhrases); }
+        showError(err && err.message ? err.message : '短语加载失败');
+        statusEl.textContent = '常用短语加载失败';
+      });
+  }
+
+  function insertPhrase(content) {
+    var text = String(content || '');
+    if (!text) { return; }
+    rememberSelection();
+    var value = textarea.value || '';
+    var start = Math.min(lastSelection.start, value.length);
+    var end = Math.min(Math.max(lastSelection.end, start), value.length);
+    var before = value.slice(0, start);
+    var after = value.slice(end);
+    var insertion = text;
+    if (before && !/\s$/.test(before)) { insertion = '\n' + insertion; }
+    if (after && !/^\s/.test(after)) { insertion += '\n'; }
+    var room = 2000 - (before.length + after.length);
+    if (room <= 0) {
+      toast('跟进内容已达到 2000 字上限', true);
+      return;
+    }
+    if (insertion.length > room) {
+      insertion = insertion.slice(0, room);
+      toast('已插入短语，但跟进内容最多 2000 字', true);
+    }
+    textarea.value = before + insertion + after;
+    var caret = before.length + insertion.length;
+    textarea.focus();
+    textarea.setSelectionRange(caret, caret);
+    lastSelection.start = caret;
+    lastSelection.end = caret;
+  }
+
+  chips.addEventListener('click', function (ev) {
+    var chip = ev.target.closest('[data-phrase-id]');
+    if (!chip) { return; }
+    var id = Number(chip.getAttribute('data-phrase-id'));
+    var phrase = phrases.filter(function (item) { return item.id === id; })[0];
+    if (phrase) { insertPhrase(phrase.content); }
+  });
+
+  manageBtn.addEventListener('click', function () {
+    manager.hidden = !manager.hidden;
+    manageBtn.setAttribute('aria-expanded', manager.hidden ? 'false' : 'true');
+    manageBtn.textContent = manager.hidden ? '管理短语' : '收起管理';
+    if (!manager.hidden) { phraseInput.focus(); }
+  });
+
+  addBtn.addEventListener('click', function () {
+    var content = String(phraseInput.value || '').trim();
+    if (!content) {
+      showError('短语内容不能为空');
+      phraseInput.focus();
+      return;
+    }
+    if (content.length > 200) {
+      showError('短语内容最多 200 字');
+      phraseInput.focus();
+      return;
+    }
+    addBtn.disabled = true;
+    addBtn.textContent = '添加中…';
+    showError('');
+    api('/follow-up-phrases', {
+      method: 'POST',
+      body: { object_type: objectType, content: content }
+    }).then(function () {
+      phraseInput.value = '';
+      toast('已添加短语');
+      return loadPhrases();
+    }).catch(function (err) {
+      showError(err && err.message ? err.message : '添加失败');
+    }).then(function () {
+      addBtn.disabled = false;
+      addBtn.textContent = '添加';
+      phraseInput.focus();
+    });
+  });
+
+  phraseInput.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      addBtn.click();
+    }
+  });
+
+  manageList.addEventListener('click', function (ev) {
+    var del = ev.target.closest('[data-phrase-delete]');
+    if (!del) { return; }
+    var id = Number(del.getAttribute('data-phrase-delete'));
+    var phrase = phrases.filter(function (item) { return item.id === id; })[0];
+    if (!phrase) { return; }
+    if (!window.confirm('删除短语「' + phrase.content + '」？已保存的跟进不会改变。')) {
+      return;
+    }
+    del.disabled = true;
+    showError('');
+    api('/follow-up-phrases/' + id, { method: 'DELETE' })
+      .then(function () {
+        toast('已删除短语');
+        return loadPhrases();
+      })
+      .catch(function (err) {
+        del.disabled = false;
+        showError(err && err.message ? err.message : '删除失败');
+      });
+  });
+
+  loadPhrases();
+}
+
 /* 记一条跟进（模态框）。picked 里的 file 是真实 File，提交时由调用方上传 */
 function openFollowModal(opts) {
   opts = opts || {};
@@ -406,6 +628,7 @@ function openFollowModal(opts) {
     '<button type="button" class="btn btn-link modal-close">×</button></div>' +
     '<div class="modal-body">' +
     '<form id="fuModalForm" class="form-grid" autocomplete="off">' +
+    followPhrasePanelHtml(opts.objectType) +
     '<div class="field"><label>跟进内容 *</label>' +
     '<textarea name="content" rows="4" maxlength="2000" required placeholder="' +
     esc(opts.placeholder || '聊了什么？对方什么态度？下一步做什么？') + '"></textarea></div>' +
@@ -432,6 +655,11 @@ function openFollowModal(opts) {
   function close() { if (modal.parentNode) { document.body.removeChild(modal); } }
   modal.querySelector('.modal-close').addEventListener('click', close);
   modal.querySelector('.modal-cancel').addEventListener('click', close);
+  bindFollowPhrasePanel(
+    modal,
+    opts.objectType,
+    modal.querySelector('[name="content"]')
+  );
 
   var input = modal.querySelector('[name="photos"]');
   var box = modal.querySelector('#fuThumbs');
@@ -534,6 +762,7 @@ function renderEntityFollowPage(root, opts) {
       openFollowModal({
         title: opts.modalTitle || ('记一条跟进 · ' + opts.title),
         placeholder: opts.placeholder,
+        objectType: opts.objectType,
         extraHtml: opts.followExtraHtml || '',
         onSubmit: opts.onSubmit
       });

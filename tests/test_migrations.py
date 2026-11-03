@@ -67,7 +67,7 @@ class TestMigrations(unittest.TestCase):
             "leads", "lead_tags", "customer_contacts", "carriers", "orders",
             "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
             "customers", "deals", "follow_ups", "attachments", "products",
-            "deal_tags",
+            "deal_tags", "follow_up_phrases",
         }
         conn = sqlite3.connect(str(self.db))
         try:

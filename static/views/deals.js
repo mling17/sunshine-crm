@@ -170,6 +170,7 @@ function openQuoteFollowModal(quote, onSubmit) {
     openFollowModal({
         title: '记一条跟进 · ' + (quote.quote_no || quote.title || '报价单'),
         placeholder: '客户对这张报价单的价格、配置或交付有什么反馈？下一步做什么？',
+        objectType: 'deal',
         extraHtml: quoteFollowAssociationHtml(quote),
         onSubmit: onSubmit
     });
@@ -812,6 +813,7 @@ function viewDealDetail(root, rawId) {
         renderEntityFollowPage(root, {
             backHash: '#/deals',
             backLabel: '商机',
+            objectType: 'deal',
             title: customerName,
             hideEntityCard: true,
             placeholder: '这次沟通聊了什么？客户对报价和参数是什么态度？下一步做什么？',

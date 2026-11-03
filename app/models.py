@@ -509,6 +509,23 @@ class DealDetailOut(DealOut):
 # ---------------- 跟进 ----------------
 
 
+class FollowPhraseIn(BaseModel):
+    """常用短语：同一内容可分别用于不同业务对象。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    object_type: Literal["lead", "customer", "deal", "order", "aftersale"]
+    content: str = Field(min_length=1, max_length=200)
+
+
+class FollowPhraseOut(BaseModel):
+    id: int
+    object_type: str
+    content: str
+    sort: int = 0
+    created_at: str
+
+
 class FollowUpOut(BaseModel):
     id: int
     customer_id: int | None = None

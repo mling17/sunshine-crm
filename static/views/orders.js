@@ -269,6 +269,7 @@ function orderFollowModal(order) {
     openFollowModal({
         title: '记一条订单跟进 · ' + order.order_no,
         placeholder: '这次和客户沟通了什么？生产、收款、发货或安装有什么新进展？',
+        objectType: 'order',
         onSubmit: function (payload) {
             var fd = new FormData();
             fd.append('object_type', 'order');

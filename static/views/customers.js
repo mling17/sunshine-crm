@@ -280,6 +280,7 @@ function viewCustomerDetail(root, rawId) {
         renderEntityFollowPage(root, {
             backHash: '#/customers',
             backLabel: '客户',
+            objectType: 'customer',
             title: c.name,
             titleHtml:
                 '<div class=\"entity-title-main\"><h2><a class=\"crumb\" href=\"#/customers\">‹ 客户</a> / ' +

@@ -32,8 +32,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_017"
-SCHEMA_USER_VERSION = 16
+MIGRATION_VERSION = "v2_018"
+SCHEMA_USER_VERSION = 17
 
 
 def default_db_path() -> Path:
@@ -1087,6 +1087,31 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_017', datetime('now'), '售后单可关联同订单历史售后')"),
     ("user_version v2_017", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 34. v2_018：按业务对象维护跟进常用短语 ----------
+    ("follow_up_phrases", None, """
+    CREATE TABLE IF NOT EXISTS follow_up_phrases (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      object_type TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      sort        INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      create_time TEXT NOT NULL DEFAULT '',
+      update_time TEXT NOT NULL DEFAULT '',
+      is_delete   INTEGER NOT NULL DEFAULT 0
+    )
+    """),
+    ("idx_follow_phrases_object", None,
+     "CREATE INDEX IF NOT EXISTS idx_follow_phrases_object"
+     " ON follow_up_phrases(object_type, is_delete, sort)"),
+    ("uq_follow_phrases_active", None,
+     "CREATE UNIQUE INDEX IF NOT EXISTS uq_follow_phrases_active"
+     " ON follow_up_phrases(object_type, content) WHERE is_delete = 0"),
+    ("standardize_follow_phrase_audit_columns", None, ""),
+    ("schema_migrations v2_018", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_018', datetime('now'), '跟进常用短语按线索/客户/商机/订单/售后分区维护')"),
+    ("user_version v2_018", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -1170,6 +1195,8 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
                     ensure_active_lead_phone_unique(conn)
                 elif label == "standardize_product_audit_columns":
                     ensure_standard_columns(conn)
+                elif label == "standardize_follow_phrase_audit_columns":
+                    ensure_standard_columns(conn)
                 else:
                     conn.execute(sql)
             except sqlite3.Error as exc:  # 带语句名报错，定位快
@@ -1202,6 +1229,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
         "leads", "lead_tags", "customer_contacts", "carriers", "orders",
         "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
         "products", "deal_items", "order_items", "deal_quotes", "quote_items",
+        "follow_up_phrases",
     )
     for table in required_tables:
         assert table_exists(conn, table), f"缺表 {table}"

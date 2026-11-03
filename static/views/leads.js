@@ -383,6 +383,7 @@ function viewLeadDetail(root, rawId) {
         renderEntityFollowPage(root, {
             backHash: '#/leads',
             backLabel: '线索池',
+            objectType: 'lead',
             title: name,
             titleHtml:
                 '<div class="lead-detail-title-main">' +

@@ -136,6 +136,7 @@ function viewAftersaleDetail(root, rawId) {
         renderEntityFollowPage(root, {
             backHash: '#/aftersales',
             backLabel: '售后',
+            objectType: 'aftersale',
             title: a.no,
             titleHtml: '<div class="entity-title-main"><h2>' +
                 '<a class="crumb" href="#/aftersales">‹ 售后</a> / ' +

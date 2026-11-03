@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime
 from typing import Literal
 
@@ -24,6 +25,8 @@ from app.models import (
     MAX_PHOTOS,
     STAGES,
     AttachmentOut,
+    FollowPhraseIn,
+    FollowPhraseOut,
     FollowUpItemOut,
     FollowUpOut,
 )
@@ -47,6 +50,15 @@ def _clean_content(raw: str | None) -> str:
         raise HTTPException(status_code=400, detail="跟进内容不能为空")
     if len(content) > 2000:
         raise HTTPException(status_code=400, detail="跟进内容最多 2000 字")
+    return content
+
+
+def _clean_phrase_content(raw: str | None) -> str:
+    content = (raw or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="短语内容不能为空")
+    if len(content) > 200:
+        raise HTTPException(status_code=400, detail="短语内容最多 200 字")
     return content
 
 
@@ -240,6 +252,109 @@ def _check_deal_frozen(conn, deal_id: int) -> None:
 
 
 # ---------------- 路由 ----------------
+
+
+@router.get("/follow-up-phrases", response_model=list[FollowPhraseOut])
+def list_follow_phrases(
+    object_type: str = Query(..., description="lead/customer/deal/order/aftersale"),
+) -> list[FollowPhraseOut]:
+    """返回某个业务对象自己的常用短语集。"""
+    _validate_object_type(object_type)
+    with db_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, object_type, content, sort, created_at
+            FROM follow_up_phrases
+            WHERE object_type = ? AND is_delete = 0
+            ORDER BY sort, id
+            """,
+            (object_type,),
+        ).fetchall()
+    return [FollowPhraseOut(**dict(row)) for row in rows]
+
+
+@router.post(
+    "/follow-up-phrases",
+    response_model=FollowPhraseOut,
+    status_code=201,
+)
+def create_follow_phrase(payload: FollowPhraseIn) -> FollowPhraseOut:
+    """新增常用短语；同一短语可在不同业务对象下各存一份。"""
+    content = _clean_phrase_content(payload.content)
+    created_at = now_iso()
+    try:
+        with db_conn() as conn:
+            duplicate = conn.execute(
+                """
+                SELECT 1 FROM follow_up_phrases
+                WHERE object_type = ? AND content = ? AND is_delete = 0
+                """,
+                (payload.object_type, content),
+            ).fetchone()
+            if duplicate is not None:
+                raise HTTPException(status_code=409, detail="这个短语已经存在")
+
+            next_sort = conn.execute(
+                """
+                SELECT COALESCE(MAX(sort), 0) + 1
+                FROM follow_up_phrases
+                WHERE object_type = ?
+                """,
+                (payload.object_type,),
+            ).fetchone()[0]
+            cur = conn.execute(
+                """
+                INSERT INTO follow_up_phrases
+                    (object_type, content, sort, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    payload.object_type,
+                    content,
+                    int(next_sort or 1),
+                    created_at,
+                    created_at,
+                ),
+            )
+            phrase_id = int(cur.lastrowid or 0)
+            row = conn.execute(
+                """
+                SELECT id, object_type, content, sort, created_at
+                FROM follow_up_phrases
+                WHERE id = ? AND is_delete = 0
+                """,
+                (phrase_id,),
+            ).fetchone()
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="这个短语已经存在") from None
+
+    if row is None:
+        raise HTTPException(status_code=500, detail="短语保存失败")
+    return FollowPhraseOut(**dict(row))
+
+
+@router.delete("/follow-up-phrases/{phrase_id}")
+def delete_follow_phrase(phrase_id: int) -> dict:
+    """软删除常用短语；已插入跟进正文的文字不受影响。"""
+    with db_conn() as conn:
+        phrase = conn.execute(
+            """
+            SELECT object_type FROM follow_up_phrases
+            WHERE id = ? AND is_delete = 0
+            """,
+            (phrase_id,),
+        ).fetchone()
+        if phrase is None:
+            raise HTTPException(status_code=404, detail="常用短语不存在")
+        conn.execute(
+            """
+            UPDATE follow_up_phrases
+            SET is_delete = 1, updated_at = ?
+            WHERE id = ? AND is_delete = 0
+            """,
+            (now_iso(), phrase_id),
+        )
+    return {"ok": True, "id": phrase_id}
 
 
 @router.post("/follow-ups", response_model=FollowUpItemOut)
