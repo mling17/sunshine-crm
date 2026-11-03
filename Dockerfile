@@ -21,7 +21,7 @@ RUN apt-get update \
 
 # 先复制依赖清单，让代码变更尽量复用依赖层缓存。
 COPY requirements.txt ./
-RUN python -m pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
 COPY --chown=crm:crm app ./app
 COPY --chown=crm:crm static ./static
