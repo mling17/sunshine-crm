@@ -772,6 +772,190 @@ function renderEntityFollowPage(root, opts) {
 }
 
 
+/* ===== 通用可搜索下拉 =====
+ * searchableSelectHtml + bindSearchableSelect 用于选项较多、需要检索的表单字段。
+ * 选项里的 key / label 为空时不会渲染，避免下拉出现空白项。
+ */
+var SEARCHABLE_SELECT_SEQ = 0;
+
+function searchableSelectHtml(name, current, placeholder, extraClass) {
+  var value = String(current || '');
+  var seq = ++SEARCHABLE_SELECT_SEQ;
+  var listId = 'searchableSelectList' + seq;
+  return '<div class="combo searchable-select ' + esc(extraClass || '') + '" data-searchable-select>' +
+    '<input type="hidden" name="' + esc(name) + '" value="' + esc(value) + '">' +
+    '<div class="combo-control">' +
+      '<input type="text" class="combo-input" autocomplete="off" role="combobox" ' +
+        'aria-autocomplete="list" aria-expanded="false" aria-controls="' + listId + '" ' +
+        'aria-label="' + esc(placeholder || '搜索并选择') + '" ' +
+        'placeholder="' + esc(placeholder || '搜索并选择') + '" value="' + esc(value) + '">' +
+      '<button type="button" class="combo-toggle" aria-label="展开选项" tabindex="-1">⌄</button>' +
+    '</div>' +
+    '<div class="combo-list" id="' + listId + '" role="listbox"></div>' +
+  '</div>';
+}
+
+function bindSearchableSelect(comboEl, options, config) {
+  config = config || {};
+  var input = comboEl.querySelector('.combo-input');
+  var hidden = comboEl.querySelector('input[type="hidden"]');
+  var toggle = comboEl.querySelector('.combo-toggle');
+  var list = comboEl.querySelector('.combo-list');
+  var activeIndex = -1;
+  var selectedValue = String(hidden.value || '');
+  var allItems = (options || []).filter(function (item) {
+    return item && String(item.value || '').trim() && String(item.label || '').trim();
+  });
+
+  function itemSearchText(item) {
+    return [item.label, item.value, item.group].filter(Boolean).join(' ').toUpperCase();
+  }
+
+  function displayValue(value) {
+    var hit = allItems.filter(function (item) { return item.value === value; })[0];
+    return hit ? String(hit.value) : String(value || '');
+  }
+
+  function visibleItems(query) {
+    var q = String(query || '').trim().toUpperCase();
+    var items = q
+      ? allItems.filter(function (item) { return itemSearchText(item).indexOf(q) >= 0; })
+      : allItems.filter(function (item) {
+          return item.value === selectedValue ||
+            (typeof config.initial === 'function' ? config.initial(item) : true);
+        });
+    if (q) {
+      items.sort(function (a, b) {
+        var aLabel = String(a.label || '').toUpperCase();
+        var bLabel = String(b.label || '').toUpperCase();
+        var aStarts = aLabel.indexOf(q) === 0 ? 0 : 1;
+        var bStarts = bLabel.indexOf(q) === 0 ? 0 : 1;
+        return aStarts - bStarts;
+      });
+    }
+    return items.slice(0, 50);
+  }
+
+  function optionButtons() {
+    return Array.prototype.slice.call(list.querySelectorAll('[data-combo-value]'));
+  }
+
+  function setActive(nextIndex) {
+    var buttons = optionButtons();
+    buttons.forEach(function (button) { button.classList.remove('active'); });
+    if (!buttons.length) {
+      activeIndex = -1;
+      input.removeAttribute('aria-activedescendant');
+      return;
+    }
+    activeIndex = Math.max(0, Math.min(nextIndex, buttons.length - 1));
+    buttons[activeIndex].classList.add('active');
+    input.setAttribute('aria-activedescendant', buttons[activeIndex].id);
+    buttons[activeIndex].scrollIntoView({ block: 'nearest' });
+  }
+
+  function open() {
+    list.classList.add('open');
+    input.setAttribute('aria-expanded', 'true');
+  }
+
+  function close(restoreValue) {
+    list.classList.remove('open');
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+    activeIndex = -1;
+    if (restoreValue !== false) {
+      input.value = displayValue(selectedValue);
+    }
+  }
+
+  function render(query, showAll) {
+    var items = visibleItems(showAll ? '' : query);
+    if (items.length) {
+      list.innerHTML = items.map(function (item, index) {
+        var current = item.value === selectedValue;
+        return '<button type="button" class="combo-item' + (current ? ' selected' : '') + '" ' +
+          'id="' + list.id + 'Option' + index + '" role="option" data-combo-value="' +
+          esc(item.value) + '" aria-selected="' + (current ? 'true' : 'false') + '">' +
+          '<span class="combo-label">' + esc(item.label) + '</span>' +
+          '<span class="combo-group">' + esc(item.group || '') + '</span>' +
+        '</button>';
+      }).join('');
+    } else {
+      list.innerHTML = '<div class="combo-empty small muted">' +
+        esc(config.emptyText || '没有匹配的选项') + '</div>';
+    }
+    open();
+    activeIndex = -1;
+  }
+
+  function choose(value) {
+    var hit = allItems.filter(function (item) { return item.value === value; })[0];
+    if (!hit) { return; }
+    selectedValue = hit.value;
+    hidden.value = hit.value;
+    input.value = displayValue(hit.value);
+    close(false);
+  }
+
+  input.addEventListener('focus', function () {
+    if (!list.classList.contains('open')) {
+      render('', true);
+      input.select();
+    }
+  });
+  input.addEventListener('input', function () {
+    render(input.value, false);
+  });
+  input.addEventListener('keydown', function (ev) {
+    var buttons = optionButtons();
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      if (!list.classList.contains('open')) { render(input.value, false); }
+      setActive(activeIndex + 1);
+    } else if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (!list.classList.contains('open')) { render(input.value, false); }
+      setActive(activeIndex <= 0 ? buttons.length - 1 : activeIndex - 1);
+    } else if (ev.key === 'Enter' && activeIndex >= 0 && list.classList.contains('open')) {
+      ev.preventDefault();
+      choose(buttons[activeIndex].getAttribute('data-combo-value'));
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      close(true);
+    }
+  });
+  input.addEventListener('blur', function () {
+    setTimeout(function () { close(true); }, 160);
+  });
+  toggle.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
+  toggle.addEventListener('click', function () {
+    if (list.classList.contains('open')) {
+      close(true);
+    } else {
+      render('', true);
+      input.focus();
+    }
+  });
+  list.addEventListener('mousedown', function (ev) {
+    if (ev.target.closest('[data-combo-value]')) { ev.preventDefault(); }
+  });
+  list.addEventListener('click', function (ev) {
+    var button = ev.target.closest('[data-combo-value]');
+    if (!button) { return; }
+    choose(button.getAttribute('data-combo-value'));
+  });
+
+  return {
+    getValue: function () { return hidden.value; },
+    setValue: function (value) {
+      selectedValue = String(value || '');
+      hidden.value = selectedValue;
+      input.value = displayValue(selectedValue);
+    }
+  };
+}
+
 /* ===== 可搜索下拉（产品型号）：替代 31 项原生 select =====
  * modelComboHtml(currentKey) + bindModelCombo(comboEl, items, onPick)
  * items 用 dictItems('product_model')，onPick 拿到 {key,label,meta}

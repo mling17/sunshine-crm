@@ -4,10 +4,10 @@
  *   在线永远拿最新文件（发版不用清缓存），断网才回退到缓存壳；
  * 绝不缓存 /crm/api/ 的响应：客户数据是隐私，也必须实时。
  */
-const CACHE = 'crm-shell-v64';
+const CACHE = 'crm-shell-v65';
 const SHELL = ['/crm/', '/crm/index.html', '/crm/app.js', '/crm/app.css',
   '/crm/dashboard-stats.css', '/crm/order-detail.css', '/crm/ui-polish.css', '/crm/manifest.json',
-  '/crm/views/shared.js', '/crm/views/dashboard.js', '/crm/views/leads.js', '/crm/views/customers.js',
+  '/crm/views/shared.js', '/crm/views/regions.js', '/crm/views/dashboard.js', '/crm/views/leads.js', '/crm/views/customers.js',
   '/crm/views/deals.js', '/crm/views/orders.js', '/crm/views/aftersales.js', '/crm/views/logistics.js',
   '/crm/views/products.js', '/crm/views/followups.js', '/crm/views/stats.js',
   '/crm/views/import.js', '/crm/views/dict.js'];

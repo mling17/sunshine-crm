@@ -215,13 +215,13 @@ function leadFormHtml(lead) {
         '<div class=\"field\"><label>联系人</label>' +
         '<input name=\"company_name\" type=\"text\" maxlength=\"100\" value=\"' + esc(l.company_name || '') + '\"></div>' +
         '<div class=\"field\"><label>地区</label>' +
-        '<input name=\"location\" type=\"text\" maxlength=\"200\" value=\"' + esc(l.location || '') + '\" placeholder=\"省份.城市\"></div>' +
+        regionComboHtml(l.location) + '</div>' +
         '</div>' +
         '<div class=\"row-2\">' +
         '<div class=\"field\"><label>来源</label>' +
-        '<select name="source">' + dictOptions('customer_source', l.source || 'other', '') + '</select></div>' +
+        '<select name="source">' + dictOptions('customer_source', l.source || 'other') + '</select></div>' +
         '<div class=\"field\"><label>意向</label>' +
-        '<select name="intent_level">' + dictOptions('intent_level', l.intent_level || 'low', '') + '</select></div>' +
+        '<select name="intent_level">' + dictOptions('intent_level', l.intent_level || 'low') + '</select></div>' +
         '</div>' +
         '<div class=\"field\"><label>标签</label>' +
         '<input name=\"tags\" type=\"text\" maxlength=\"400\" value=\"' + esc((l.tags || []).join('，')) + '" ' +
@@ -282,6 +282,8 @@ function openLeadFormModal(root, lead) {
     var form = modal.querySelector('form');
     var actions = form.querySelector('.form-actions');
     var errorEl = form.querySelector('#leadFormError');
+    var regionComboEl = form.querySelector('[data-searchable-select]');
+    if (regionComboEl) { bindRegionCombo(regionComboEl); }
     var cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'btn modal-cancel';

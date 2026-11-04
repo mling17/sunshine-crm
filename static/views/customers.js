@@ -137,6 +137,8 @@ function openCustomerEdit(id, root) {
 
         var form = modal.querySelector('form');
         var actions = form.querySelector('.form-actions');
+        var regionComboEl = form.querySelector('[data-searchable-select]');
+        if (regionComboEl) { bindRegionCombo(regionComboEl); }
         var cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
         cancelBtn.className = 'btn modal-cancel';
@@ -170,22 +172,20 @@ function customerFormHtml(customer) {
         '<div class=\"field\"><label>名称 *</label>' +
         '<input name=\"name\" type=\"text\" maxlength=\"64\" required value=\"' + esc(c.name || '') + '\"></div>' +
         '<div class=\"field\"><label>类型</label>' +
-                '<select name="customer_type">' + dictOptions('customer_type', c.customer_type || 'personal', '') + '</select></div>' +
+                '<select name="customer_type">' + dictOptions('customer_type', c.customer_type || 'personal') + '</select></div>' +
         '</div>' +
         '<div class=\"field\"><label>电话</label>' +
         '<input name=\"phone\" type=\"tel\" maxlength=\"32\" inputmode=\"tel\" value=\"' + esc(c.phone || '') + '\"></div>' +
         '<div class=\"field\"><label>微信</label>' +
         '<input name=\"wechat\" type=\"text\" maxlength=\"64\" value=\"' + esc(c.wechat || '') + '\"></div>' +
         '<div class=\"field\"><label>地区</label>' +
-        '<input name=\"location\" type=\"text\" maxlength=\"200\" value=\"' + esc(c.location || '') + '\"></div>' +
+        regionComboHtml(c.location) + '</div>' +
         '<div class=\"field\"><label>联系人</label>' +
         '<input name=\"company_name\" type=\"text\" maxlength=\"100\" value=\"' + esc(c.company_name || '') + '\"></div>' +
         '<div class=\"field\"><label>来源</label>' +
                 '<select name="source">' + dictOptions('customer_source', c.source, '请选择') + '</select></div>' +
-        '<div class=\"field\"><label>来源补充（选“其他”填）</label>' +
-        '<input name=\"source_other\" type=\"text\" maxlength=\"100\" value=\"' + esc(c.source_other || '') + '\"></div>' +
         '<div class=\"field\"><label>意向</label>' +
-                '<select name="intent_level">' + dictOptions('intent_level', c.intent_level || 'medium', '') + '</select></div>' +
+                '<select name="intent_level">' + dictOptions('intent_level', c.intent_level || 'medium') + '</select></div>' +
         '<div class=\"field\"><label>标签（逗号分隔，如：重点、转介绍）</label>' +
         '<input name=\"tags\" type=\"text\" maxlength=\"400\" value=\"' + esc((c.tags || []).join('、')) + '\"></div>' +
         '<div class=\"field\"><label>备注</label>' +
@@ -208,7 +208,6 @@ function readCustomerForm(form) {
         customer_type: val('customer_type') || 'personal',
         company_name: val('company_name') || null,
         source: val('source') || null,
-        source_other: val('source_other') || null,
         intent_level: val('intent_level') || null,
         note: val('note') || null,
         tags: tags

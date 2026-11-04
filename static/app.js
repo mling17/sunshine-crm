@@ -98,7 +98,11 @@
   var dictsReady = false;
 
   function dictItems(code) {
-    return (DICTS[code] || []).filter(function (it) { return it.enabled !== false; });
+    return (DICTS[code] || []).filter(function (it) {
+      return it && it.enabled !== false &&
+        String(it.key === null || it.key === undefined ? '' : it.key).trim() !== '' &&
+        String(it.label === null || it.label === undefined ? '' : it.label).trim() !== '';
+    });
   }
 
   function dictLabel(code, key, fallback) {
@@ -108,13 +112,14 @@
     return fallback || key;
   }
 
-  /* 生成 <option> 串。empty 传字符串则加一个「不选」项；
+  /* 生成 <option> 串。empty 传非空字符串则加一个「不选」项；
      当前值在字典里已停用/已删时补一条，避免编辑时把老数据静默清空 */
   function dictOptions(code, current, empty) {
     var items = dictItems(code);
     var html = '';
-    if (empty !== undefined && empty !== null) {
-      html += '<option value="">' + esc(empty) + '</option>';
+    var emptyLabel = String(empty === undefined || empty === null ? '' : empty).trim();
+    if (emptyLabel) {
+      html += '<option value="">' + esc(emptyLabel) + '</option>';
     }
     html += items.map(function (it) {
       return '<option value="' + esc(it.key) + '"' +

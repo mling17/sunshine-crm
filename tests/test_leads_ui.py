@@ -56,7 +56,7 @@ class LeadsUiStructureTest(unittest.TestCase):
         end = self.js.index("function parseLeadTags")
         form = self.js[start:end]
         self.assertGreaterEqual(form.count('<div class=\\"row-2\\">'), 4)
-        self.assertIn("省份.城市", form)
+        self.assertIn("regionComboHtml(l.location)", form)
 
     def test_new_lead_form_defaults_and_required_fields(self):
         start = self.js.index("function leadFormHtml")
@@ -66,8 +66,9 @@ class LeadsUiStructureTest(unittest.TestCase):
         self.assertIn('id=\\"leadFormError\\"', form)
         self.assertIn("<label>电话 *</label>", form)
         self.assertIn("required", form)
-        self.assertIn("dictOptions('customer_source', l.source || 'other', '')", form)
-        self.assertIn("dictOptions('intent_level', l.intent_level || 'low', '')", form)
+        self.assertIn("dictOptions('customer_source', l.source || 'other')", form)
+        self.assertIn("dictOptions('intent_level', l.intent_level || 'low')", form)
+        self.assertNotIn("dictOptions(" + "'customer_source', l.source || 'other', '')", form)
 
     def test_lead_submit_shows_visible_validation_and_api_errors(self):
         start = self.js.index("function openLeadFormModal")

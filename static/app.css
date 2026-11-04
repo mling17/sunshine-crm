@@ -2185,6 +2185,60 @@ table.data-table th.nowrap { white-space: nowrap; }
 }
 .combo-label { font-size: 13px; color: #4a5464; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .combo-empty { padding: 10px 12px; }
+.combo-control {
+  position: relative;
+}
+.combo-control .combo-input {
+  width: 100%;
+  padding-right: 38px;
+  box-sizing: border-box;
+}
+.combo-toggle {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #687386;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.combo-toggle:hover {
+  background: #eef4ff;
+  color: var(--accent, #2463eb);
+}
+.searchable-select .combo-list {
+  max-height: 300px;
+}
+.searchable-select .combo-item {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+}
+.searchable-select .combo-item.active,
+.searchable-select .combo-item.selected {
+  background: #eef4ff;
+  color: #1749b8;
+}
+.searchable-select .combo-item.selected .combo-label {
+  font-weight: 650;
+  color: #1749b8;
+}
+.searchable-select .combo-group {
+  flex: none;
+  max-width: 46%;
+  overflow: hidden;
+  color: #7b8797;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 
 /* ================= 2026-10-31 视觉收敛：更清爽的业务工作台 =================
