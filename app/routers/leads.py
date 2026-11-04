@@ -1,7 +1,7 @@
 """线索管理。
 
 设计要点（已拍板，别再改）：
-- 线索字段：手机号/微信号（至少填一个才能创建）、类型/联系人/来源/地区/标签/备注/意向等级
+- 线索字段：名称和电话必填，微信/类型/联系人/来源/地区/标签/备注/意向等级可选
 - 状态机：`新线索 → 跟进中 → 已转化 / 已失效`
 - 转化：建商机 + 新建客户（线索档案迁移）；去重：命中已有客户 → 提示
 - 跟进：挂在线索上的跟进记录（见 3.8 统一模型）
@@ -242,10 +242,13 @@ def list_leads(
 
 @router.post("/leads", response_model=LeadOut)
 def create_lead(lead_in: LeadIn) -> LeadOut:
-    """建线索。手机/微信至少一个（400 `missing_contact`）；来源必填（400 `invalid_enum`）。"""
-    # 验证手机号和微信至少有一个
-    if not lead_in.phone and not lead_in.wechat:
-        raise HTTPException(status_code=400, detail="手机和微信至少填一个")
+    """建线索。名称、电话和来源必填，错误通过业务码返回给前端展示。"""
+    if not lead_in.name:
+        raise ApiError(status_code=400, code="name_required", message="名称不能为空")
+
+    phone_key = _normalize_phone(lead_in.phone)
+    if not phone_key:
+        raise ApiError(status_code=400, code="phone_required", message="电话不能为空")
     
     # 验证来源枚举
     if not _source_allowed(lead_in.source):
@@ -257,7 +260,6 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
     with db_conn() as conn:
         # 检查是否有重复线索或客户（Q6）
         duplicate_hint = None
-        phone_key = _normalize_phone(lead_in.phone)
         candidates = [
             {"object_type": "lead", **dict(row)}
             for row in conn.execute(

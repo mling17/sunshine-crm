@@ -167,9 +167,9 @@ class OrderDetailUiTest(unittest.TestCase):
             "@media (max-width: 640px)",
         ):
             self.assertIn(marker, self.css)
-        self.assertIn('/crm/order-detail.css?v=20261103a3', self.index)
+        self.assertIn('/crm/order-detail.css?v=20261104lead1', self.index)
         self.assertIn("'/crm/order-detail.css'", self.sw)
-        self.assertIn("const CACHE = 'crm-shell-v63';", self.sw)
+        self.assertIn("const CACHE = 'crm-shell-v64';", self.sw)
         self.assertGreaterEqual(self.css.count("grid-template-columns: repeat(5,"), 3)
 
     def test_pending_customer_confirmation_is_not_a_frontend_state(self):

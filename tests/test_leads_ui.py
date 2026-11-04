@@ -40,6 +40,26 @@ class LeadsUiStructureTest(unittest.TestCase):
         self.assertGreaterEqual(form.count('<div class=\\"row-2\\">'), 4)
         self.assertIn("省份.城市", form)
 
+    def test_new_lead_form_defaults_and_required_fields(self):
+        start = self.js.index("function leadFormHtml")
+        end = self.js.index("function parseLeadTags")
+        form = self.js[start:end]
+        self.assertIn('class=\\"lead-form form-grid\\" autocomplete=\\"off\\" novalidate', form)
+        self.assertIn('id=\\"leadFormError\\"', form)
+        self.assertIn("<label>电话 *</label>", form)
+        self.assertIn("required", form)
+        self.assertIn("dictOptions('customer_source', l.source || 'other', '')", form)
+        self.assertIn("dictOptions('intent_level', l.intent_level || 'low', '')", form)
+
+    def test_lead_submit_shows_visible_validation_and_api_errors(self):
+        start = self.js.index("function openLeadFormModal")
+        end = self.js.index("function refreshAfterLeadChange")
+        handler = self.js[start:end]
+        self.assertIn("showLeadFormError('名称不能为空'", handler)
+        self.assertIn("showLeadFormError('电话不能为空'", handler)
+        self.assertIn("showLeadFormError(err.message", handler)
+        self.assertIn("toast(text, true)", handler)
+
     def test_detail_layout_styles_exist(self):
         for selector in (
             ".entity-title-main",

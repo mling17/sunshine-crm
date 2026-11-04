@@ -175,10 +175,24 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(resp["status"], "new")
         self.assertEqual(resp["intent_level"], "medium")  # 定稿：新建线索意向默认「中」
 
-    def test_create_lead_with_wechat_only(self):
-        resp = self.create_lead(wechat="wechat123")
-        self.assertEqual(resp["wechat"], "wechat123")
-        self.assertEqual(resp["status"], "new")
+    def test_create_lead_requires_phone_even_with_wechat(self):
+        resp = self.client.post("/api/crm/leads", json={
+            "name": "张伟",
+            "wechat": "wechat123",
+            "source": "wechat",
+        })
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["code"], "phone_required")
+        self.assertIn("电话不能为空", resp.json()["detail"])
+
+    def test_create_lead_requires_name(self):
+        resp = self.client.post("/api/crm/leads", json={
+            "phone": "13800138000",
+            "source": "wechat",
+        })
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["code"], "name_required")
+        self.assertIn("名称不能为空", resp.json()["detail"])
 
     def test_create_lead_with_both_phone_and_wechat(self):
         resp = self.create_lead(phone="13800138000", wechat="wechat123")
@@ -186,7 +200,7 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(resp["wechat"], "wechat123")
         self.assertEqual(resp["status"], "new")
 
-    def test_create_lead_with_no_contact_info_400(self):
+    def test_create_lead_with_blank_phone_400(self):
         resp = self.client.post("/api/crm/leads", json={
             "name": "张伟",
             "phone": "",
@@ -194,7 +208,8 @@ class LeadsTest(ApiTestCase):
             "source": "wechat",
         })
         self.assertEqual(resp.status_code, 400, resp.text)
-        self.assertIn("手机和微信至少填一个", resp.json()["detail"])
+        self.assertEqual(resp.json()["code"], "phone_required")
+        self.assertIn("电话不能为空", resp.json()["detail"])
 
     def test_create_lead_with_invalid_source_400(self):
         resp = self.client.post("/api/crm/leads", json={
@@ -456,9 +471,9 @@ class LeadsTest(ApiTestCase):
 
     def test_create_lead_allows_same_wechat_because_phone_is_unique_key(self):
         self.create_customer(wechat="wechat123")
-        resp = self.create_lead(phone=None, wechat="WECHAT123")
+        resp = self.create_lead(phone="13800138001", wechat="WECHAT123")
         self.assertEqual(resp["status"], "new")
-        self.assertIsNone(resp["phone"])
+        self.assertEqual(resp["phone"], "13800138001")
         self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 1)
 
     # ---------- 跟进兼容性 ----------

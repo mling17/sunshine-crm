@@ -184,7 +184,8 @@ function loadLeads(root) {
 
 function leadFormHtml(lead) {
     var l = lead || {};
-    return '<form class=\"lead-form form-grid\" autocomplete=\"off\">' +
+    return '<form class=\"lead-form form-grid\" autocomplete=\"off\" novalidate>' +
+        '<div class=\"notice danger-notice\" id=\"leadFormError\" role=\"alert\" aria-live=\"assertive\" hidden></div>' +
         '<div class=\"row-2\">' +
         '<div class=\"field\"><label>名称 *</label>' +
         '<input name=\"name\" type=\"text\" maxlength=\"64\" required value=\"' + esc(l.name || '') + '\"></div>' +
@@ -192,8 +193,8 @@ function leadFormHtml(lead) {
                 '<select name="lead_type">' + dictOptions('customer_type', l.lead_type || 'company') + '</select></div>' +
         '</div>' +
         '<div class=\"row-2\">' +
-        '<div class=\"field\"><label>电话</label>' +
-        '<input name=\"phone\" type=\"tel\" maxlength=\"32\" inputmode=\"tel\" value=\"' + esc(l.phone || '') + '\"></div>' +
+        '<div class=\"field\"><label>电话 *</label>' +
+        '<input name=\"phone\" type=\"tel\" maxlength=\"32\" inputmode=\"tel\" required value=\"' + esc(l.phone || '') + '\"></div>' +
         '<div class=\"field\"><label>微信</label>' +
         '<input name=\"wechat\" type=\"text\" maxlength=\"64\" value=\"' + esc(l.wechat || '') + '\"></div>' +
         '</div>' +
@@ -205,9 +206,9 @@ function leadFormHtml(lead) {
         '</div>' +
         '<div class=\"row-2\">' +
         '<div class=\"field\"><label>来源</label>' +
-        '<select name="source">' + dictOptions('customer_source', l.source, '请选择') + '</select></div>' +
+        '<select name="source">' + dictOptions('customer_source', l.source || 'other', '') + '</select></div>' +
         '<div class=\"field\"><label>意向</label>' +
-        '<select name="intent_level">' + dictOptions('intent_level', l.intent_level || 'medium', '') + '</select></div>' +
+        '<select name="intent_level">' + dictOptions('intent_level', l.intent_level || 'low', '') + '</select></div>' +
         '</div>' +
         '<div class=\"field\"><label>标签</label>' +
         '<input name=\"tags\" type=\"text\" maxlength=\"400\" value=\"' + esc((l.tags || []).join('，')) + '" ' +
@@ -241,10 +242,10 @@ function readLeadForm(form) {
         wechat: val('wechat') || null,
         lead_type: val('lead_type') || 'personal',
         company_name: val('company_name') || null,
-        source: val('source') || null,
+        source: val('source') || 'other',
         location: val('location') || null,
         note: val('note') || null,
-        intent_level: val('intent_level') || null,
+        intent_level: val('intent_level') || 'low',
         tags: tags
     };
 }
@@ -267,6 +268,7 @@ function openLeadFormModal(root, lead) {
 
     var form = modal.querySelector('form');
     var actions = form.querySelector('.form-actions');
+    var errorEl = form.querySelector('#leadFormError');
     var cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'btn modal-cancel';
@@ -276,6 +278,30 @@ function openLeadFormModal(root, lead) {
     var submitBtn = form.querySelector('button[type="submit"]');
     if (submitBtn) { submitBtn.textContent = isEdit ? '保存' : '新增'; }
 
+    function clearLeadFormError() {
+        if (errorEl) {
+            errorEl.textContent = '';
+            errorEl.hidden = true;
+        }
+        $$('[aria-invalid="true"]', form).forEach(function (el) {
+            el.removeAttribute('aria-invalid');
+        });
+    }
+
+    function showLeadFormError(message, fieldName) {
+        var text = message || '保存失败，请稍后重试';
+        if (errorEl) {
+            errorEl.textContent = text;
+            errorEl.hidden = false;
+        }
+        var field = fieldName ? form.querySelector('[name="' + fieldName + '"]') : null;
+        if (field) {
+            field.setAttribute('aria-invalid', 'true');
+            field.focus();
+        }
+        toast(text, true);
+    }
+
     modal.querySelector('.modal-close').addEventListener('click', close);
     modal.addEventListener('click', function (ev) {
         if (ev.target === modal || (ev.target.classList && ev.target.classList.contains('modal-overlay'))) { close(); }
@@ -283,14 +309,18 @@ function openLeadFormModal(root, lead) {
 
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
+        clearLeadFormError();
         var payload = readLeadForm(form);
-        if (!payload.name && !payload.phone && !payload.wechat) {
-            toast('名称、手机或微信至少填一项', true);
+        if (!payload.name) {
+            showLeadFormError('名称不能为空', 'name');
             return;
         }
-        /* 来源是后端必填（数据字典 customer_source），别让它以 400 的形式回来 */
+        if (!payload.phone) {
+            showLeadFormError('电话不能为空', 'phone');
+            return;
+        }
         if (!payload.source) {
-            toast('请选择来源（可在「数据字典 → 客户来源」里维护）', true);
+            showLeadFormError('请选择来源（可在「数据字典 → 客户来源」里维护）', 'source');
             return;
         }
         submitBtn.disabled = true;
@@ -308,9 +338,11 @@ function openLeadFormModal(root, lead) {
                 showDuplicateHintModal(err.data.duplicate_hint);
                 return;
             }
-            toast(err.message, true);
+            showLeadFormError(err.message);
         }).then(function () { submitBtn.disabled = false; });
     });
+    form.addEventListener('input', clearLeadFormError);
+    form.addEventListener('change', clearLeadFormError);
 }
 
 /* 线索改动后刷新：
