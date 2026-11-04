@@ -13,10 +13,22 @@ services:
     environment:
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}"
+      CRM_DB_ENGINE: "${CRM_DB_ENGINE:-sqlite}"
       CRM_DB: /opt/data/crm/crm.db
       CRM_UPLOADS: /opt/data/crm/uploads
+      CRM_MYSQL_HOST: "${CRM_MYSQL_HOST:-mysql}"
+      CRM_MYSQL_PORT: "${CRM_MYSQL_PORT:-3306}"
+      CRM_MYSQL_USER: "${CRM_MYSQL_USER:-crm}"
+      CRM_MYSQL_PASSWORD: "${CRM_MYSQL_PASSWORD:-}"
+      CRM_MYSQL_DATABASE: "${CRM_MYSQL_DATABASE:-sunshine_crm}"
+      CRM_MYSQL_CHARSET: "${CRM_MYSQL_CHARSET:-utf8mb4}"
+      CRM_MYSQL_SSL_DISABLED: "${CRM_MYSQL_SSL_DISABLED:-true}"
       COOKIE_SECURE: "${COOKIE_SECURE:-0}"
       TZ: "${TZ:-Asia/Shanghai}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: false
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -27,6 +39,34 @@ services:
     restart: unless-stopped
     stop_grace_period: 15s
 
+  mysql:
+    image: mysql:8.0.36
+    container_name: sunshine-crm-mysql
+    profiles: ["mysql"]
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    environment:
+      MYSQL_DATABASE: "${CRM_MYSQL_DATABASE:-sunshine_crm}"
+      MYSQL_USER: "${CRM_MYSQL_USER:-crm}"
+      MYSQL_PASSWORD: "${CRM_MYSQL_PASSWORD:-}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-}"
+      TZ: "${TZ:-Asia/Shanghai}"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   crm-data:
     name: sunshine-crm-data
+  mysql-data:
+    name: sunshine-crm-mysql-data

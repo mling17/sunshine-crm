@@ -26,6 +26,7 @@ RUN python -m pip install --no-cache-dir -r requirements.txt -i https://mirrors.
 COPY --chown=crm:crm app ./app
 COPY --chown=crm:crm static ./static
 COPY --chown=crm:crm ops/backup.py ./ops/backup.py
+COPY --chown=crm:crm ops/migrate_sqlite_to_mysql.py ./ops/migrate_sqlite_to_mysql.py
 
 RUN mkdir -p /opt/data/crm/uploads /opt/data/crm/backups \
     && chown -R crm:crm /opt/data/crm /app

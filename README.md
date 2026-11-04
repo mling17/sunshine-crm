@@ -13,9 +13,9 @@
 
 | 层 | 选型 | 说明 |
 | --- | --- | --- |
-| 后端 | Python + FastAPI + Pydantic | REST API，前缀 `/api/crm`，SQLite 存储 |
+| 后端 | Python + FastAPI + Pydantic | REST API，前缀 `/api/crm` |
 | 前端 | 原生 JS SPA（无构建） | `static/` 目录直出，hash 路由 `#/leads` 等 |
-| 存储 | SQLite + 本地 `uploads/` | 附件（跟进照片、报价单）落盘 |
+| 存储 | SQLite（默认）/ MySQL 8.0 + 本地 `uploads/` | 数据库可切换；附件仍落盘 |
 | 部署 | systemd + nginx 反代 | 静态文件由 nginx 托管，API 由 `crm-api.service` 提供 |
 
 ## 目录
@@ -56,7 +56,7 @@ tests/               pytest 用例
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
-pip install fastapi "uvicorn[standard]" pydantic python-multipart
+pip install -r requirements.txt
 
 # 管理员账号（首次登录用，库为空时自动建）
 export ADMIN_USERNAME=admin
@@ -71,7 +71,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 8010
 | 变量 | 说明 |
 | --- | --- |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 管理员登录名与口令 |
+| `CRM_DB_ENGINE` | `sqlite`（默认）或 `mysql` |
 | `CRM_DB` | SQLite 路径，默认 `crm.db` |
+| `CRM_MYSQL_*` | MySQL 主机、端口、用户、密码、库名、字符集与 TLS 开关 |
 | `CRM_UPLOADS` | 附件目录，默认 `uploads/` |
 | `CRM_MINIO_ENDPOINT` / `_BUCKET` / `_ACCESS` / `_SECRET` | 可选，异地备份用 |
 
@@ -81,6 +83,12 @@ uvicorn app.main:app --host 127.0.0.1 --port 8010
 2. 传统部署：后端用 `ops/crm-api.service`，前端用 `bash ops/deploy-frontend.sh`
 3. **改前端必须同步升版本号**：`static/index.html` 里所有 `?v=` 与 `static/sw.js` 的缓存名一起升，否则浏览器混版会让页面报 `dictOptions is not defined`（表现为「点按钮没反应」）
 4. 反向代理：`ops/nginx-crm-location.conf`（把 `/crm/` 静态与 `/crm/api/` → `127.0.0.1:8010` 一起配好）
+
+数据库操作手册：
+
+- [SQLite 数据迁移到 MySQL](docs/DATABASE-SQLITE-TO-MYSQL.md)
+- [MySQL 数据备份及恢复](docs/DATABASE-MYSQL-BACKUP-RESTORE.md)
+- [SQLite 数据备份及恢复](docs/DATABASE-SQLITE-BACKUP-RESTORE.md)
 
 ## 数据与安全
 

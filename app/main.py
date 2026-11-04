@@ -73,15 +73,23 @@ def seed_admin_if_needed() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    ensure_schema(settings.db_path)
-    run_migrations(settings.db_path)  # V2 增量迁移
-    with db_conn() as conn:
-        backfill_pending_quote_tags(conn)
+    ensure_schema(None if settings.CRM_DB_ENGINE == "mysql" else settings.db_path)
+    if settings.CRM_DB_ENGINE == "mysql":
+        from app.mysql_schema import mysql_runtime_seed
+
+        with db_conn() as conn:
+            mysql_runtime_seed(conn)
+            backfill_pending_quote_tags(conn)
+    else:
+        run_migrations(settings.db_path)  # V2 增量迁移
+        with db_conn() as conn:
+            backfill_pending_quote_tags(conn)
     settings.uploads_path.mkdir(parents=True, exist_ok=True)
     seed_admin_if_needed()
     log.info(
-        "CRM 启动完成：db=%s uploads=%s session_ttl=%sh",
-        settings.db_path,
+        "CRM 启动完成：db=%s engine=%s uploads=%s session_ttl=%sh",
+        settings.database_label,
+        settings.CRM_DB_ENGINE,
         settings.uploads_path,
         settings.SESSION_TTL_HOURS,
     )
@@ -122,7 +130,12 @@ install_error_handler(app)
 @app.get("/health", tags=["meta"])
 def health() -> dict:
     """探活接口：不鉴权，给 systemd / nginx / 监控用。"""
-    return {"status": "ok", "db": str(settings.db_path), "ts": now_iso()}
+    return {
+        "status": "ok",
+        "db": settings.database_label,
+        "db_engine": settings.CRM_DB_ENGINE,
+        "ts": now_iso(),
+    }
 
 
 app.include_router(auth.router)

@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from sqlite3 import IntegrityError
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.db import db_conn
+from app.db import IntegrityError, db_conn
 from app.errors import ApiError
 from app.models import (
     AftersaleDetailOut,

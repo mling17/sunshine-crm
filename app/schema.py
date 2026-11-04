@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from app.config.settings import settings
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 from app.db import DBPath, db_conn
 
@@ -136,6 +137,11 @@ ENSURE_SQL: list[str] = [
 
 def ensure_schema(db_path: DBPath = None) -> None:
     """建库 + 建表 + 建索引（幂等）。lifespan 里调用一次。"""
+    if db_path is None and settings.CRM_DB_ENGINE == "mysql":
+        from app.mysql_schema import ensure_mysql_schema
+
+        ensure_mysql_schema()
+        return
     with db_conn(db_path) as conn:
         for statement in ENSURE_SQL:
             conn.execute(statement)

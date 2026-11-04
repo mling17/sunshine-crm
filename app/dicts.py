@@ -8,7 +8,7 @@ import sqlite3
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Union
 
-from app.db import db_conn
+from app.db import DatabaseError, db_conn
 from app.enums import (
     AFTERSALE_STATUS,
     AFTERSALE_STATUS_LEGACY_LABELS,
@@ -222,7 +222,7 @@ def _usage_by_key(conn: sqlite3.Connection, code: str) -> Dict[str, int]:
                 f"SELECT {column} AS k, COUNT(*) AS n FROM {table}{where}"
                 f" GROUP BY {column}"
             ).fetchall()
-        except sqlite3.Error:
+        except DatabaseError:
             continue
         for row in rows:
             key = row["k"]
@@ -323,7 +323,7 @@ def used_count(code: str, key: str) -> int:
     try:
         with db_conn() as conn:
             return _usage_by_key(conn, code).get(str(key), 0)
-    except sqlite3.Error:
+    except DatabaseError:
         return 0
 
 

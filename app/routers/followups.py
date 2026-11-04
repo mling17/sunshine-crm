@@ -19,7 +19,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from app import labels
-from app.db import db_conn
+from app.db import IntegrityError, db_conn
 from app.errors import ApiError
 from app.models import (
     MAX_PHOTOS,
@@ -325,7 +325,7 @@ def create_follow_phrase(payload: FollowPhraseIn) -> FollowPhraseOut:
                 """,
                 (phrase_id,),
             ).fetchone()
-    except sqlite3.IntegrityError:
+    except IntegrityError:
         raise HTTPException(status_code=409, detail="这个短语已经存在") from None
 
     if row is None:

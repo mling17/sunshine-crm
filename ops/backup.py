@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 
 # ---------- 可配置项（环境变量优先） ----------
 DB_PATH       = os.environ.get("CRM_DB", "/opt/data/crm/crm.db")
+DB_ENGINE     = os.environ.get("CRM_DB_ENGINE", "sqlite").strip().lower()
 UPLOADS_DIR   = os.environ.get("CRM_UPLOADS", "/opt/data/crm/uploads")
 BACKUP_ROOT   = os.environ.get("CRM_BACKUP_ROOT", "/opt/data/crm/backups")
 LOG_FILE      = os.environ.get("CRM_BACKUP_LOG", "/opt/data/crm/logs/backup.log")
@@ -149,6 +150,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-offsite", action="store_true", help="只做本地备份")
     args = ap.parse_args()
+
+    if DB_ENGINE != "sqlite":
+        log(
+            "ERROR",
+            "当前不是 SQLite 备份脚本支持的数据库引擎，请使用 mysqldump",
+            engine=DB_ENGINE,
+            doc="docs/DATABASE-MYSQL-BACKUP-RESTORE.md",
+        )
+        return 1
 
     t0 = time.time()
     lock_path = "/tmp/crm-backup.lock"

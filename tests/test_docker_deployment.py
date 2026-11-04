@@ -23,6 +23,7 @@ class DockerArtifactsTest(unittest.TestCase):
         self.assertNotIn("pip install --no-cache-dir -e .", dockerfile)
         self.assertIn("COPY --chown=crm:crm app ./app", dockerfile)
         self.assertIn("COPY --chown=crm:crm static ./static", dockerfile)
+        self.assertIn("ops/migrate_sqlite_to_mysql.py", dockerfile)
         self.assertIn("USER crm", dockerfile)
         self.assertIn("EXPOSE 8010", dockerfile)
         self.assertIn("HEALTHCHECK", dockerfile)
@@ -36,6 +37,11 @@ class DockerArtifactsTest(unittest.TestCase):
         self.assertIn("${CRM_BIND_ADDRESS:-0.0.0.0}:${CRM_PORT:-8010}:8010", compose)
         self.assertIn("crm-data:/opt/data/crm", compose)
         self.assertIn("no-new-privileges:true", compose)
+        self.assertIn('CRM_DB_ENGINE: "${CRM_DB_ENGINE:-sqlite}"', compose)
+        self.assertIn("mysql:8.0.36", compose)
+        self.assertIn('profiles: ["mysql"]', compose)
+        self.assertIn("mysql-data:/var/lib/mysql", compose)
+        self.assertIn("sunshine-crm-mysql-data", compose)
 
     def test_docker_context_excludes_runtime_data_and_secrets(self):
         ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
@@ -46,6 +52,18 @@ class DockerArtifactsTest(unittest.TestCase):
     def test_runtime_requirements_include_pydantic_settings(self):
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
         self.assertIn("pydantic-settings", requirements)
+        self.assertIn("PyMySQL", requirements)
+        self.assertIn("sqlglot", requirements)
+
+    def test_database_operations_docs_exist(self):
+        for name in (
+            "DATABASE-SQLITE-TO-MYSQL.md",
+            "DATABASE-MYSQL-BACKUP-RESTORE.md",
+            "DATABASE-SQLITE-BACKUP-RESTORE.md",
+        ):
+            path = ROOT / "docs" / name
+            self.assertTrue(path.is_file(), f"缺少数据库文档 {name}")
+            self.assertGreater(len(path.read_text(encoding="utf-8")), 500)
 
 
 class StandaloneWebTest(unittest.TestCase):

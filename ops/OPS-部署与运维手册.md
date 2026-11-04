@@ -57,10 +57,20 @@ env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -c 'import fastapi,pydantic;pr
 | 对外路径 | `http://<内网服务器IP>:8000/crm/` | 现有 nginx `location /crm/` |
 | API 路径 | `/crm/api/...` → `127.0.0.1:8010/api/crm/...` | 片段见 `nginx-crm-location.conf` |
 | 前端静态 | `/root/nginx/html/crm/` | 容器内 `/usr/share/nginx/html/crm/` |
-| 数据库 | `/opt/data/crm/crm.db` | SQLite 单文件 |
+| 数据库 | `/opt/data/crm/crm.db`（默认）/ MySQL 8.0 | `crm.env` 中 `CRM_DB_ENGINE` 切换 |
 | 照片 | `/opt/data/crm/uploads/YYYY/MM/DD/<uuid>` | 本地目录，不上 MinIO |
 | 备份 | `/opt/data/crm/backups/YYYY-MM-DD/` | 本地 14 天 + 异机 90 天 |
 | systemd | `crm-api` / `crm-backup.timer` | 对齐 `platform.service` 写法 |
+
+数据库配置统一放在权限 `600` 的 `/opt/data/crm/crm.env`，`crm-api.service`
+会自动读取。切换 MySQL 时至少设置 `CRM_DB_ENGINE`、`CRM_MYSQL_HOST/PORT/USER/PASSWORD/DATABASE`；
+完整迁移、备份和恢复步骤见：
+
+- `../docs/DATABASE-SQLITE-TO-MYSQL.md`
+- `../docs/DATABASE-MYSQL-BACKUP-RESTORE.md`
+- `../docs/DATABASE-SQLITE-BACKUP-RESTORE.md`
+
+切换 MySQL 后必须停用只支持 SQLite 的 `crm-backup.timer`，改用 MySQL 文档中的备份方案。
 
 ---
 

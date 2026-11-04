@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=root
+EnvironmentFile=-/opt/data/crm/crm.env
 EnvironmentFile=/opt/data/crm/ops/backup.env
 ExecStart=/usr/bin/python3 /opt/data/crm/ops/backup.py
 # 备份卡死比不备份更糟：15 分钟没完就掐掉，本次标记失败等告警

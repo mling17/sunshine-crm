@@ -26,6 +26,7 @@ class HealthTest(unittest.TestCase):
         body = resp.json()
         self.assertEqual(body["status"], "ok")
         self.assertEqual(Path(body["db"]).resolve(), _bootstrap.TEST_DB.resolve())
+        self.assertEqual(body["db_engine"], "sqlite")
         self.assertTrue(body["ts"])
 
     def test_schema_and_seed_user(self):

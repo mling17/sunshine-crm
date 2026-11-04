@@ -18,6 +18,8 @@ WorkingDirectory=/opt/data/crm
 # PYTHONPATH，这里再显式钉死一次，杜绝"手工能跑、服务起不来"。
 Environment=PYTHONPATH=/opt/data/crm
 Environment=PYTHONUNBUFFERED=1
+# 可选：数据库切换/密钥放独立环境文件，权限 600，避免改 unit
+EnvironmentFile=-/opt/data/crm/crm.env
 Environment=CRM_DB=/opt/data/crm/crm.db
 Environment=CRM_UPLOADS=/opt/data/crm/uploads
 
