@@ -68,9 +68,9 @@ class FollowupPhraseUiTest(unittest.TestCase):
         self.assertIn("grid-column: 1 / -1", panel)
 
     def test_asset_versions_are_bumped_for_phrase_panel(self):
-        self.assertIn("/crm/views/shared.js?v=20261104region1", self.index)
+        self.assertIn("/crm/views/shared.js?v=20261104customer1", self.index)
         self.assertIn("/crm/app.css?v=20261104region1", self.index)
-        self.assertIn("const CACHE = 'crm-shell-v65';", self.sw)
+        self.assertIn("const CACHE = 'crm-shell-v66';", self.sw)
 
 
 if __name__ == "__main__":

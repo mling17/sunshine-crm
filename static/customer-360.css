@@ -1,0 +1,449 @@
+/* Customer 360: one relationship sheet, with business signals kept in context. */
+
+.customer-360-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(340px, .92fr);
+  margin: 2px 0 18px;
+  overflow: hidden;
+  border: 1px solid var(--ui-line);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 30px -26px rgba(16, 35, 61, .5);
+}
+
+.customer-360-contact,
+.customer-360-insights {
+  min-width: 0;
+  padding: 20px;
+}
+
+.customer-360-contact {
+  border-right: 1px solid var(--ui-line);
+}
+
+.customer-360-insights {
+  background:
+    linear-gradient(150deg, rgba(237, 243, 255, .72), rgba(248, 250, 252, .72) 58%, #fff);
+}
+
+.customer-360-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 17px;
+}
+
+.customer-360-mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid #cdddf5;
+  border-radius: 13px 5px 13px 5px;
+  color: #1749bb;
+  background: #edf3ff;
+  font-size: 18px;
+  font-weight: 760;
+}
+
+.customer-360-identity-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.customer-360-company {
+  overflow: hidden;
+  color: var(--ui-ink);
+  font-size: 16px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-360-relationship {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ui-muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-360-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid #cfe9e4;
+  border-radius: 999px;
+  color: #116f61;
+  background: #effaf7;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.customer-360-state::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.customer-360-state.is-progress {
+  border-color: #f1dfba;
+  color: #93651b;
+  background: #fff9ec;
+}
+
+.customer-360-state.is-new {
+  border-color: #d9e2ee;
+  color: #5f7085;
+  background: #f7f9fc;
+}
+
+.customer-360-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid #e8eef6;
+  border-left: 1px solid #e8eef6;
+}
+
+.customer-360-fact {
+  min-width: 0;
+  padding: 11px 12px 10px;
+  border-right: 1px solid #e8eef6;
+  border-bottom: 1px solid #e8eef6;
+}
+
+.customer-360-fact dt {
+  margin-bottom: 4px;
+  color: #7b899c;
+  font-size: 11.5px;
+}
+
+.customer-360-fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #1d304a;
+  font-size: 13.5px;
+  font-weight: 620;
+  line-height: 1.42;
+}
+
+.customer-360-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+  color: #53647a;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.customer-360-note span:first-child {
+  color: #7b899c;
+}
+
+.customer-360-latest {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px dashed #d8e2ee;
+}
+
+.customer-360-latest-head,
+.customer-360-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customer-360-latest-head strong,
+.customer-360-chart-head h3 {
+  margin: 0;
+  color: var(--ui-ink);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.customer-360-latest-head time,
+.customer-360-chart-head span {
+  color: var(--ui-muted);
+  font-size: 11.5px;
+}
+
+.customer-360-latest p {
+  display: -webkit-box;
+  margin: 7px 0 0;
+  overflow: hidden;
+  color: #465972;
+  font-size: 13px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.customer-360-latest .customer-360-next {
+  margin-top: 7px;
+  color: #18786b;
+  font-size: 11.5px;
+}
+
+.customer-360-latest .customer-360-next.is-overdue {
+  color: #b14e37;
+}
+
+.customer-360-kpis {
+  display: grid;
+  grid-template-columns: 1.3fr repeat(3, minmax(0, .7fr));
+  margin-bottom: 18px;
+  border-bottom: 1px solid #dce6f1;
+}
+
+.customer-360-kpi {
+  min-width: 0;
+  padding: 0 10px 13px;
+}
+
+.customer-360-kpi:first-child {
+  padding-left: 0;
+}
+
+.customer-360-kpi:last-child {
+  padding-right: 0;
+}
+
+.customer-360-kpi + .customer-360-kpi {
+  border-left: 1px solid #dce6f1;
+}
+
+.customer-360-kpi-label {
+  overflow: hidden;
+  color: #748399;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-360-kpi-value {
+  margin-top: 4px;
+  overflow: hidden;
+  color: #162b47;
+  font-size: 21px;
+  font-weight: 760;
+  letter-spacing: -.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-360-kpi-value.is-money {
+  color: #1749bb;
+  font-size: 19px;
+}
+
+.customer-360-chart-head {
+  margin-bottom: 10px;
+}
+
+.customer-360-chart {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(26px, 1fr));
+  gap: 8px;
+  min-height: 108px;
+  padding: 8px 2px 0;
+  border-bottom: 1px solid #dbe5f0;
+  background:
+    repeating-linear-gradient(
+      to top,
+      transparent 0,
+      transparent 34px,
+      rgba(89, 113, 145, .08) 35px
+    );
+}
+
+.customer-360-activity-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.customer-360-activity-count {
+  min-height: 18px;
+  color: #586a80;
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.customer-360-activity-plot {
+  display: flex;
+  height: 72px;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  gap: 2px;
+}
+
+.customer-360-activity-segment {
+  display: block;
+  min-height: 0;
+  border-radius: 4px 4px 2px 2px;
+}
+
+.customer-360-activity-segment.is-follow {
+  background: linear-gradient(180deg, #4f86ec, #245dda);
+}
+
+.customer-360-activity-segment.is-system {
+  background: #a9c9c2;
+}
+
+.customer-360-activity-month {
+  padding-top: 6px;
+  overflow: hidden;
+  color: #75849a;
+  font-size: 10.5px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-360-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  margin-top: 11px;
+  color: #6c7c91;
+  font-size: 11px;
+}
+
+.customer-360-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.customer-360-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.customer-360-legend .is-follow {
+  background: #2d68dc;
+}
+
+.customer-360-legend .is-system {
+  background: #a9c9c2;
+}
+
+.customer-360-journey {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: center;
+  gap: 3px;
+  margin-top: 15px;
+}
+
+.customer-360-journey-step {
+  position: relative;
+  padding-top: 8px;
+  border-top: 2px solid #d5e2f2;
+  color: #64758b;
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.customer-360-journey-step::before {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #8fa2ba;
+  box-shadow: 0 0 0 1px #cbd8e7;
+  content: "";
+  transform: translateX(-50%);
+}
+
+.customer-360-journey-step.has-data {
+  border-top-color: #79a4e7;
+  color: #24486f;
+}
+
+.customer-360-journey-step.has-data::before {
+  background: #2d68dc;
+  box-shadow: 0 0 0 1px #7fa8e7;
+}
+
+.customer-360-journey-step b {
+  display: block;
+  margin-top: 2px;
+  color: #1c3554;
+  font-size: 13px;
+}
+
+.customer-360-meta {
+  margin-top: 14px;
+  color: #8794a6;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.timeline-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+  padding-top: 15px;
+  border-top: 1px dashed #dbe5f0;
+}
+
+.timeline-load-more .btn {
+  gap: 8px;
+  min-width: 170px;
+}
+
+@media (max-width: 980px) {
+  .customer-360-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-360-contact {
+    border-right: 0;
+    border-bottom: 1px solid var(--ui-line);
+  }
+}
+
+@media (max-width: 620px) {
+  .customer-360-contact,
+  .customer-360-insights {
+    padding: 15px;
+  }
+
+  .customer-360-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-360-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+
+  .customer-360-kpi:nth-child(3) {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .customer-360-activity-column {
+    min-width: 0;
+  }
+
+  .customer-360-journey {
+    gap: 1px;
+  }
+}

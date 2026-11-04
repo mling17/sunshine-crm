@@ -204,9 +204,14 @@ class FormLayoutStructureTest(unittest.TestCase):
     def test_customer_detail_has_one_contact_information_row(self):
         source = self.views["customers.js"]
         detail = source[source.index("function viewCustomerDetail"):]
+        overview = source[
+            source.index("function customer360OverviewHtml"):
+            source.index("function viewCustomerDetail")
+        ]
 
-        self.assertEqual(detail.count("['联系人',"), 1)
-        self.assertIn("var contactParts = [c.company_name, c.primary_contact_name", detail)
+        self.assertEqual(overview.count("<dt>联系人</dt>"), 1)
+        self.assertIn("var contactLine = [contactName", overview)
+        self.assertIn("infoHtml: customer360OverviewHtml(c, records)", detail)
 
     def test_product_creation_uses_generated_code_and_order_form_import(self):
         products = self.views["products.js"]

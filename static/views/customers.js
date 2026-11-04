@@ -235,6 +235,159 @@ function pagerHtml(res) {
 }
 
 /* 客户详情页面逻辑 */
+function customer360Stage(c) {
+    var deals = c.deals || [];
+    var orders = c.orders || [];
+    if (orders.some(function (o) { return o.status === 'completed'; })) {
+        return ['已成交', 'is-done'];
+    }
+    if (orders.length) { return ['交付中', 'is-progress']; }
+    if (deals.some(function (d) { return d.stage === 'won'; })) {
+        return ['待下单', 'is-progress'];
+    }
+    if (deals.some(function (d) { return d.stage === 'confirm'; })) {
+        return ['待客户确认', 'is-progress'];
+    }
+    if (deals.length) { return ['商机跟进', 'is-progress']; }
+    return ['新客户', 'is-new'];
+}
+
+function customerActivityData(records) {
+    var now = new Date();
+    var buckets = [];
+    var i;
+    for (i = 5; i >= 0; i--) {
+        var d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        buckets.push({
+            year: d.getFullYear(),
+            month: d.getMonth(),
+            label: (d.getMonth() + 1) + '月',
+            follow: 0,
+            system: 0
+        });
+    }
+    (records || []).forEach(function (record) {
+        var date = new Date(record.at);
+        if (isNaN(date.getTime())) { return; }
+        buckets.forEach(function (bucket) {
+            if (date.getFullYear() === bucket.year && date.getMonth() === bucket.month) {
+                if (record.type === 'follow') { bucket.follow += 1; }
+                else { bucket.system += 1; }
+            }
+        });
+    });
+    return buckets;
+}
+
+function customer360OverviewHtml(c, records) {
+    var deals = c.deals || [];
+    var orders = c.orders || [];
+    var aftersales = c.aftersales || [];
+    var sortedRecords = sortedTimelineRecords(records || []);
+    var latestFollow = sortedRecords.filter(function (r) { return r.type === 'follow'; })[0] || sortedRecords[0];
+    var stage = customer360Stage(c);
+    var orderTotal = orders.reduce(function (sum, order) {
+        return sum + (Number(order.amount) || 0);
+    }, 0);
+    var activity = customerActivityData(sortedRecords);
+    var maxActivity = 1;
+    activity.forEach(function (month) {
+        maxActivity = Math.max(maxActivity, month.follow + month.system);
+    });
+    var followTotal = sortedRecords.filter(function (r) { return r.type === 'follow'; }).length;
+    var systemTotal = sortedRecords.length - followTotal;
+    var contactName = c.primary_contact_name || c.name;
+    var company = c.company_name || c.name;
+    var contactLine = [contactName, c.primary_contact_phone || c.phone,
+        (c.primary_contact_wechat || c.wechat) ? '微信 ' + (c.primary_contact_wechat || c.wechat) : '']
+        .filter(Boolean).join(' · ');
+    var monogram = String(c.name || '客').trim().slice(0, 1);
+    var source = c.source ? (SOURCE_LABELS[c.source] || c.source) : '—';
+    if (c.source === 'other' && c.source_other) { source = c.source_other; }
+    var intent = c.intent_level ? (INTENT_LABELS[c.intent_level] || c.intent_level) : '—';
+    var latestHtml = latestFollow
+        ? '<div class="customer-360-latest-head"><strong>' +
+          (latestFollow.type === 'follow' ? '最近一次跟进' : '最近业务动态') + '</strong><time>' +
+          esc(fmtDateTime(latestFollow.at)) + '</time></div>' +
+          '<p>' + esc(latestFollow.content || '—') + '</p>' +
+          (latestFollow.next_date
+            ? '<div class="customer-360-next' +
+              (latestFollow.next_date < todayISO() ? ' is-overdue' : '') + '">下次跟进 ' +
+              esc(latestFollow.next_date) +
+              (latestFollow.next_date < todayISO() ? ' · 已到期' : '') + '</div>'
+            : '')
+        : '<div class="customer-360-latest-head"><strong>最近一次跟进</strong></div>' +
+          '<p>还没有跟进记录，记下第一次沟通后会显示在这里。</p>';
+
+    var chartHtml = activity.map(function (month) {
+        var total = month.follow + month.system;
+        var followHeight = total ? Math.max(3, Math.round(month.follow / maxActivity * 100)) : 0;
+        var systemHeight = total ? Math.max(3, Math.round(month.system / maxActivity * 100)) : 0;
+        return '<div class="customer-360-activity-column" title="' + esc(month.label) + '：' +
+            total + ' 次动态（跟进 ' + month.follow + '，系统节点 ' + month.system + '）">' +
+            '<span class="customer-360-activity-count">' + (total || '') + '</span>' +
+            '<div class="customer-360-activity-plot" aria-hidden="true">' +
+            (month.system ? '<i class="customer-360-activity-segment is-system" style="height:' +
+                systemHeight + '%"></i>' : '') +
+            (month.follow ? '<i class="customer-360-activity-segment is-follow" style="height:' +
+                followHeight + '%"></i>' : '') +
+            '</div><span class="customer-360-activity-month">' + esc(month.label) + '</span></div>';
+    }).join('');
+
+    var journey = [
+        ['建档', 1],
+        ['商机', deals.length],
+        ['订单', orders.length],
+        ['售后', aftersales.length],
+        ['动态', sortedRecords.length]
+    ].map(function (step) {
+        return '<div class="customer-360-journey-step' + (step[1] ? ' has-data' : '') + '">' +
+            esc(step[0]) + '<b>' + step[1] + '</b></div>';
+    }).join('');
+
+    return '<section class="customer-360-overview" aria-label="客户全景信息">' +
+        '<div class="customer-360-contact">' +
+        '<div class="customer-360-identity">' +
+        '<span class="customer-360-mark" aria-hidden="true">' + esc(monogram) + '</span>' +
+        '<div class="customer-360-identity-copy"><div class="customer-360-company">' + esc(company) + '</div>' +
+        '<div class="customer-360-relationship">' + esc(contactLine || '暂无联系人信息') + '</div></div>' +
+        '<span class="customer-360-state ' + stage[1] + '">' + esc(stage[0]) + '</span></div>' +
+        '<dl class="customer-360-facts">' +
+        '<div class="customer-360-fact"><dt>联系电话</dt><dd>' +
+        esc(c.primary_contact_phone || c.phone || '—') + '</dd></div>' +
+        '<div class="customer-360-fact"><dt>微信</dt><dd>' +
+        esc(c.primary_contact_wechat || c.wechat || '—') + '</dd></div>' +
+        '<div class="customer-360-fact"><dt>所在地区</dt><dd>' + esc(c.location || '—') + '</dd></div>' +
+        '<div class="customer-360-fact"><dt>来源 / 意向</dt><dd>' +
+        esc(source + ' · ' + intent) + '</dd></div>' +
+        '<div class="customer-360-fact"><dt>负责人</dt><dd>' + esc(c.owner || '—') + '</dd></div>' +
+        '<div class="customer-360-fact"><dt>联系人</dt><dd>' + esc(contactLine || '—') + '</dd></div>' +
+        '</dl>' +
+        (c.note ? '<div class="customer-360-note"><span>备注</span><span>' + esc(c.note) + '</span></div>' : '') +
+        '<div class="customer-360-latest">' + latestHtml + '</div>' +
+        '</div>' +
+        '<div class="customer-360-insights">' +
+        '<div class="customer-360-kpis">' +
+        '<div class="customer-360-kpi"><div class="customer-360-kpi-label">累计订单额</div>' +
+        '<div class="customer-360-kpi-value is-money">' + esc(money(orderTotal)) + '</div></div>' +
+        '<div class="customer-360-kpi"><div class="customer-360-kpi-label">商机</div>' +
+        '<div class="customer-360-kpi-value">' + deals.length + '</div></div>' +
+        '<div class="customer-360-kpi"><div class="customer-360-kpi-label">订单</div>' +
+        '<div class="customer-360-kpi-value">' + orders.length + '</div></div>' +
+        '<div class="customer-360-kpi"><div class="customer-360-kpi-label">售后</div>' +
+        '<div class="customer-360-kpi-value">' + aftersales.length + '</div></div></div>' +
+        '<div class="customer-360-chart-head"><h3>近 6 个月业务动态</h3><span>共 ' +
+        sortedRecords.length + ' 次</span></div>' +
+        '<div class="customer-360-chart" role="img" aria-label="近 6 个月客户动态柱状图，人工跟进 ' +
+        followTotal + ' 次，系统节点 ' + systemTotal + ' 次">' + chartHtml + '</div>' +
+        '<div class="customer-360-legend"><span><i class="is-follow"></i>人工跟进 ' + followTotal +
+        '</span><span><i class="is-system"></i>系统节点 ' + systemTotal + '</span></div>' +
+        '<div class="customer-360-journey" aria-label="客户业务规模">' + journey + '</div>' +
+        '<div class="customer-360-meta">建档 ' + esc(fmtDateTime(c.created_at)) +
+        ' · 最近更新 ' + esc(fmtDateTime(c.updated_at)) + '</div>' +
+        '</div></section>';
+}
+
 function viewCustomerDetail(root, rawId) {
     var id = Number(rawId);
     if (!id || isNaN(id)) {
@@ -270,8 +423,6 @@ function viewCustomerDetail(root, rawId) {
             dealHtml +
             '</div>';
 
-        var contactParts = [c.company_name, c.primary_contact_name, c.primary_contact_phone,
-            c.primary_contact_wechat ? '微信 ' + c.primary_contact_wechat : ''].filter(Boolean);
         var actions =
             '<button type=\"button\" class=\"btn btn-sm\" id=\"toggleEditCustomer\">编辑客户</button>' +
             '<button type=\"button\" class=\"btn btn-sm btn-primary\" id=\"custToDeal\">转商机</button>';
@@ -288,19 +439,12 @@ function viewCustomerDetail(root, rawId) {
                 '</div></div>',
             badgesHtml: '<span class=\"badge muted\">' +
                 esc(dictLabel('customer_type', c.customer_type, c.customer_type || '—')) + '</span>',
-            infoHtml: infoGrid([
-                ['电话', c.phone || '—'],
-                ['微信', c.wechat || '—'],
-                ['地区', c.location || '—'],
-                ['联系人', contactParts.join(' · ') || '—'],
-                ['来源', c.source ? (SOURCE_LABELS[c.source] || c.source) : '—'],
-                ['意向', c.intent_level ? (INTENT_LABELS[c.intent_level] || c.intent_level) : '—'],
-                ['备注', c.note || '—'],
-                ['时间', '建档 ' + fmtDateTime(c.created_at) + ' · 最近更新 ' + fmtDateTime(c.updated_at)]
-            ]),
+            infoHtml: customer360OverviewHtml(c, records),
             actionsHtml: actions,
             placeholder: '这次沟通聊了什么？客户是什么态度？下一步做什么？',
             records: records,
+            initialTimelineLimit: 6,
+            timelineBatchSize: 6,
             extraHtml: filesCardHtml(collectFiles(records), '这个客户还没有上传图纸 / 报价单 / 现场照片') + dealsCard,
             onSubmit: function (p) {
                 var fd = new FormData();

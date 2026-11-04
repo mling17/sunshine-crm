@@ -307,10 +307,14 @@ document.addEventListener('click', function (ev) {
 });
 
 /* 履历时间线 */
-function timelineHtml(records) {
-  if (!records || !records.length) { return '<p class="empty">还没有跟进记录</p>'; }
-  var sorted = records.slice().sort(function (a, b) { return a.at < b.at ? 1 : -1; });
-  return '<div class="tl">' + sorted.map(function (r) {
+var TIMELINE_BATCH_SIZE = 8;
+
+function sortedTimelineRecords(records) {
+  return (records || []).slice().sort(function (a, b) { return a.at < b.at ? 1 : -1; });
+}
+
+function timelineItemsHtml(records) {
+  return (records || []).map(function (r) {
     var m = RECORD_META[r.type] || RECORD_META.follow;
     var meta = [];
     if (r.method) { meta.push('方式：' + (dictLabel('follow_method', r.method, r.method))); }
@@ -326,7 +330,14 @@ function timelineHtml(records) {
       timelineQuoteDetailHtml(r.detail) +
       photoThumbs(r.files) +
       '</div></div>';
-  }).join('') + '</div>';
+  }).join('');
+}
+
+function timelineHtml(records, limit) {
+  if (!records || !records.length) { return '<p class="empty">还没有跟进记录</p>'; }
+  var sorted = sortedTimelineRecords(records);
+  var visible = limit ? sorted.slice(0, limit) : sorted;
+  return '<div class="tl">' + timelineItemsHtml(visible) + '</div>';
 }
 
 function collectFiles(records) {
@@ -732,6 +743,15 @@ function renderEntityFollowPage(root, opts) {
     '<div class="entity-title-main"><h2><a class="crumb" href="' + opts.backHash + '">‹ ' +
     esc(opts.backLabel) + '</a> / ' + esc(opts.title) + '</h2></div>'
   );
+  var timelineRecords = sortedTimelineRecords(opts.records || []);
+  var timelineLimit = Number(opts.initialTimelineLimit) > 0
+    ? Number(opts.initialTimelineLimit)
+    : timelineRecords.length;
+  var timelineBatchSize = Number(opts.timelineBatchSize) > 0
+    ? Number(opts.timelineBatchSize)
+    : TIMELINE_BATCH_SIZE;
+  var timelineVisible = timelineRecords.slice(0, timelineLimit);
+
   root.innerHTML =
     (opts.hideEntityCard ? '' :
       '<div class="card">' +
@@ -753,7 +773,14 @@ function renderEntityFollowPage(root, opts) {
       : '<button type="button" class="btn btn-sm btn-primary" id="btnAddFollow">' +
       esc(opts.addLabel || '＋ 记一条跟进') + '</button>') +
     '</div>' +
-    timelineHtml(opts.records) +
+    (timelineRecords.length
+      ? '<div class="tl" id="entityTimeline">' + timelineItemsHtml(timelineVisible) + '</div>' +
+        (timelineRecords.length > timelineLimit
+          ? '<div class="timeline-load-more"><button type="button" class="btn" id="btnLoadMoreTimeline">' +
+            '加载更多 <span class="small muted" id="timelineRemaining">还有 ' +
+            (timelineRecords.length - timelineLimit) + ' 条</span></button></div>'
+          : '')
+      : '<p class="empty">还没有跟进记录</p>') +
     '</div>' +
     (opts.extraHtml || '');
 
@@ -767,6 +794,25 @@ function renderEntityFollowPage(root, opts) {
         extraHtml: opts.followExtraHtml || '',
         onSubmit: opts.onSubmit
       });
+    });
+  }
+
+  var loadMoreBtn = $('#btnLoadMoreTimeline', root);
+  if (loadMoreBtn) {
+    var timelineLoaded = timelineVisible.length;
+    loadMoreBtn.addEventListener('click', function () {
+      var nextBatch = timelineRecords.slice(timelineLoaded, timelineLoaded + timelineBatchSize);
+      var timeline = $('#entityTimeline', root);
+      if (timeline && nextBatch.length) {
+        timeline.insertAdjacentHTML('beforeend', timelineItemsHtml(nextBatch));
+        timelineLoaded += nextBatch.length;
+      }
+      var remaining = timelineRecords.length - timelineLoaded;
+      if (remaining <= 0) {
+        loadMoreBtn.parentNode.removeChild(loadMoreBtn);
+        return;
+      }
+      $('#timelineRemaining', root).textContent = '还有 ' + remaining + ' 条';
     });
   }
 }
