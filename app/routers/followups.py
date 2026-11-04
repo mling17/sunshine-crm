@@ -452,7 +452,7 @@ async def create_follow_up(
                 raise ApiError(
                     status_code=409,
                     code="lead_closed",
-                    message="线索已转化或已失效，无法添加跟进"
+                    message="线索已转化或已无效，无法添加跟进"
                 )
         elif object_type == "customer":
             # 检查客户是否存在

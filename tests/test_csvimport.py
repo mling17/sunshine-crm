@@ -307,14 +307,14 @@ class LeadCsvImportTest(ApiTestCase):
             },
         )
 
-    def test_import_leads_defaults_to_medium_and_writes_create_history(self):
+    def test_import_leads_defaults_to_low_and_writes_create_history(self):
         resp = self.commit_leads(self.CSV)
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["imported"], 2)
 
         leads = self.client.get("/api/crm/leads?size=100").json()["items"]
         self.assertEqual(len(leads), 2)
-        self.assertTrue(all(item["intent_level"] == "medium" for item in leads))
+        self.assertTrue(all(item["intent_level"] == "low" for item in leads))
         self.assertTrue(all(item["lead_type"] == "other" for item in leads))
         self.assertEqual({item["source"] for item in leads}, {"referral", "wechat"})
 

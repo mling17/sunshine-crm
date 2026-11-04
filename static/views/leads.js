@@ -15,7 +15,7 @@ function viewLeads(root) {
         return Promise.resolve();
     }
     /* 线索转商机后归入客户链路，不再在线索池提供「已转化」入口。 */
-    var tabs = [['', '全部'], ['new', '新线索'], ['following', '跟进中'], ['invalid', '已失效']];
+    var tabs = [['', '全部'], ['new', '新线索'], ['following', '跟进中'], ['invalid', '无效']];
     var tabHtml = tabs.map(function (t) {
         return '<button type="button" class="tab-btn' + ((st.status || '') === t[0] ? ' active' : '') +
             '" data-status="' + t[0] + '">' + t[1] + '</button>';
@@ -88,7 +88,7 @@ function leadIntentBadge(level) {
 function leadStatusBadge(status) {
     var map = {
         new: ['ok', '新线索'], following: ['warn', '跟进中'],
-        converted: ['muted', '已转化'], invalid: ['danger', '已失效']
+        converted: ['muted', '已转化'], invalid: ['danger', '无效']
     };
     var v = map[status] || map.new;
     return '<span class="badge ' + v[0] + '">' + v[1] + '</span>';
@@ -372,8 +372,7 @@ function viewLeadDetail(root, rawId) {
                 actions += '<a class="btn btn-sm" href="#/customers/' + l.converted_customer_id + '">看客户档案 ›</a>';
             }
         } else if (invalid) {
-            actions += '<button type="button" class="btn btn-sm btn-danger" id="deleteLeadBtn">删除线索</button>' +
-                '<button type="button" class="btn btn-sm" disabled title="已失效线索不能转商机">转商机</button>';
+            actions += '<button type="button" class="btn btn-sm btn-danger" id="deleteLeadBtn">删除线索</button>';
         } else {
             actions += '<button type="button" class="btn btn-sm" id="leadEditBtn">编辑线索</button>' +
                 '<button type="button" class="btn btn-sm btn-primary" id="leadToDealBtn">转商机</button>' +
@@ -406,7 +405,7 @@ function viewLeadDetail(root, rawId) {
             actionsHtml: actions,
             placeholder: '这次沟通聊了什么？对方什么态度？下一步做什么？',
             canFollow: !invalid && !converted,
-            lockedText: converted ? '线索已转商机，请到客户档案中继续跟进' : '已失效的线索不能再添加跟进',
+            lockedText: converted ? '线索已转商机，请到客户档案中继续跟进' : '无效的线索不能再添加跟进',
             records: records,
             extraHtml: filesCardHtml(collectFiles(records), '这个线索还没有上传图纸 / 报价单 / 现场照片'),
             onSubmit: function (p) {
@@ -520,7 +519,7 @@ function openLeadDeleteConfirm(leadId) {
             '<div class="modal-header"><h3>删除线索</h3>' +
             '<button type="button" class="btn btn-link modal-close">×</button></div>' +
             '<div class="modal-body">' +
-            '<div class="notice danger-notice">即将删除已失效线索「' + esc(name) +
+            '<div class="notice danger-notice">即将删除无效线索「' + esc(name) +
             '」。数据会标记为已删除，不再出现在线索池，但可由管理员从数据库追溯。</div>' +
             '<div class="form-actions">' +
             '<button type="button" class="btn modal-cancel">取消</button>' +

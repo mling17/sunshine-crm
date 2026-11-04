@@ -448,7 +448,7 @@ def update_lead(lead_id: int, lead_update: LeadUpdate) -> LeadOut:
         
         # 检查是否为终态
         if lead["status"] in ("converted", "invalid"):
-            raise HTTPException(status_code=409, detail="线索已转化或已失效，无法修改")
+            raise HTTPException(status_code=409, detail="线索已转化或已无效，无法修改")
         
         # 构造更新字段
         current_tags = [
@@ -614,13 +614,13 @@ def invalidate_lead(lead_id: int, reason: dict) -> LeadOut:
         
         # 检查是否为终态
         if lead["status"] in ("converted", "invalid"):
-            raise HTTPException(status_code=409, detail="线索已转化或已失效")
+            raise HTTPException(status_code=409, detail="线索已转化或已无效")
         
         updated_at = now_iso()
         conn.execute(
             """
             UPDATE leads 
-            SET status = 'invalid', invalid_reason = ?, invalid_reason_other = ?, updated_at = ?
+            SET status = 'invalid', invalid_reason = ?, invalid_reason_other = ?, intent_level = 'none', updated_at = ?
             WHERE id = ?
             """,
             (invalid_reason, invalid_reason_other, updated_at, lead_id),
@@ -661,7 +661,7 @@ def delete_lead(lead_id: int) -> dict:
             raise ApiError(
                 status_code=409,
                 code="lead_not_invalid",
-                message="只有已失效的线索才能删除",
+                message="只有无效的线索才能删除",
             )
         now = now_iso()
         conn.execute(

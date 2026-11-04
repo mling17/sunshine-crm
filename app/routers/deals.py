@@ -43,7 +43,7 @@ from app.models import (
 from app.product_catalog import config_summary, get_product, product_snapshot
 from app.routers.auth import require_auth
 from app.security import now_iso, now_local_iso
-from app.services import next_no, resolve_carrier_contact
+from app.services import next_no, resolve_carrier_contact, upgrade_intent
 from app.timeline import add_entry, change_summary, entries_for
 
 router = APIRouter(
@@ -483,6 +483,8 @@ def create_deal(payload: DealIn) -> DealOut:
             ).strip(),
             detail={"amount": amount, "drive_type": drive},
         )
+        # 意向升级：客户绑定商机 → 至少「中」
+        upgrade_intent(conn, "customer", payload.customer_id, "medium")
         row = _deal_row(conn, deal_id)
     return _out(row)
 
@@ -1152,6 +1154,14 @@ def _create_order(
             now,
         ),
     )
+
+    # 意向升级：关联订单 → 至少「高」（客户与转化来源线索同步）
+    upgrade_intent(conn, "customer", deal["customer_id"], "high")
+    for _lead in conn.execute(
+        "SELECT id FROM leads WHERE converted_customer_id = ? AND is_delete = 0",
+        (deal["customer_id"],),
+    ).fetchall():
+        upgrade_intent(conn, "lead", _lead["id"], "high")
 
     deal_row = _deal_row(conn, deal_id)
     order_row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()

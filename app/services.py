@@ -291,6 +291,31 @@ def read_files(files: list, *, max_count: int | None = None) -> list[tuple[str, 
     return prepared
 
 
+INTENT_RANK = {"none": 0, "low": 1, "medium": 2, "high": 3}
+
+
+def upgrade_intent(conn: Connection, object_type: str, object_id: int, level: str) -> None:
+    """意向等级只升不降。
+
+    自动规则：导入默认 low → 绑定商机升到 medium → 关联订单升到 high。
+    用户手动修改（编辑表单 / 跟进弹层）不受此限制，这里只在事件触发时调用。
+    """
+    if level not in INTENT_RANK or not object_id:
+        return
+    table = "leads" if object_type == "lead" else "customers"
+    row = conn.execute(
+        f"SELECT intent_level FROM {table} WHERE id = ?", (object_id,)
+    ).fetchone()
+    if row is None:
+        return
+    current = row["intent_level"] if row["intent_level"] in INTENT_RANK else "none"
+    if INTENT_RANK[level] > INTENT_RANK[current]:
+        conn.execute(
+            f"UPDATE {table} SET intent_level = ?, updated_at = ? WHERE id = ?",
+            (level, now_iso(), object_id),
+        )
+
+
 def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> LeadConvertOut:
     """线索转化（单事务 8 步）。
 
@@ -557,6 +582,10 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
         """,
         (customer_id, deal_id, updated_at, lead_id),
     )
+
+    # 8. 意向升级：绑定商机 → 至少「中」（客户与原线索同步）
+    upgrade_intent(conn, "customer", customer_id, "medium")
+    upgrade_intent(conn, "lead", lead_id, "medium")
 
     # 系统履历：转化（线索页时间线能看到「🚩 转商机」，历史跟进已搬到客户名下）
     from app.timeline import add_entry as _add_entry

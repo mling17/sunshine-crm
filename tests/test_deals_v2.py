@@ -47,6 +47,19 @@ class DealsTest(ApiTestCase):
         self.assertEqual(deal["balance"], 0.0)
         self.assertIsNone(deal["closed_at"], "只有 won 才写 closed_at")
 
+    def test_create_deal_upgrades_intent_to_medium_without_downgrading_high(self):
+        low = self.create_customer(name="低意向客户", intent_level="low")
+        self.create_deal(low["id"])
+        low_detail = self.client.get(f"/api/crm/customers/{low['id']}").json()
+        self.assertEqual(low_detail["intent_level"], "medium")
+
+        high = self.create_customer(
+            name="高意向客户", phone="13900000001", intent_level="high"
+        )
+        self.create_deal(high["id"])
+        high_detail = self.client.get(f"/api/crm/customers/{high['id']}").json()
+        self.assertEqual(high_detail["intent_level"], "high")
+
     def test_deposit_and_balance_cannot_be_set_on_deal(self):
         c = self.create_customer(name="张伟")
         resp = self.client.post(

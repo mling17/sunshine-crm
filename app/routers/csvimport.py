@@ -700,7 +700,7 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     """
                     INSERT INTO leads (name, phone, wechat, location, note, lead_type, source,
                                        intent_level, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'medium', 'new', ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'low', 'new', ?, ?)
                     """,
                     (
                         values["name"],
@@ -758,8 +758,8 @@ async def commit_import(request: Request) -> ImportCommitOut:
                     """
                     INSERT INTO customers
                         (name, phone, wechat, location, note, customer_type, source,
-                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         intent_level, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'low', ?, ?)
                     """,
                     (
                         values["name"],

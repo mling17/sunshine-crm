@@ -346,6 +346,7 @@ class LeadsTest(ApiTestCase):
         body = resp.json()
         self.assertEqual(body["status"], "invalid")
         self.assertEqual(body["invalid_reason"], "no_intent")
+        self.assertEqual(body["intent_level"], "none")
 
     def test_invalidate_lead_with_other_reason(self):
         lead = self.create_lead(phone="13800138000")
@@ -358,6 +359,7 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(body["status"], "invalid")
         self.assertEqual(body["invalid_reason"], "other")
         self.assertEqual(body["invalid_reason_other"], "客户不愿意合作")
+        self.assertEqual(body["intent_level"], "none")
 
     def test_only_invalid_lead_can_be_soft_deleted(self):
         lead = self.create_lead(phone="13800138000")
@@ -504,6 +506,44 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(body["dedupe"], "forced")
         self.assertEqual(body["deal"]["spec"], "1200*2400")
         self.assertEqual(body["customer"]["created_at"], body["lead"]["created_at"])
+        self.assertEqual(body["lead"]["intent_level"], "medium")
+        self.assertEqual(body["customer"]["intent_level"], "medium")
+
+    def test_lead_conversion_and_order_upgrade_intent_to_high(self):
+        lead = self.create_lead(phone="13800138000", intent_level="low")
+        converted = self.client.post(f"/api/crm/leads/{lead['id']}/convert", json={
+            "mode": "new",
+            "deal": {
+                "title": "测试商机",
+                "product_type": "天窗",
+                "model": "XW-120",
+                "spec": "1200*2400",
+                "drive_type": "manual",
+                "amount": 12800.0,
+            },
+        })
+        self.assertEqual(converted.status_code, 200, converted.text)
+        body = converted.json()
+        customer = body["customer"]
+        deal = self.create_deal(customer["id"], amount=12800.0, drive_type="manual")
+
+        advanced = self.client.put(
+            f"/api/crm/deals/{deal['id']}", json={"stage": "confirm"}
+        )
+        self.assertEqual(advanced.status_code, 200, advanced.text)
+
+        order = self.client.post(
+            f"/api/crm/deals/{deal['id']}/orders",
+            json={"deposit": 1000, "logistics_mode": "self"},
+        )
+        self.assertEqual(order.status_code, 200, order.text)
+
+        lead_detail = self.client.get(f"/api/crm/leads/{lead['id']}").json()
+        customer_detail = self.client.get(
+            f"/api/crm/customers/{customer['id']}"
+        ).json()
+        self.assertEqual(lead_detail["intent_level"], "high")
+        self.assertEqual(customer_detail["intent_level"], "high")
 
     def test_company_lead_conversion_keeps_primary_contact_searchable(self):
         lead = self.create_lead(
@@ -850,7 +890,7 @@ class FollowUpsV2Test(ApiTestCase):
             content="测试跟进内容"
         )
         self.assertEqual(resp.status_code, 409)
-        self.assertIn("线索已转化或已失效", resp.json()["detail"])
+        self.assertIn("线索已转化或已无效", resp.json()["detail"])
 
     def test_follow_up_with_intent_level_update(self):
         """跟进时更新意向等级"""

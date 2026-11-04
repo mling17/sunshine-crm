@@ -4502,3 +4502,16 @@ table.data-table a:hover { text-decoration: underline; }
   }
 }
 
+
+
+/* ================= 字典编辑弹窗：键值编辑区优化 =================
+ * 问题：弹窗是限高 flex 容器，只有 .table-wrap 因 overflow:auto 允许收缩，
+ * 选项多时表格被压成一条 ~170px 的滚动条（30 个型号只剩 1.5 行可视）。
+ * 修复：弹窗内表格保持自然高度，由弹窗整体滚动；同时加宽弹窗、放宽行距。 */
+.modal-body > .table-wrap { flex: 0 0 auto; }
+
+.modal-content.wide.dict-edit-modal { width: min(94vw, 960px); max-width: 960px; }
+.dict-edit-modal .dict-table th { padding: 9px 10px; }
+.dict-edit-modal .dict-table td { padding: 8px 10px; }
+.dict-edit-modal .dict-input { min-height: 30px; }
+.dict-edit-modal .dict-new .dict-input { flex: 1 1 240px; min-height: 34px; }

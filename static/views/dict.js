@@ -199,7 +199,7 @@ function openDictModal(dict) {
       : '<p class="small muted">该字典为「' + esc(lv.name) + '」，' + esc(lv.tip) + '。</p>';
 
     modal.innerHTML =
-      '<div class="modal-content wide">' +
+      '<div class="modal-content wide dict-edit-modal">' +
         '<div class="modal-header">' +
           '<h3>' + esc(dict.name) + ' <span class="badge ' + lv.cls + '">' + esc(dict.level) + ' · ' + esc(lv.name) + '</span></h3>' +
           '<button type="button" class="btn-link modal-close" aria-label="关闭">×</button>' +
