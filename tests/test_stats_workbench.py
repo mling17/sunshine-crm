@@ -4,7 +4,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, datetime, timedelta
 
-from tests._util import ApiTestCase
+from tests._util import ApiTestCase, insert_customer, insert_order
 
 
 class StatsTest(ApiTestCase):
@@ -126,6 +126,52 @@ class StatsTest(ApiTestCase):
 
 
 class WorkbenchTest(ApiTestCase):
+    def test_today_activity_counts_new_records_and_followups(self):
+        customer = insert_customer(name="今日客户", phone="13800009901")
+        order = insert_order(
+            customer_id=customer["id"],
+            amount=5000.0,
+            status="completed",
+        )
+        lead = self.client.post(
+            "/api/crm/leads",
+            json={"name": "今日线索", "phone": "13800009902", "source": "wechat"},
+        )
+        self.assertEqual(lead.status_code, 200, lead.text)
+        lead = lead.json()
+        aftersale = self.client.post(
+            "/api/crm/aftersales",
+            json={
+                "order_id": order["id"],
+                "type": "repair",
+                "description": "今日售后",
+            },
+        )
+        self.assertEqual(aftersale.status_code, 200, aftersale.text)
+
+        self.add_follow_up(customer["id"], content="今日电话回访")
+        lead_follow = self.client.post(
+            "/api/crm/follow-ups",
+            data={
+                "object_type": "lead",
+                "object_id": str(lead["id"]),
+                "content": "今日微信沟通",
+            },
+        )
+        self.assertEqual(lead_follow.status_code, 200, lead_follow.text)
+
+        today = {
+            item["key"]: item
+            for item in self.dashboard()["stats"]["today_activity"]
+        }
+        self.assertEqual(set(today), {"lead", "customer", "deal", "order", "aftersale"})
+        self.assertTrue(all(item["new_count"] == 1 for item in today.values()))
+        self.assertEqual(today["lead"]["followups"], 1)
+        self.assertEqual(today["customer"]["followups"], 1)
+        self.assertEqual(today["deal"]["followups"], 0)
+        self.assertEqual(today["order"]["followups"], 0)
+        self.assertEqual(today["aftersale"]["followups"], 0)
+
     def test_in_progress_and_recent_activities(self):
         c = self.create_customer(name="张三")
         d = self.create_deal(c["id"], amount=4000.0, drive_type="manual")
@@ -157,6 +203,10 @@ class WorkbenchTest(ApiTestCase):
 
     def test_dashboard_adds_yesterday_summary_and_recent_services(self):
         stats = self.dashboard()["stats"]
+        self.assertEqual(
+            {item["key"] for item in stats["today_activity"]},
+            {"lead", "customer", "deal", "order", "aftersale"},
+        )
         self.assertEqual(
             {item["key"] for item in stats["yesterday_activity"]},
             {"lead", "customer", "deal", "order", "aftersale"},

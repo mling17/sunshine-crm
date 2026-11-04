@@ -654,6 +654,8 @@ class DashboardStatsOut(BaseModel):
     orders_by_status: dict[str, dict[str, int | float]] = Field(default_factory=dict)
     recent_orders: list[dict] = Field(default_factory=list)
     aftersale_sla_alerts: list[dict] = Field(default_factory=list)
+    #: 今日各业务对象的新增数与跟进次数（工作台“今日工作统计”）
+    today_activity: list[dict] = Field(default_factory=list)
     #: 昨日各业务对象的新增数与跟进次数（工作台“昨日新增与跟进”）
     yesterday_activity: list[dict] = Field(default_factory=list)
     #: 最近售后单（工作台售后提醒区）

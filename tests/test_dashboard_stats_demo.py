@@ -56,6 +56,9 @@ class ProductionDashboardStatsTest(unittest.TestCase):
         styles = (ROOT / "static" / "dashboard-stats.css").read_text(encoding="utf-8")
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
+        self.assertIn("今日工作统计", dashboard)
+        self.assertIn("today_activity", dashboard)
+        self.assertIn("dashTodayItem", dashboard)
         self.assertIn("昨日新增与跟进", dashboard)
         self.assertIn("recent_aftersales", dashboard)
         self.assertIn("ds-work-grid", dashboard)
@@ -68,6 +71,8 @@ class ProductionDashboardStatsTest(unittest.TestCase):
         self.assertIn("/stats?range=", stats)
         self.assertIn("dashboard-stats.css", html)
         self.assertIn(".ds-page", styles)
+        self.assertIn(".ds-today-card", styles)
+        self.assertIn(".ds-today-grid", styles)
         self.assertIn("@media (max-width: 760px)", styles)
         self.assertIn("prefers-reduced-motion", styles)
 

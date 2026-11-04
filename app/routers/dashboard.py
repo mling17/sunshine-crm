@@ -129,10 +129,11 @@ WHERE a.status = 'pending'
 ORDER BY a.created_at ASC
 """
 
-#: 工作台“昨日新增与跟进”：以昨天本地自然日为界，客服/订单系统事件不计入人工跟进。
-_YESTERDAY_ACTIVITY_SQL = """
+#: 工作台“新增与跟进”：按本地自然日汇总 5 个业务入口，系统事件不计入人工跟进。
+def _daily_activity_sql(day_expr: str) -> str:
+    return f"""
 WITH y AS (
-  SELECT date('now','localtime','-1 day') AS day
+  SELECT {day_expr} AS day
 )
 SELECT 'lead' AS module,
        (SELECT COUNT(*) FROM leads
@@ -169,11 +170,16 @@ UNION ALL
 SELECT 'aftersale',
        (SELECT COUNT(*) FROM aftersales
          WHERE is_delete = 0
-           AND date(datetime(created_at,'localtime')) = (SELECT day FROM y)),
+           -- 售后单使用本地无时区时间；再按 UTC 转本地会把傍晚的记录推到次日。
+           AND date(created_at) = (SELECT day FROM y)),
        (SELECT COUNT(*) FROM follow_ups
          WHERE is_delete = 0 AND kind = 'follow' AND object_type = 'aftersale'
            AND date(datetime(created_at,'localtime')) = (SELECT day FROM y))
 """
+
+
+_TODAY_ACTIVITY_SQL = _daily_activity_sql("date('now','localtime')")
+_YESTERDAY_ACTIVITY_SQL = _daily_activity_sql("date('now','localtime','-1 day')")
 
 #: 售后提醒卡只展示最近 4 单，超时仍以 created_at 与本地日期差计算。
 _RECENT_AFTERSALES_SQL = """
@@ -193,6 +199,25 @@ SELECT a.id, a.no, a.type, a.status, a.description, a.created_at,
 def _month_won(conn) -> MonthWonOut:
     row = conn.execute(_MONTH_WON_SQL).fetchone()
     return MonthWonOut(count=int(row["count"] or 0), amount=float(row["amount"] or 0.0))
+
+
+def _activity_summary(rows) -> list[dict]:
+    names = {
+        "lead": "线索",
+        "customer": "客户",
+        "deal": "商机",
+        "order": "订单",
+        "aftersale": "售后",
+    }
+    return [
+        {
+            "key": row["module"],
+            "name": names[row["module"]],
+            "new_count": int(row["new_count"] or 0),
+            "followups": int(row["followups"] or 0),
+        }
+        for row in rows
+    ]
 
 
 @router.get("/dashboard", response_model=DashboardOut)
@@ -288,21 +313,12 @@ def get_dashboard() -> DashboardOut:
                 "customer_name": row["customer_name"]
             })
 
-        yesterday_activity = [
-            {
-                "key": row["module"],
-                "name": {
-                    "lead": "线索",
-                    "customer": "客户",
-                    "deal": "商机",
-                    "order": "订单",
-                    "aftersale": "售后",
-                }[row["module"]],
-                "new_count": int(row["new_count"] or 0),
-                "followups": int(row["followups"] or 0),
-            }
-            for row in conn.execute(_YESTERDAY_ACTIVITY_SQL).fetchall()
-        ]
+        today_activity = _activity_summary(
+            conn.execute(_TODAY_ACTIVITY_SQL).fetchall()
+        )
+        yesterday_activity = _activity_summary(
+            conn.execute(_YESTERDAY_ACTIVITY_SQL).fetchall()
+        )
 
         recent_aftersales = [
             {
@@ -349,6 +365,7 @@ def get_dashboard() -> DashboardOut:
             orders_by_status=orders_by_status,
             recent_orders=recent_orders,
             aftersale_sla_alerts=aftersale_sla_alerts,
+            today_activity=today_activity,
             yesterday_activity=yesterday_activity,
             recent_aftersales=recent_aftersales,
             in_progress_deals=in_progress,
