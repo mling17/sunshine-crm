@@ -85,13 +85,17 @@ function leadIntentBadge(level) {
     return '<span class="badge ' + cls + '">' + esc(label) + '</span>';
 }
 
-function leadStatusBadge(status) {
+function leadStatusBadge(status, compact) {
     var map = {
-        new: ['ok', '新线索'], following: ['warn', '跟进中'],
-        converted: ['muted', '已转化'], invalid: ['danger', '无效']
+        new: ['ok', '新线索', '新'], following: ['warn', '跟进中', '跟'],
+        converted: ['muted', '已转化', '转'], invalid: ['danger', '无效', '无']
     };
     var v = map[status] || map.new;
-    return '<span class="badge ' + v[0] + '">' + v[1] + '</span>';
+    if (!compact) {
+        return '<span class="badge ' + v[0] + '">' + v[1] + '</span>';
+    }
+    return '<span class="badge ' + v[0] + ' lead-status-badge" title="' + v[1] +
+        '" aria-label="' + v[1] + '">' + v[2] + '</span>';
 }
 
 function leadDetailTags(tags) {
@@ -130,16 +134,25 @@ function loadLeads(root) {
         listEl.innerHTML = dataTable([
             { title: '名称', render: function (l) {
                 var name = l.name || (l.lead_type === 'company' ? l.company_name : '') || '—';
-                return '<a href="#/leads/' + l.id + '">' + esc(name) + '</a>' +
+                return '<div class="lead-name-cell"><div class="lead-name-main">' +
+                    '<a class="lead-name-link" href="#/leads/' + l.id + '" title="' + esc(name) + '">' +
+                    esc(name) + '</a>' +
                     (l.company_name && l.lead_type === 'company' && l.company_name !== name
-                        ? '<div class="small muted">' + esc(l.company_name) + '</div>' : '') +
-                    ' ' + leadStatusBadge(l.status);
+                        ? '<div class="lead-company muted" title="' + esc(l.company_name) + '">' +
+                            esc(l.company_name) + '</div>' : '') +
+                    '</div>' + leadStatusBadge(l.status, true) + '</div>';
             } },
             { title: '类型', render: function (l) { return esc(leadTypeText(l)); }, nowrap: true },
             { title: '来源', render: function (l) { return esc(leadSourceText(l)); }, nowrap: true },
             { title: '地区', render: function (l) { return esc(l.location || '—'); } },
-            { title: '微信号', render: function (l) { return esc(l.wechat || '—'); }, nowrap: true },
-            { title: '联系方式', render: function (l) { return esc(l.phone || '—'); }, nowrap: true },
+            { title: '微信号', render: function (l) {
+                var wechat = l.wechat || '—';
+                return '<span class="lead-cell-ellipsis" title="' + esc(wechat) + '">' + esc(wechat) + '</span>';
+            }, nowrap: true },
+            { title: '联系方式', render: function (l) {
+                var phone = l.phone || '—';
+                return '<span class="lead-cell-ellipsis" title="' + esc(phone) + '">' + esc(phone) + '</span>';
+            }, nowrap: true },
             { title: '标签', render: function (l) {
                 return (l.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') || '—';
             } },
@@ -162,7 +175,7 @@ function loadLeads(root) {
                 return opButtons(ops);
             } }
         ], items, st.q || st.status ? '没有匹配的线索，换个条件试试'
-            : '还没有线索，点右上「新增线索」开始');
+            : '还没有线索，点右上「新增线索」开始', 'lead-table');
 
         pagerEl.innerHTML = pagerHtml(res);
         pagerEl.onclick = function (ev) {

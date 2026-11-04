@@ -14,6 +14,7 @@ class LeadsUiStructureTest(unittest.TestCase):
         self.js = (ROOT / "static/views/leads.js").read_text(encoding="utf-8")
         self.shared = (ROOT / "static/views/shared.js").read_text(encoding="utf-8")
         self.css = (ROOT / "static/app.css").read_text(encoding="utf-8")
+        self.polish_css = (ROOT / "static/ui-polish.css").read_text(encoding="utf-8")
 
     def test_list_keeps_separate_tag_and_intent_columns(self):
         self.assertIn("{ title: '类型'", self.js)
@@ -25,6 +26,23 @@ class LeadsUiStructureTest(unittest.TestCase):
             "dictLabel('customer_type', l.lead_type, l.lead_type || '—')",
             self.js,
         )
+
+    def test_list_truncates_long_values_and_uses_compact_status_badges(self):
+        for marker in (
+            'class="lead-name-cell"',
+            'class="lead-cell-ellipsis"',
+            "leadStatusBadge(l.status, true)",
+            "'lead-table'",
+            "new: ['ok', '新线索', '新']",
+            "following: ['warn', '跟进中', '跟']",
+            "invalid: ['danger', '无效', '无']",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.js)
+        self.assertIn("tableClass", self.shared)
+        self.assertIn("table.data-table.lead-table", self.polish_css)
+        self.assertIn("table-layout: fixed", self.polish_css)
+        self.assertIn(".lead-status-badge", self.polish_css)
 
     def test_detail_heading_groups_tags_and_right_aligned_badges(self):
         for marker in ("titleHtml:", "lead-detail-title-line", "detail-title-tags"):
