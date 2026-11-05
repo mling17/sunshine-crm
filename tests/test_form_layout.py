@@ -43,7 +43,6 @@ class FormLayoutStructureTest(unittest.TestCase):
             "shared.js": [
                 '<form id="fuModalForm" class="form-grid"',
             ],
-            "dashboard.js": '<form id="quickFuForm" class="form-grid"',
             "aftersales.js": [
                 '<form id="asFinishForm" class="form-grid"',
             ],
@@ -57,6 +56,7 @@ class FormLayoutStructureTest(unittest.TestCase):
 
         self.assertIn('<form id="profileForm" class="modal-body form-grid"', self.index)
         self.assertIn('<form id="passwordForm" class="modal-body form-grid"', self.index)
+        self.assertNotIn("quickFuForm", self.views["dashboard.js"])
 
     def test_product_menu_follows_aftersales_and_uses_data_dictionary(self):
         aftersales = self.index.index('data-view="aftersales"')

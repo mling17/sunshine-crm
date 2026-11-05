@@ -656,7 +656,9 @@ class DashboardStatsOut(BaseModel):
     today_activity: list[dict] = Field(default_factory=list)
     #: 昨日各业务对象的新增数与跟进次数（工作台“昨日新增与跟进”）
     yesterday_activity: list[dict] = Field(default_factory=list)
-    #: 最近售后单（工作台售后提醒区）
+    #: 未完成售后单准确数量（工作台“进行中售后”）
+    active_aftersales_count: int = 0
+    #: 最近未完成售后单（工作台售后提醒区，最多 4 条）
     recent_aftersales: list[dict] = Field(default_factory=list)
 
 

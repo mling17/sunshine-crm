@@ -42,12 +42,30 @@ class DashboardNavigationUiTest(unittest.TestCase):
         self.assertIn("window.scrollTo({", self.dashboard)
         self.assertIn("heading.focus({ preventScroll: true });", self.dashboard)
 
+    def test_todo_action_links_to_object_detail(self):
+        self.assertIn("function dashboardTodoHref(item)", self.dashboard)
+        self.assertIn('"#/deals/" + item.deal_id', self.dashboard)
+        self.assertIn('"#/customers/" + item.customer_id', self.dashboard)
+        self.assertIn("dashboardTodoHref(item) + '\">跟进</a>", self.dashboard)
+        self.assertNotIn("data-log-fu", self.dashboard)
+        self.assertNotIn("openQuickFollowup", self.dashboard)
+
+    def test_dashboard_counts_and_lists_only_active_aftersales(self):
+        self.assertIn('label: "进行中售后"', self.dashboard)
+        self.assertIn("stats.active_aftersales_count", self.dashboard)
+        self.assertIn(
+            'item.status === "pending" || item.status === "processing"',
+            self.dashboard,
+        )
+        self.assertIn("var serviceHtml = activeServices.length", self.dashboard)
+        self.assertNotIn('label: "超时售后"', self.dashboard)
+
     def test_dashboard_script_and_cache_versions_are_refreshed(self):
         self.assertIn(
-            "/crm/views/dashboard.js?v=20261105dashboard-scroll1",
+            "/crm/views/dashboard.js?v=20261105dashboard-active1",
             self.index,
         )
-        self.assertIn("const CACHE = 'crm-shell-v79';", self.service_worker)
+        self.assertIn("const CACHE = 'crm-shell-v80';", self.service_worker)
 
 
 if __name__ == "__main__":

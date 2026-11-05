@@ -63,6 +63,12 @@ function dashScrollToTarget(root, targetId) {
   if (heading) { heading.focus({ preventScroll: true }); }
 }
 
+function dashboardTodoHref(item) {
+  return item.deal_id
+    ? "#/deals/" + item.deal_id
+    : "#/customers/" + item.customer_id;
+}
+
 function dashYesterdayItem(item, all) {
   var maxNew = Math.max.apply(null, all.map(function (entry) { return Number(entry.new_count || 0); }).concat([1]));
   var maxFollow = Math.max.apply(null, all.map(function (entry) { return Number(entry.followups || 0); }).concat([1]));
@@ -119,11 +125,17 @@ function viewDashboard(root) {
   return api("/dashboard").then(function (d) {
     var stats = d.stats || {};
     var todos = d.today_followups || [];
-    var monthWon = d.month_won || stats.month_won || { count: 0, amount: 0 };
     var orders = stats.orders_by_status || {};
     var today = stats.today_activity || [];
     var yesterday = stats.yesterday_activity || [];
-    var services = stats.recent_aftersales || [];
+    var recentServices = stats.recent_aftersales || [];
+    var activeServices = recentServices.filter(function (item) {
+      return item.status === "pending" || item.status === "processing";
+    });
+    var activeServicesCount = Math.max(
+      Number(stats.active_aftersales_count || 0),
+      activeServices.length
+    );
     var activities = stats.recent_activities || [];
     var alerts = stats.aftersale_sla_alerts || [];
     var overdue = todos.filter(function (item) { return Number(item.days_overdue || 0) > 0; });
@@ -131,9 +143,6 @@ function viewDashboard(root) {
     var openOrders = openStatuses.reduce(function (sum, pair) {
       return sum + Number((orders[pair[0]] || {}).count || 0);
     }, 0);
-    var overdueServices = services.filter(function (item) {
-      return item.status !== "done" && Number(item.days_pending || 0) > 3;
-    }).length;
     var todayNew = today.reduce(function (sum, item) {
       return sum + Number(item.new_count || 0);
     }, 0);
@@ -174,9 +183,8 @@ function viewDashboard(root) {
             ? '<span class="ds-danger-badge">逾期 ' + item.days_overdue + " 天</span>"
             : "<span>今天</span>") +
         "</div></div>" +
-        '<div class="ds-todo-side"><button type="button" class="ds-button ds-button-primary ds-button-small" ' +
-          'data-log-fu="' + item.customer_id + '"' + (item.deal_id ? ' data-log-deal="' + item.deal_id + '"' : "") +
-          ">记一条</button></div>" +
+        '<div class="ds-todo-side"><a class="ds-button ds-button-primary ds-button-small" href="' +
+          dashboardTodoHref(item) + '">跟进</a></div>' +
       "</div>";
     }).join("") : '<div class="ds-empty"><span>' + dashIcon("won") +
       "</span><b>今天的跟进已经清空</b><small>接下来可以检查订单进度或售后提醒。</small></div>";
@@ -193,9 +201,9 @@ function viewDashboard(root) {
         esc(ORDER_STATUS_LABEL[pair[0]] || pair[1]) + "</small></span></a>";
     }).join("");
 
-    var serviceHtml = services.length ? services.map(function (item) {
+    var serviceHtml = activeServices.length ? activeServices.map(function (item) {
       var type = AFTERSALE_TYPE_LABEL[item.type] || item.type || "售后";
-      var urgent = item.status !== "done" && Number(item.days_pending || 0) > 3;
+      var urgent = item.status === "pending" && Number(item.days_pending || 0) > 3;
       var status = urgent ? "超时 " + item.days_pending + " 天"
         : (AFTERSALE_STATUS_LABEL[item.status] || item.status);
       return '<a class="ds-service' + (urgent ? " urgent" : "") + '" href="#/aftersales/' + item.id + '">' +
@@ -203,7 +211,7 @@ function viewDashboard(root) {
           esc(item.customer_name || "客户") + " · " + esc(type) + "</b><small>" +
           esc(item.description || item.no || "") + "</small></span>" +
         '<span class="ds-service-age">' + esc(status) + "</span></a>";
-    }).join("") : '<div class="ds-empty compact"><b>暂无售后提醒</b><small>最近售后会显示在这里。</small></div>';
+    }).join("") : '<div class="ds-empty compact"><b>没有未完成的售后单</b><small>处理完成后会自动移出这里。</small></div>';
 
     root.innerHTML = '<section class="ds-page ds-page-enter">' +
       '<header class="ds-heading"><div><p class="ds-eyebrow">' + esc(dashDateLabel()) + "</p>" +
@@ -240,12 +248,12 @@ function viewDashboard(root) {
             "</span><span>·</span><span>已发货 " + Number((orders.shipped || {}).count || 0) + "</span>"
         }) +
         dashKpi({
-          label: "超时售后",
-          value: String(overdueServices),
+          label: "进行中售后",
+          value: String(activeServicesCount),
           tone: "amber",
           icon: "service",
           href: "#/aftersales",
-          foot: "<span>本月成交 " + money(monthWon.amount) + "</span><span>·</span><span>SLA 3 天</span>"
+          foot: "<span>待处理</span><span>·</span><span>处理中</span>"
         }) +
       "</div>" +
       '<section class="ds-card ds-today-card"><div class="ds-today-summary">' +
@@ -278,7 +286,7 @@ function viewDashboard(root) {
             Number((orders.balance_paid || {}).count || 0) + " 单</strong></p></div>" +
             '<div class="ds-order-grid">' + orderChips + "</div></section>" +
           '<section class="ds-card"><div class="ds-card-head"><div><h2>售后提醒</h2></div>' +
-            '<span class="ds-count">' + services.length + "</span></div>" +
+            '<span class="ds-count">' + activeServicesCount + "</span></div>" +
             '<div class="ds-service-list">' + serviceHtml + "</div></section>" +
         "</div>" +
         '<section class="ds-card ds-activity-card"><div class="ds-card-head"><div><h2>最近动态</h2></div>' +
@@ -289,15 +297,6 @@ function viewDashboard(root) {
           "</div></section>" +
       "</div></section>";
 
-    $$("button[data-log-fu]", root).forEach(function (button) {
-      button.addEventListener("click", function () {
-        openQuickFollowup(
-          Number(button.getAttribute("data-log-fu")),
-          Number(button.getAttribute("data-log-deal")) || 0
-        );
-      });
-    });
-
     $$("[data-dashboard-scroll]", root).forEach(function (control) {
       control.addEventListener("click", function (event) {
         event.preventDefault();
@@ -305,63 +304,4 @@ function viewDashboard(root) {
       });
     });
   });
-}
-
-/* 行内「记一条」：POST /follow-ups，保存后刷新工作台。 */
-function openQuickFollowup(customerId, dealId) {
-  var modal = document.createElement("div");
-  modal.className = "modal";
-  modal.innerHTML =
-    '<div class="modal-overlay"></div>' +
-    '<div class="modal-content"><div class="modal-header"><h3>记一条跟进</h3>' +
-      '<button type="button" class="btn btn-link modal-close">×</button></div>' +
-      '<div class="modal-body"><form id="quickFuForm" class="form-grid" autocomplete="off">' +
-        '<div class="field"><label>跟进内容 *</label><textarea name="content" rows="4" maxlength="2000" required ' +
-          'placeholder="聊了什么、客户什么态度、下一步做什么"></textarea></div>' +
-        '<div class="row-2"><div class="field"><label>下次跟进日期</label>' +
-          '<input type="date" name="next_date" value="' + quickDayAfter(3) + '"></div>' +
-          '<div class="field"><label>跟进方式</label><select name="method">' +
-            dictOptions("follow_method", "wechat") + "</select></div></div>" +
-        '<div class="form-actions"><button type="button" class="btn modal-cancel">取消</button>' +
-          '<button type="submit" class="btn btn-primary">保存跟进</button></div>' +
-      "</form></div></div>";
-  document.body.appendChild(modal);
-
-  function close() {
-    if (modal.parentNode) { document.body.removeChild(modal); }
-  }
-  modal.querySelector(".modal-close").addEventListener("click", close);
-  modal.querySelector(".modal-cancel").addEventListener("click", close);
-  var form = modal.querySelector("form");
-  form.addEventListener("submit", function (ev) {
-    ev.preventDefault();
-    var button = form.querySelector('button[type="submit"]');
-    var content = String(form.querySelector('[name="content"]').value || "").trim();
-    if (!content) {
-      toast("跟进内容不能为空", true);
-      return;
-    }
-    var body = new FormData();
-    body.append("customer_id", String(customerId));
-    body.append("content", content);
-    body.append("method", form.querySelector('[name="method"]').value || "wechat");
-    var nextDate = form.querySelector('[name="next_date"]').value;
-    if (nextDate) { body.append("next_date", nextDate); }
-    if (dealId) { body.append("deal_id", String(dealId)); }
-    button.disabled = true;
-    api("/follow-ups", { method: "POST", body: body }).then(function () {
-      toast("已记录跟进");
-      close();
-      return render();
-    }).catch(function (err) {
-      toast(err.message, true);
-      button.disabled = false;
-    });
-  });
-}
-
-function quickDayAfter(days) {
-  var date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate());
 }

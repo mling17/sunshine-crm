@@ -181,7 +181,17 @@ SELECT 'aftersale',
 _TODAY_ACTIVITY_SQL = _daily_activity_sql("date('now','localtime')")
 _YESTERDAY_ACTIVITY_SQL = _daily_activity_sql("date('now','localtime','-1 day')")
 
-#: 售后提醒卡只展示最近 4 单，超时仍以 created_at 与本地日期差计算。
+#: 进行中售后只统计尚未结束的待处理/处理中单据。
+_ACTIVE_AFTERSALES_COUNT_SQL = """
+SELECT COUNT(*) AS n
+  FROM aftersales a
+  JOIN orders o ON o.id = a.order_id
+  JOIN customers c ON c.id = a.customer_id
+ WHERE a.is_delete = 0 AND o.is_delete = 0 AND c.is_delete = 0
+   AND a.status IN ('pending', 'processing')
+"""
+
+#: 售后提醒卡只展示最近 4 张未完成售后单，超时仍按 created_at 与本地日期差计算。
 _RECENT_AFTERSALES_SQL = """
 SELECT a.id, a.no, a.type, a.status, a.description, a.created_at,
        c.name AS customer_name, o.order_no,
@@ -191,6 +201,7 @@ SELECT a.id, a.no, a.type, a.status, a.description, a.created_at,
   JOIN orders o ON o.id = a.order_id
   JOIN customers c ON c.id = a.customer_id
  WHERE a.is_delete = 0 AND o.is_delete = 0 AND c.is_delete = 0
+   AND a.status IN ('pending', 'processing')
  ORDER BY datetime(a.created_at) DESC, a.id DESC
  LIMIT 4
 """
@@ -320,6 +331,9 @@ def get_dashboard() -> DashboardOut:
             conn.execute(_YESTERDAY_ACTIVITY_SQL).fetchall()
         )
 
+        active_aftersales_count = int(
+            conn.execute(_ACTIVE_AFTERSALES_COUNT_SQL).fetchone()["n"] or 0
+        )
         recent_aftersales = [
             {
                 "id": row["id"],
@@ -367,6 +381,7 @@ def get_dashboard() -> DashboardOut:
             aftersale_sla_alerts=aftersale_sla_alerts,
             today_activity=today_activity,
             yesterday_activity=yesterday_activity,
+            active_aftersales_count=active_aftersales_count,
             recent_aftersales=recent_aftersales,
             in_progress_deals=in_progress,
             recent_activities=recent_activities,

@@ -216,6 +216,59 @@ class WorkbenchTest(ApiTestCase):
             for item in stats["yesterday_activity"]
         ))
         self.assertEqual(stats["recent_aftersales"], [])
+        self.assertEqual(stats["active_aftersales_count"], 0)
+
+    def test_active_aftersales_count_and_reminders_exclude_completed(self):
+        customer = insert_customer(name="售后统计客户", phone="13800009903")
+        order = insert_order(
+            customer_id=customer["id"],
+            amount=6000.0,
+            status="completed",
+        )
+
+        ids = []
+        for index in range(6):
+            created = self.client.post(
+                "/api/crm/aftersales",
+                json={
+                    "order_id": order["id"],
+                    "type": "repair",
+                    "description": f"未完成售后 {index + 1}",
+                },
+            )
+            self.assertEqual(created.status_code, 200, created.text)
+            ids.append(created.json()["id"])
+
+        started = self.client.post(
+            "/api/crm/follow-ups",
+            data={
+                "object_type": "aftersale",
+                "object_id": str(ids[4]),
+                "content": "已开始处理",
+            },
+        )
+        self.assertEqual(started.status_code, 200, started.text)
+
+        self.client.post(
+            "/api/crm/follow-ups",
+            data={
+                "object_type": "aftersale",
+                "object_id": str(ids[5]),
+                "content": "处理完成",
+            },
+        )
+        finished = self.client.post(
+            f"/api/crm/aftersales/{ids[5]}/finish",
+            json={"result": "问题已解决"},
+        )
+        self.assertEqual(finished.status_code, 200, finished.text)
+
+        stats = self.dashboard()["stats"]
+        self.assertEqual(stats["active_aftersales_count"], 5)
+        self.assertEqual(len(stats["recent_aftersales"]), 4, "提醒列表仍限制最近 4 条")
+        statuses = {item["status"] for item in stats["recent_aftersales"]}
+        self.assertEqual(statuses, {"pending", "processing"})
+        self.assertNotIn(ids[5], [item["id"] for item in stats["recent_aftersales"]])
 
 
 class LeadDerivedTest(ApiTestCase):
