@@ -60,8 +60,8 @@ _CHANGE_TRACKED = (
     "amount", "note",
 )
 _UPDATABLE = _CHANGE_TRACKED + ("stage",)
-#: 锁定（已生成订单）后唯一允许改的字段
-_LOCKED_ALLOWED = ("note",)
+#: 流失商机只允许补备注；已生成订单的商机完全只读
+_FROZEN_ALLOWED = ("note",)
 
 
 # ---------------- 校验小工具 ----------------
@@ -79,7 +79,7 @@ def _deal_locked() -> ApiError:
     return ApiError(
         status_code=409,
         code="deal_locked",
-        message="该商机已生成订单，基本信息不可修改（只允许改备注、记跟进）",
+        message="该商机已生成订单并归档，仅可查看",
     )
 
 
@@ -612,10 +612,10 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
         if "product_id" in fields:
             requested_fields.add("product_id")
         if old["order_id"] is not None:
-            if [k for k in requested_fields if k not in _LOCKED_ALLOWED]:
+            if requested_fields:
                 raise _deal_locked()
         elif old["stage"] == "lost":
-            if [k for k in requested_fields if k not in _LOCKED_ALLOWED]:
+            if [k for k in requested_fields if k not in _FROZEN_ALLOWED]:
                 raise ApiError(
                     status_code=409,
                     code="deal_frozen",

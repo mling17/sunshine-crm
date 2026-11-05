@@ -15,6 +15,10 @@ function dealStageBadge(stage, label, orderId) {
     return '<span class="badge ' + cls + '">' + esc(text) + '</span>';
 }
 
+function dealIsArchived(deal) {
+    return !!deal.order_id;
+}
+
 /* 手动/电动徽标（后端下发 drive_type_label；数据字典里没有这张表） */
 function driveBadge(deal) {
     if (!deal.drive_type) { return '<span class="muted small">—</span>'; }
@@ -143,14 +147,12 @@ function quoteItemHtml(item, editable) {
 }
 
 function quoteFollowButtonHtml(quote, deal, placement) {
-    var unavailable = !!deal.order_id || deal.stage === 'lost';
-    var title = unavailable
-        ? (deal.order_id ? '已生成订单，请在订单中跟进' : '已作废的商机不能再添加跟进')
-        : '直接关联报价单 ' + quote.quote_no + ' 记录跟进';
+    if (dealIsArchived(deal) || deal.stage === 'lost') { return ''; }
+    var title = '直接关联报价单 ' + quote.quote_no + ' 记录跟进';
     return '<button type="button" class="btn btn-sm btn-primary deal-quote-card-follow ' +
         'deal-quote-card-follow-' + placement + '" data-quote-follow="' + quote.id + '"' +
         ' title="' + esc(title) + '" aria-label="' + esc(title) + '"' +
-        (unavailable ? ' disabled' : '') + '>跟进</button>';
+        '>跟进</button>';
 }
 
 function quoteFollowAssociationHtml(quote) {
@@ -178,7 +180,7 @@ function openQuoteFollowModal(quote, onSubmit) {
 
 function quoteCardsHtml(deal, quotes) {
     var cards = (quotes || []).map(function (quote) {
-        var editable = !deal.order_id && quote.status === 'draft';
+        var editable = !dealIsArchived(deal) && quote.status === 'draft';
         var itemHtml = quote.items && quote.items.length
             ? quote.items.map(function (item) { return quoteItemHtml(item, editable); }).join('')
             : '<p class="empty" style="padding:16px">还没有关联产品，请先添加产品并上传对应下单表。</p>';
@@ -201,12 +203,12 @@ function quoteCardsHtml(deal, quotes) {
         if (quote.order_id) {
             actions += '<a class="btn btn-sm btn-primary" href="#/orders/' + quote.order_id + '">查看订单</a> ';
         }
-        if (!quote.order_id && !deal.order_id &&
+        if (!quote.order_id && !dealIsArchived(deal) &&
             (quote.status === 'draft' || quote.status === 'pending')) {
             actions += '<button type="button" class="btn btn-sm btn-outline-danger" data-quote-void="' +
                 quote.id + '">作废</button> ';
         }
-        var canDeleteQuote = !quote.order_id && !deal.order_id &&
+        var canDeleteQuote = !quote.order_id && !dealIsArchived(deal) &&
             (quote.status === 'draft' || quote.status === 'void');
         var quoteTitle = quote.title || quote.quote_no;
         var deleteCardAction = canDeleteQuote
@@ -256,6 +258,7 @@ function quoteCardsHtml(deal, quotes) {
 
 function dealTagsHtml(deal, quotes) {
     var tags = deal.tags || [];
+    var editable = !dealIsArchived(deal);
     return '<div class="deal-tags" aria-label="商机标签">' +
         '<span class="deal-tag deal-tag-system" title="系统标签，自动统计">报价单 ' +
           (quotes || []).length + '</span>' +
@@ -264,14 +267,16 @@ function dealTagsHtml(deal, quotes) {
                 (tag.source === 'auto' ? 'deal-tag-auto' : 'deal-tag-manual') +
                 '" title="' + (tag.deletable ? '手动标签' : '系统自动标签，不能删除') + '">' +
                 esc(tag.name) +
-                (tag.deletable
+                (editable && tag.deletable
                     ? '<button type="button" class="deal-tag-remove" data-deal-tag-remove="' +
                       tag.id + '" title="删除标签" aria-label="删除标签 ' + esc(tag.name) + '">×</button>'
                     : '') +
             '</span>';
         }).join('') +
-        '<button type="button" class="deal-tag-add" data-deal-tag-add="' + deal.id +
-          '" title="添加标签" aria-label="添加标签">＋</button>' +
+        (editable
+            ? '<button type="button" class="deal-tag-add" data-deal-tag-add="' + deal.id +
+              '" title="添加标签" aria-label="添加标签">＋</button>'
+            : '') +
     '</div>';
 }
 
@@ -282,8 +287,9 @@ function dealOverviewHtml(deal, customerName, quotes) {
     var hasPendingOrConfirmedQuote = (quotes || []).some(function (quote) {
         return quote.status === 'pending' || quote.status === 'confirmed';
     });
-    var canAddQuote = !deal.order_id && deal.stage !== 'lost' && !hasPendingOrConfirmedQuote;
-    var canLose = !deal.order_id && deal.stage !== 'lost' && !confirmedQuote;
+    var archived = dealIsArchived(deal);
+    var canAddQuote = !archived && deal.stage !== 'lost' && !hasPendingOrConfirmedQuote;
+    var canLose = !archived && deal.stage !== 'lost' && !confirmedQuote;
     var orderAction;
     if (deal.order_id) {
         orderAction = '<a class="btn btn-sm btn-primary" href="#/orders/' + deal.order_id +
@@ -295,15 +301,15 @@ function dealOverviewHtml(deal, customerName, quotes) {
         orderAction = '<button type="button" class="btn btn-sm btn-primary" disabled ' +
             'title="客户确认报价单后才能生成订单">生成订单</button>';
     }
-    var addQuoteAction = canAddQuote
+    var addQuoteAction = archived ? '' : (canAddQuote
         ? '<button type="button" class="btn btn-sm btn-primary" id="headerCreateQuote">' +
           '＋ 添加报价单</button>'
         : '<button type="button" class="btn btn-sm btn-primary" disabled ' +
-          'title="已有待客户确认或客户已确认的报价单，或商机已关闭">＋ 添加报价单</button>';
-    var loseAction = canLose
+          'title="已有待客户确认或客户已确认的报价单，或商机已关闭">＋ 添加报价单</button>');
+    var loseAction = archived ? '' : (canLose
         ? '<button type="button" class="btn btn-sm btn-danger" id="dealLose">标记流失</button>'
         : '<button type="button" class="btn btn-sm btn-danger" disabled ' +
-          'title="已确认报价或商机已关闭">标记流失</button>';
+          'title="已确认报价或商机已关闭">标记流失</button>');
     return '<section class="deal-overview" id="dealQuotesCard">' +
         '<div class="deal-overview-head">' +
             '<div class="deal-overview-identity">' +
@@ -734,7 +740,8 @@ function viewDeals(root, route) {
                 (Number(d.amount || 0) > 0 ? money(d.amount) : '—') + '</td>' +
                 '<td>' + dealStageBadge(d.stage, d.stage_label, d.order_id) + '</td>' +
                 '<td style="white-space:nowrap">' + fmtDateTime(d.updated_at || d.created_at).slice(0, 10) + '</td>' +
-                '<td style="white-space:nowrap"><a class="btn btn-sm" href="#/deals/' + d.id + '">跟进</a></td>' +
+                '<td style="white-space:nowrap"><a class="btn btn-sm" href="#/deals/' + d.id + '">' +
+                    (d.order_id ? '查看' : '跟进') + '</a></td>' +
                 '</tr>';
         }).join('') : '<tr><td colspan="9" class="empty">还没有商机：请进入线索或客户跟进页转商机</td></tr>';
 
@@ -791,8 +798,9 @@ function viewDealDetail(root, rawId) {
 
         var customerName = index[d.customer_id] || ('客户 #' + d.customer_id);
         var timelineRecords = followupRecordsFromApi(records);
-        var canFollow = !d.order_id && d.stage !== 'lost';
-        var canEditItems = !d.order_id && d.stage !== 'lost';
+        var archived = dealIsArchived(d);
+        var canFollow = !archived && d.stage !== 'lost';
+        var canEditItems = !archived && d.stage !== 'lost';
         var items = d.items || [];
 
         function submitDealFollowUp(p) {
@@ -818,10 +826,10 @@ function viewDealDetail(root, rawId) {
             hideEntityCard: true,
             placeholder: '这次沟通聊了什么？客户对报价和参数是什么态度？下一步做什么？',
             canFollow: canFollow,
-            lockedText: d.order_id
-                ? '已生成订单，请在订单中跟进'
+            lockedText: archived
+                ? '已生成订单，商机已归档，仅可查看'
                 : (d.stage === 'lost' ? '已作废的商机不能再添加跟进' : '已转订单的商机请到订单中继续跟进'),
-            lockedButtonLabel: d.order_id ? '已生成订单，请在订单中跟进' : '',
+            lockedButtonLabel: '',
             records: timelineRecords,
             followExtraHtml:
                 '<div class="field"><label>关联报价单</label><select name="quote_id"' +

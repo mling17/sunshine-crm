@@ -5,8 +5,6 @@ import unittest
 
 from tests._util import ApiTestCase, insert_customer, insert_order
 
-from app.db import db_conn
-
 
 class OrderCompletionGuardsTest(ApiTestCase):
     def setUp(self):
@@ -38,30 +36,28 @@ class OrderCompletionGuardsTest(ApiTestCase):
         )
         self.assertEqual(resp.status_code, 200, resp.text)
 
-    def test_completed_order_locks_deal_tags(self):
-        order = insert_order(customer_id=self.customer["id"], status="producing")
-        deal_id = int(order["deal_id"])
-
+    def test_generated_order_locks_deal_tags(self):
+        deal = self.create_deal(self.customer["id"])
         added = self.client.post(
-            f"/api/crm/deals/{deal_id}/tags", json={"name": "安装完成"}
+            f"/api/crm/deals/{deal['id']}/tags", json={"name": "安装完成"}
         )
         self.assertEqual(added.status_code, 200, added.text)
         manual_tag = next(tag for tag in added.json() if tag["source"] == "manual")
 
-        with db_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET status = 'completed' WHERE id = ?",
-                (order["id"],),
-            )
+        insert_order(
+            customer_id=self.customer["id"],
+            deal_id=deal["id"],
+            status="producing",
+        )
 
         create = self.client.post(
-            f"/api/crm/deals/{deal_id}/tags", json={"name": "完成后新增"}
+            f"/api/crm/deals/{deal['id']}/tags", json={"name": "出单后新增"}
         )
         self.assertEqual(create.status_code, 409, create.text)
         self.assertEqual(create.json()["code"], "deal_tags_locked")
 
         delete = self.client.delete(
-            f"/api/crm/deals/{deal_id}/tags/{manual_tag['id']}"
+            f"/api/crm/deals/{deal['id']}/tags/{manual_tag['id']}"
         )
         self.assertEqual(delete.status_code, 409, delete.text)
         self.assertEqual(delete.json()["code"], "deal_tags_locked")

@@ -196,7 +196,7 @@ class DealOrdersTest(ApiTestCase):
 
     # ---------- 商机修改（锁定矩阵）----------
     def test_update_deal_locked_fields_fails(self):
-        """测试锁定后修改关键字段失败"""
+        """测试商机归档后所有修改失败"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=1000.0, drive_type="electric")
         self.client.post(f"/api/crm/deals/{deal['id']}/win")
@@ -223,6 +223,11 @@ class DealOrdersTest(ApiTestCase):
 
         # 修改 product_type 应该失败
         resp = self.client.put(f"/api/crm/deals/{deal['id']}", json={"product_type": "新产品"})
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["code"], "deal_locked")
+
+        # 生成订单后备注也属于存档内容
+        resp = self.client.put(f"/api/crm/deals/{deal['id']}", json={"note": "归档后补备注"})
         self.assertEqual(resp.status_code, 409)
         self.assertEqual(resp.json()["code"], "deal_locked")
 

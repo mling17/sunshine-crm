@@ -224,7 +224,7 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         )
         self.assertIn('data-quote-follow="', quote_helpers)
         self.assertIn("直接关联报价单 ", quote_helpers)
-        self.assertIn("!!deal.order_id || deal.stage === 'lost'", quote_helpers)
+        self.assertIn("if (dealIsArchived(deal) || deal.stage === 'lost') { return ''; }", quote_helpers)
         self.assertIn('<input type="hidden" name="quote_id"', quote_helpers)
         self.assertIn("quoteFollowAssociationHtml(quote)", quote_helpers)
 
@@ -332,16 +332,28 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         ):
             self.assertIn(marker, self.css)
 
-    def test_ordered_deal_uses_locked_follow_button_without_adding_tabs(self):
+    def test_ordered_deal_page_is_view_only_without_disabled_actions(self):
         detail = self.deals[
             self.deals.index("function viewDealDetail"):
             self.deals.index("function openDealEdit")
         ]
-        self.assertIn("lockedButtonLabel: d.order_id ? '已生成订单，请在订单中跟进' : ''", detail)
+        tags = self.deals[
+            self.deals.index("function dealTagsHtml"):
+            self.deals.index("function dealOverviewHtml")
+        ]
+        overview = self.deals[
+            self.deals.index("function dealOverviewHtml"):
+            self.deals.index("function bindQuoteActions")
+        ]
+        self.assertIn("lockedText: archived", detail)
+        self.assertIn("lockedButtonLabel: ''", detail)
+        self.assertIn("var editable = !dealIsArchived(deal);", tags)
+        self.assertIn("editable && tag.deletable", tags)
+        self.assertIn("var addQuoteAction = archived ? ''", overview)
+        self.assertIn("var loseAction = archived ? ''", overview)
+        self.assertIn("(d.order_id ? '查看' : '跟进')", self.deals)
         self.assertIn("dealStageBadge(deal.stage, deal.stage_label, deal.order_id)", self.deals)
         self.assertIn("var tabs = [['', '全部']].concat(STAGES);", self.deals)
-        self.assertIn("opts.lockedButtonLabel", self.shared)
-        self.assertIn("disabled title=", self.shared)
         products = (ROOT / "static" / "views" / "products.js").read_text(encoding="utf-8")
         self.assertIn("dealStageBadge(d.stage, d.stage_label, d.order_id)", products)
 

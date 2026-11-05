@@ -356,7 +356,7 @@ class DealsTest(ApiTestCase):
         self.assertEqual(resp.json()["code"], "deal_frozen")
 
     def test_freeze_matrix_assertions(self):
-        """冻结矩阵：① 出单后锁定 ② 锁定后仍可改备注 ③ 流失后冻结 ④ 流失后仍可改备注"""
+        """冻结矩阵：① 出单后归档只读 ② 流失后冻结但仍可补备注"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=1000.0)
 
@@ -366,10 +366,10 @@ class DealsTest(ApiTestCase):
         self.assertEqual(resp.status_code, 409)
         self.assertEqual(resp.json()["code"], "deal_locked")
 
-        # ② 锁定只挡基本信息，备注照常能改
+        # ② 出单即归档，备注也不能改
         note = self.client.put(f"/api/crm/deals/{deal['id']}", json={"note": "锁定后补备注"})
-        self.assertEqual(note.status_code, 200, note.text)
-        self.assertEqual(note.json()["note"], "锁定后补备注")
+        self.assertEqual(note.status_code, 409, note.text)
+        self.assertEqual(note.json()["code"], "deal_locked")
 
         # ③ 另一单走流失 → 冻结
         d2 = self.create_deal(c["id"], amount=500.0)
