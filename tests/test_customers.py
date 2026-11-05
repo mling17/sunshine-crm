@@ -31,6 +31,7 @@ class CustomersTest(ApiTestCase):
         self.assertTrue(a["updated_at"])
         # 新客户默认无商机（标签口径在 T3b 的 tests/test_tags.py 覆盖）
         self.assertEqual(a["deals_total"], 0)
+        self.assertEqual(a["orders_total"], 0)
         self.assertEqual(a["total_closed_amount"], 0)
 
         body = self.client.get("/api/crm/customers").json()

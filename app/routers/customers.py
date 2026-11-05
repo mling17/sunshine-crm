@@ -2,7 +2,7 @@
 
 - 全部接口要求登录（router 级 ``dependencies=[Depends(require_auth)]``）；
 - 客户档案不允许删除，DELETE 请求统一返回 403，以保留商机与跟进履历；
-- 列表里的 ``deals_total`` / ``total_closed_amount`` 用相关子查询算，避免 N+1；
+- 列表里的 ``deals_total`` / ``orders_total`` / ``total_closed_amount`` 用相关子查询算，避免 N+1；
 - 标签：``tags(name UNIQUE)`` 做字典，``customer_tags`` 做关联。写客户时按名字
   upsert 字典（同名永远复用同一个 tag_id），再整体替换该客户的关联行。
 """
@@ -50,6 +50,7 @@ SELECT c.id, c.name, c.phone, c.wechat, c.location, c.note,
          WHERE cc.customer_id = c.id AND cc.is_delete = 0
          ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1) AS primary_contact_wechat,
        (SELECT COUNT(*) FROM deals d WHERE d.customer_id = c.id AND d.is_delete = 0) AS deals_total,
+       (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id AND o.is_delete = 0) AS orders_total,
        (SELECT COALESCE(SUM(d.amount), 0) FROM deals d
          WHERE d.customer_id = c.id AND d.stage = 'won' AND d.is_delete = 0) AS total_closed_amount
 FROM customers c
@@ -200,12 +201,29 @@ def list_customers(
 
 
 @router.get("/tags", response_model=list[str])
-def list_tags() -> list[str]:
-    """标签字典（供前端筛选 chips / 输入自动补全）。"""
+def list_tags(
+    limit: int | None = Query(default=None, ge=1, le=100),
+) -> list[str]:
+    """标签字典；传 limit 时按客户使用次数返回热门标签。"""
     with db_conn() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT name FROM tags WHERE is_delete = 0 ORDER BY name"
-        ).fetchall()
+        if limit is None:
+            rows = conn.execute(
+                "SELECT DISTINCT name FROM tags WHERE is_delete = 0 ORDER BY name"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT t.name, COUNT(DISTINCT ct.customer_id) AS usage_count
+                FROM tags t
+                JOIN customer_tags ct ON ct.tag_id = t.id AND ct.is_delete = 0
+                JOIN customers c ON c.id = ct.customer_id AND c.is_delete = 0
+                WHERE t.is_delete = 0
+                GROUP BY t.id, t.name
+                ORDER BY usage_count DESC, t.name ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
     return [row["name"] for row in rows]
 
 

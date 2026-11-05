@@ -27,7 +27,7 @@ function customerNameCellHtml(c) {
 
 function viewCustomers(root) {
     var st = state.filters;
-    return api('/tags').catch(function () { return []; }).then(function (tags) {
+    return api('/tags?limit=8').catch(function () { return []; }).then(function (tags) {
         root.innerHTML =
             '<div class=\"card\">' +
             '<div class=\"card-head lead-page-head\"><div><h2>客户档案</h2>' +
@@ -100,6 +100,7 @@ function loadCustomers(root) {
             } },
             { title: '意向', nowrap: true, render: function (c) { return leadIntentBadge(c.intent_level); } },
             { title: '商机', align: 'center', nowrap: true, render: function (c) { return (c.deals_total || 0) + ' 个'; } },
+            { title: '订单', align: 'center', nowrap: true, render: function (c) { return (c.orders_total || 0) + ' 个'; } },
             { title: '累计成交', align: 'right', nowrap: true, render: function (c) { return money(c.total_closed_amount); } },
             { title: '创建时间', nowrap: true, render: function (c) { return fmtDateTime(c.created_at).slice(0, 10); } },
             { title: '操作', nowrap: true, render: function (c) {

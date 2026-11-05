@@ -512,21 +512,23 @@ table.data-table.customer-table td:nth-child(1) { width: 20%; }
 table.data-table.customer-table th:nth-child(2),
 table.data-table.customer-table td:nth-child(2) { width: 6%; }
 table.data-table.customer-table th:nth-child(3),
-table.data-table.customer-table td:nth-child(3) { width: 10%; }
+table.data-table.customer-table td:nth-child(3) { width: 9%; }
 table.data-table.customer-table th:nth-child(4),
-table.data-table.customer-table td:nth-child(4) { width: 10%; }
+table.data-table.customer-table td:nth-child(4) { width: 9%; }
 table.data-table.customer-table th:nth-child(5),
-table.data-table.customer-table td:nth-child(5) { width: 13%; }
+table.data-table.customer-table td:nth-child(5) { width: 12%; }
 table.data-table.customer-table th:nth-child(6),
 table.data-table.customer-table td:nth-child(6) { width: 6%; }
 table.data-table.customer-table th:nth-child(7),
-table.data-table.customer-table td:nth-child(7) { width: 6%; }
+table.data-table.customer-table td:nth-child(7) { width: 5%; }
 table.data-table.customer-table th:nth-child(8),
-table.data-table.customer-table td:nth-child(8) { width: 10%; }
+table.data-table.customer-table td:nth-child(8) { width: 5%; }
 table.data-table.customer-table th:nth-child(9),
-table.data-table.customer-table td:nth-child(9) { width: 10%; }
+table.data-table.customer-table td:nth-child(9) { width: 9%; }
 table.data-table.customer-table th:nth-child(10),
 table.data-table.customer-table td:nth-child(10) { width: 9%; }
+table.data-table.customer-table th:nth-child(11),
+table.data-table.customer-table td:nth-child(11) { width: 10%; }
 
 .customer-name-cell {
   padding-right: 38px;

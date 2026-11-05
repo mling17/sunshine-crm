@@ -150,6 +150,7 @@ class CustomerOut(BaseModel):
     tags: list[str] = Field(default_factory=list)
     # 复购口径（只展示，不自动写标签）
     deals_total: int = 0
+    orders_total: int = 0
     total_closed_amount: float = 0.0
     is_repeat: bool = False
     # 中文显示名（走数据字典，改名即生效）

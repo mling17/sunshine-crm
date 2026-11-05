@@ -27,6 +27,7 @@ class Customer360UiTest(unittest.TestCase):
         self.assertIn('class="lead-name-cell customer-name-cell"', self.customers)
         self.assertNotIn("联系人：", self.customers)
         self.assertNotIn("{ title: '联系方式'", self.customers)
+        self.assertIn("api('/tags?limit=8')", self.customers)
         self.assertIn("'customer-table', 'customer-table-wrap'", self.customers)
         for selector in (
             ".table-wrap.customer-table-wrap",
@@ -48,6 +49,17 @@ class Customer360UiTest(unittest.TestCase):
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, detail)
+
+    def test_customer_list_adds_order_count_before_closed_amount(self):
+        list_source = self.customers[
+            self.customers.index("function loadCustomers"):
+            self.customers.index("function openCustomerDealModal")
+        ]
+        self.assertIn("{ title: '订单'", list_source)
+        self.assertIn("c.orders_total", list_source)
+        self.assertLess(list_source.index("{ title: '商机'"), list_source.index("{ title: '订单'"))
+        self.assertLess(list_source.index("{ title: '订单'"), list_source.index("{ title: '累计成交'"))
+        self.assertIn("leadTagSummaryHtml(c.tags)", list_source)
 
     def test_customer_detail_restores_customer_360_and_keeps_lead_tag_display(self):
         detail = self.customers[
@@ -78,11 +90,11 @@ class Customer360UiTest(unittest.TestCase):
         self.assertIn("还没有跟进记录", self.shared)
 
     def test_customer_360_assets_are_cache_busted(self):
-        self.assertIn("/crm/customer-360.css?v=20261105customer-ui2", self.index)
-        self.assertIn("/crm/views/customers.js?v=20261105customer-ui2", self.index)
+        self.assertIn("/crm/customer-360.css?v=20261105customer-ui3", self.index)
+        self.assertIn("/crm/views/customers.js?v=20261105customer-ui3", self.index)
         self.assertIn("/crm/views/shared.js?v=20261105lead-tags6", self.index)
         self.assertIn("/crm/customer-360.css", self.sw)
-        self.assertIn("crm-shell-v75", self.sw)
+        self.assertIn("crm-shell-v76", self.sw)
 
     def test_customer_360_is_responsive(self):
         self.assertIn("grid-template-columns: minmax(0, 1.08fr) minmax(340px, .92fr)", self.css)

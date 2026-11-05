@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from tests._util import ApiTestCase, insert_deal, open_client
+from tests._util import ApiTestCase, insert_deal, insert_order, open_client
 
 from app.db import db_conn
 
@@ -45,6 +45,18 @@ class TagsTest(ApiTestCase):
             self.assertEqual(
                 conn.execute("SELECT COUNT(*) AS n FROM customer_tags").fetchone()["n"], 1
             )
+
+    def test_popular_tag_limit_uses_customer_usage_count(self):
+        for i in range(3):
+            self.create_customer(name=f"热门{i}", tags=["热门"])
+        for i in range(2):
+            self.create_customer(name=f"次热{i}", tags=["次热"])
+        self.create_customer(name="少用", tags=["少用"])
+
+        self.assertEqual(
+            self.client.get("/api/crm/tags", params={"limit": 2}).json(),
+            ["热门", "次热"],
+        )
 
     def test_customer_without_tags(self):
         c = self.create_customer(name="无标签客户")
@@ -157,11 +169,15 @@ class TagsTest(ApiTestCase):
     # ---------- 复购口径：deals_total / total_closed_amount ----------
     def test_detail_reports_deals_total_and_closed_amount(self):
         c = self.create_customer(name="复购客户")
-        insert_deal(c["id"], stage="won", amount=2000.0, closed_at="2026-10-01T10:00:00")
+        won_deal = insert_deal(
+            c["id"], stage="won", amount=2000.0, closed_at="2026-10-01T10:00:00"
+        )
         insert_deal(c["id"], stage="lead", amount=900.0)
+        insert_order(c["id"], won_deal["id"])
 
         detail = self.client.get(f"/api/crm/customers/{c['id']}").json()
         self.assertEqual(detail["deals_total"], 2)
+        self.assertEqual(detail["orders_total"], 1)
         self.assertEqual(detail["total_closed_amount"], 2000.0, "只累加 won 的金额")
         self.assertTrue(detail["is_repeat"], "deals_total>=2 = 老客口径")
         # 老客只展示，不自动写 tag
