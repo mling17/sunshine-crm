@@ -28,8 +28,23 @@ class LeadsUiStructureTest(unittest.TestCase):
         self.assertIn("leadTagSummaryHtml(l.tags)", cell)
         self.assertNotIn("data-op=\"tags\"", cell)
         self.assertNotIn("lead-tag-add", cell)
-        self.assertIn("list.length > 2 ? 1 : list.length", self.js)
+        self.assertIn("Math.min(list.length, 3)", self.js)
         self.assertIn("lead-tag-more", self.js)
+
+    def test_contact_phone_is_in_first_column_and_table_has_no_horizontal_scroll(self):
+        self.assertIn("{ title: '联系人 / 联系方式'", self.js)
+        self.assertNotIn("{ title: '联系方式'", self.js)
+        self.assertIn('class="lead-phone-text"', self.js)
+        self.assertNotIn('href="tel:', self.js)
+        self.assertIn("'lead-table', 'lead-table-wrap'", self.js)
+        self.assertIn(".table-wrap.lead-table-wrap", self.polish_css)
+        lead_table = self.polish_css[
+            self.polish_css.index("table.data-table.lead-table {"):
+            self.polish_css.index("table.data-table.lead-table td {")
+        ]
+        self.assertIn("width: 100%", lead_table)
+        self.assertIn("min-width: 0", lead_table)
+        self.assertIn("overflow-x: hidden", self.polish_css)
 
     def test_detail_tags_open_bulk_editor_and_save_once(self):
         for marker in (

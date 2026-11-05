@@ -118,7 +118,7 @@ function leadDetailTags(tags, lead, editable) {
 function leadTagSummaryHtml(tags) {
     var list = tags || [];
     if (!list.length) { return '—'; }
-    var showCount = list.length > 2 ? 1 : list.length;
+    var showCount = Math.min(list.length, 3);
     var shown = list.slice(0, showCount);
     var hiddenCount = list.length - shown.length;
     return '<div class="lead-tag-cell lead-tag-summary" title="' + esc(list.join('、')) + '">' +
@@ -420,14 +420,17 @@ function loadLeads(root) {
     return api('/leads?' + params.toString()).then(function (res) {
         var items = res.items || [];
         listEl.innerHTML = dataTable([
-            { title: '名称', render: function (l) {
+            { title: '联系人 / 联系方式', render: function (l) {
                 var name = l.name || (l.lead_type === 'company' ? l.company_name : '') || '—';
+                var phone = l.phone || '—';
                 return '<div class="lead-name-cell"><div class="lead-name-main">' +
                     '<a class="lead-name-link" href="#/leads/' + l.id + '" title="' + esc(name) + '">' +
                     esc(name) + '</a>' +
                     (l.company_name && l.lead_type === 'company' && l.company_name !== name
                         ? '<div class="lead-company muted" title="' + esc(l.company_name) + '">' +
                             esc(l.company_name) + '</div>' : '') +
+                    '<span class="lead-phone-text" title="' + esc(phone) + '">' +
+                    esc(phone) + '</span>' +
                     '</div>' + leadStatusBadge(l.status, true) + '</div>';
             } },
             { title: '类型', render: function (l) { return esc(leadTypeText(l)); }, nowrap: true },
@@ -436,10 +439,6 @@ function loadLeads(root) {
             { title: '微信号', render: function (l) {
                 var wechat = l.wechat || '—';
                 return '<span class="lead-cell-ellipsis" title="' + esc(wechat) + '">' + esc(wechat) + '</span>';
-            }, nowrap: true },
-            { title: '联系方式', render: function (l) {
-                var phone = l.phone || '—';
-                return '<span class="lead-cell-ellipsis" title="' + esc(phone) + '">' + esc(phone) + '</span>';
             }, nowrap: true },
             { title: '标签', render: function (l) {
                 return leadTagSummaryHtml(l.tags);
@@ -463,7 +462,7 @@ function loadLeads(root) {
                 return opButtons(ops);
             } }
         ], items, st.q || st.status ? '没有匹配的线索，换个条件试试'
-            : '还没有线索，点右上「新增线索」开始', 'lead-table');
+            : '还没有线索，点右上「新增线索」开始', 'lead-table', 'lead-table-wrap');
 
         pagerEl.innerHTML = pagerHtml(res);
         pagerEl.onclick = function (ev) {

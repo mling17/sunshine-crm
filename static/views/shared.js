@@ -103,7 +103,7 @@ function aftersaleStatusLabel(status, statusLabel) {
  * opButtons + bindOps：表格「操作」列的事件委托（onclick 覆盖式，不叠加监听）
  * infoGrid：详情页信息网格（第 3 个元素 true = 值已是 HTML，不再转义）
  */
-function dataTable(columns, rows, emptyText, tableClass) {
+function dataTable(columns, rows, emptyText, tableClass, wrapClass) {
   var head = columns.map(function (c) {
     return '<th' + (c.align ? ' style="text-align:' + c.align + '"' : '') + '>' + esc(c.title) + '</th>';
   }).join('');
@@ -116,7 +116,8 @@ function dataTable(columns, rows, emptyText, tableClass) {
     }).join('') + '</tr>';
   }).join('') : '<tr class="empty-row"><td colspan="' + columns.length + '"><p class="empty">' +
       esc(emptyText || '暂无数据') + '</p></td></tr>';
-  return '<div class="table-wrap"><table class="data-table' +
+  return '<div class="table-wrap' + (wrapClass ? ' ' + esc(wrapClass) : '') +
+    '"><table class="data-table' +
     (tableClass ? ' ' + esc(tableClass) : '') + '"><thead><tr>' + head +
     '</tr></thead><tbody>' + body + '</tbody></table></div>';
 }

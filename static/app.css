@@ -1003,7 +1003,7 @@ th {
 }
 
 .lead-tag-summary {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   overflow: hidden;
 }
 
@@ -1016,7 +1016,7 @@ th {
   white-space: nowrap;
 }
 
-.lead-tag-summary .lead-tag-chip-pair { max-width: 56px; }
+.lead-tag-summary .lead-tag-chip-pair { max-width: calc(50% - 3px); }
 
 .lead-tag-more {
   display: inline-grid;
