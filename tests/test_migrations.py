@@ -64,7 +64,7 @@ class TestMigrations(unittest.TestCase):
     def test_migration_structure(self):
         run_migrations(self.db, backup=False, verbose=False)
         expected = {
-            "leads", "lead_tags", "customer_contacts", "carriers", "orders",
+            "leads", "lead_tags", "carriers", "orders",
             "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
             "customers", "deals", "follow_ups", "attachments", "products",
             "deal_tags", "follow_up_phrases",
@@ -76,6 +76,7 @@ class TestMigrations(unittest.TestCase):
         finally:
             conn.close()
         self.assertTrue(expected <= tables, f"缺表：{expected - tables}")
+        self.assertNotIn("customer_contacts", tables)
         self.assertIn("trg_fu_object_fill", triggers)
 
     def test_order_carrier_contact_columns_exist(self):
@@ -179,27 +180,41 @@ class TestMigrations(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_v2_006_backfills_company_primary_contact_once(self):
+    def test_v2_019_backfills_contact_and_drops_redundant_table(self):
         run_migrations(self.db, backup=False, verbose=False)
         conn = sqlite3.connect(str(self.db))
         now = "2026-11-01T00:00:00Z"
         try:
-            cur = conn.execute(
+            customer_id = int(conn.execute(
                 "INSERT INTO customers"
                 " (name, phone, wechat, customer_type, company_name, created_at, updated_at)"
                 " VALUES ('中电金信','18366326404','游戏520','company','中电金信',?,?)",
                 (now, now),
-            )
-            customer_id = int(cur.lastrowid)
+            ).lastrowid)
             conn.execute(
-                "INSERT INTO leads"
-                " (name, phone, wechat, lead_type, company_name, source, status,"
-                "  converted_customer_id, created_at, updated_at)"
-                " VALUES ('陈明','18366326404','游戏520','company','中电金信',"
-                "         'wechat','converted',?,?,?)",
+                """
+                CREATE TABLE customer_contacts (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  customer_id INTEGER NOT NULL,
+                  name TEXT NOT NULL,
+                  phone TEXT,
+                  wechat TEXT,
+                  is_primary INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  create_time TEXT NOT NULL DEFAULT '',
+                  update_time TEXT NOT NULL DEFAULT '',
+                  is_delete INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO customer_contacts"
+                " (customer_id, name, phone, wechat, is_primary, created_at, updated_at)"
+                " VALUES (?, '陈明', '18366326404', '游戏520', 1, ?, ?)",
                 (customer_id, now, now),
             )
-            conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_006'")
+            conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_019'")
             conn.commit()
         finally:
             conn.close()
@@ -209,14 +224,18 @@ class TestMigrations(unittest.TestCase):
 
         conn = sqlite3.connect(str(self.db))
         try:
-            rows = conn.execute(
-                "SELECT name, phone, wechat, is_primary"
-                " FROM customer_contacts WHERE customer_id = ? AND is_delete = 0",
+            row = conn.execute(
+                "SELECT name, company_name, phone, wechat FROM customers WHERE id = ?",
                 (customer_id,),
-            ).fetchall()
+            ).fetchone()
+            dropped = conn.execute(
+                "SELECT 1 FROM sqlite_master"
+                " WHERE type = 'table' AND name = 'customer_contacts'"
+            ).fetchone()
         finally:
             conn.close()
-        self.assertEqual(rows, [("陈明", "18366326404", "游戏520", 1)])
+        self.assertEqual(row, ("中电金信", "陈明", "18366326404", "游戏520"))
+        self.assertIsNone(dropped)
 
     def test_v2_007_normalizes_existing_spec_separators(self):
         run_migrations(self.db, backup=False, verbose=False)

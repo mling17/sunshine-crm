@@ -223,21 +223,6 @@ CREATE TABLE IF NOT EXISTS `lead_tags` (
   PRIMARY KEY (`lead_id`, `tag_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 """,
-    "customer_contacts": """
-CREATE TABLE IF NOT EXISTS `customer_contacts` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `customer_id` BIGINT UNSIGNED NOT NULL,
-  `name` VARCHAR(255) NOT NULL,
-  `phone` VARCHAR(64),
-  `wechat` VARCHAR(128),
-  `is_primary` TINYINT NOT NULL DEFAULT 0,
-  `created_at` VARCHAR(32) NOT NULL,
-  `updated_at` VARCHAR(32) NOT NULL,
-  `${STANDARD}`,
-  PRIMARY KEY (`id`),
-  KEY `idx_cc_customer` (`customer_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-""",
     "carriers": """
 CREATE TABLE IF NOT EXISTS `carriers` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -656,6 +641,35 @@ def _column_names(cursor, table: str) -> set[str]:
     return {str(row["name"]) for row in cursor.fetchall()}
 
 
+def _drop_redundant_customer_contacts(cursor) -> None:
+    """把旧主联系人回写到 customers 后删除冗余表。"""
+    cursor.execute(
+        "SELECT 1 FROM information_schema.TABLES"
+        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'customer_contacts'"
+    )
+    if cursor.fetchone() is None:
+        return
+    cursor.execute(
+        """
+        UPDATE `customers` c
+        JOIN (
+          SELECT customer_id, name, phone, wechat,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY customer_id
+                   ORDER BY is_primary DESC, id ASC
+                 ) AS row_no
+          FROM `customer_contacts`
+          WHERE is_delete = 0
+        ) cc ON cc.customer_id = c.id
+        SET c.company_name = COALESCE(NULLIF(TRIM(cc.name), ''), c.company_name),
+            c.phone = COALESCE(NULLIF(TRIM(c.phone), ''), NULLIF(TRIM(cc.phone), '')),
+            c.wechat = COALESCE(NULLIF(TRIM(c.wechat), ''), NULLIF(TRIM(cc.wechat), ''))
+        WHERE cc.row_no = 1
+        """
+    )
+    cursor.execute("DROP TABLE `customer_contacts`")
+
+
 def _standard_triggers(table: str, columns: set[str]) -> list[str]:
     now = "DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ')"
     created_source = (
@@ -702,6 +716,7 @@ def ensure_mysql_schema() -> None:
         with conn.cursor() as cursor:
             for statement in table_ddl():
                 cursor.execute(statement)
+            _drop_redundant_customer_contacts(cursor)
             for table in TABLE_DDL:
                 for statement in _standard_triggers(table, _column_names(cursor, table)):
                     cursor.execute(statement)
@@ -819,5 +834,5 @@ def mysql_runtime_seed(conn) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note)"
         " VALUES (?, ?, ?)",
-        (MIGRATION_VERSION, now, "MySQL schema baseline v2_018"),
+        (MIGRATION_VERSION, now, "MySQL schema baseline v2_019"),
     )

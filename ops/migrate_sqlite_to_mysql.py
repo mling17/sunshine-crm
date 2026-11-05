@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把已完成 V2.018 迁移的 SQLite 数据复制到 MySQL 8。
+"""把已完成 V2.019 迁移的 SQLite 数据复制到 MySQL 8。
 
 特性：
 - 默认拒绝写入非空目标库，避免覆盖已有数据；
@@ -32,7 +32,6 @@ COPY_ORDER = (
     "users",
     "sessions",
     "customers",
-    "customer_contacts",
     "customer_addresses",
     "tags",
     "customer_tags",
@@ -216,11 +215,11 @@ def migrate(
                 f"源库缺少核心表 {sorted(missing)}；请先在当前应用启动一次 SQLite"
             )
         version = source.execute(
-            "SELECT 1 FROM schema_migrations WHERE version = 'v2_018'"
+            "SELECT 1 FROM schema_migrations WHERE version = 'v2_019'"
         ).fetchone()
         if version is None:
             raise RuntimeError(
-                "源库尚未完成 v2_018 迁移；请先用当前版本启动一次 SQLite"
+                "源库尚未完成 v2_019 迁移；请先用当前版本启动一次 SQLite"
             )
 
         counts = {

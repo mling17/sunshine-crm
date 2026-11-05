@@ -21,8 +21,7 @@ class Customer360UiTest(unittest.TestCase):
 
     def test_customer_list_name_cell_matches_lead_without_contact_prefix(self):
         self.assertIn("customerNameCellHtml(c)", self.customers)
-        self.assertIn("c.primary_contact_name", self.customers)
-        self.assertIn("c.primary_contact_phone", self.customers)
+        self.assertIn("c.company_name", self.customers)
         self.assertIn("customerContactPhone(c)", self.customers)
         self.assertIn('class="lead-name-cell customer-name-cell"', self.customers)
         self.assertNotIn("联系人：", self.customers)
@@ -79,6 +78,7 @@ class Customer360UiTest(unittest.TestCase):
         self.assertIn("infoHtml: customer360OverviewHtml(c, records)", self.customers)
         self.assertNotIn("beforeTimelineHtml:", self.customers)
         self.assertIn("lead-detail-title-line", self.customers[self.customers.index("function viewCustomerDetail"):])
+        self.assertNotIn("primary_contact_", self.customers)
 
     def test_customer_timeline_is_progressive(self):
         detail = self.customers[self.customers.index("function viewCustomerDetail"):]
@@ -90,8 +90,8 @@ class Customer360UiTest(unittest.TestCase):
         self.assertIn("还没有跟进记录", self.shared)
 
     def test_customer_360_assets_are_cache_busted(self):
-        self.assertIn("/crm/customer-360.css?v=20261105customer-ui3", self.index)
-        self.assertIn("/crm/views/customers.js?v=20261105customer-ui3", self.index)
+        self.assertIn("/crm/customer-360.css?v=20261105customer-ui4", self.index)
+        self.assertIn("/crm/views/customers.js?v=20261105customer-ui4", self.index)
         self.assertIn("/crm/views/shared.js?v=20261105lead-tags6", self.index)
         self.assertIn("/crm/customer-360.css", self.sw)
         self.assertIn("crm-shell-v78", self.sw)

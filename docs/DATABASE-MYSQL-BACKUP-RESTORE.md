@@ -114,7 +114,7 @@ gzip -dc "$dest/mysql-$stamp.sql.gz" | tail -n 20
 ```sql
 SELECT version, applied_at, note
 FROM schema_migrations
-WHERE version = 'v2_018';
+WHERE version = 'v2_019';
 ```
 
 同时检查所有表都有标准字段，并且没有外键：

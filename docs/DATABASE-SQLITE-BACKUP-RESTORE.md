@@ -17,9 +17,9 @@ SQLite 模式的数据由两部分组成：
 
 备份内容包括：
 
-- 29 张 CRM 表及其索引、触发器和最终迁移状态；
+- 28 张 CRM 表及其索引、触发器和最终迁移状态；
 - `CRM_UPLOADS` 下的跟进照片、产品下单表、报价附件等物理文件；
-- 最终迁移版本 `schema_migrations.version = 'v2_018'`；
+- 最终迁移版本 `schema_migrations.version = 'v2_019'`；
 - 每张表的标准字段 `create_time`、`update_time`、`is_delete`。
 
 备份成功至少满足：
@@ -147,7 +147,7 @@ ls -la /tmp/crm-restore/uploads
 
 ```bash
 sqlite3 /tmp/crm-restore/crm.db \
-  "SELECT version, applied_at FROM schema_migrations WHERE version = 'v2_018';"
+  "SELECT version, applied_at FROM schema_migrations WHERE version = 'v2_019';"
 
 sqlite3 /tmp/crm-restore/crm.db <<'SQL'
 SELECT m.name AS table_name,

@@ -1,10 +1,14 @@
 /* 客户列表页面逻辑 */
 function customerPrimaryContact(c) {
-    return String(c.primary_contact_name || '').trim();
+    return String(
+        c.customer_type === 'company' && c.company_name && c.company_name !== c.name
+            ? c.company_name
+            : ''
+    ).trim();
 }
 
 function customerContactPhone(c) {
-    return String(c.primary_contact_phone || c.phone || '').trim();
+    return String(c.phone || '').trim();
 }
 
 function customerNameCellHtml(c) {
@@ -316,10 +320,10 @@ function customer360OverviewHtml(c, records) {
     });
     var followTotal = sortedRecords.filter(function (r) { return r.type === 'follow'; }).length;
     var systemTotal = sortedRecords.length - followTotal;
-    var contactName = c.primary_contact_name || c.name;
-    var company = c.company_name || c.name;
-    var contactLine = [contactName, c.primary_contact_phone || c.phone,
-        (c.primary_contact_wechat || c.wechat) ? '微信 ' + (c.primary_contact_wechat || c.wechat) : '']
+    var contactName = customerPrimaryContact(c) || c.name;
+    var company = c.name;
+    var contactLine = [contactName, c.phone,
+        c.wechat ? '微信 ' + c.wechat : '']
         .filter(Boolean).join(' · ');
     var monogram = String(c.name || '客').trim().slice(0, 1);
     var source = c.source ? (SOURCE_LABELS[c.source] || c.source) : '—';
@@ -374,9 +378,9 @@ function customer360OverviewHtml(c, records) {
         '<span class="customer-360-state ' + stage[1] + '">' + esc(stage[0]) + '</span></div>' +
         '<dl class="customer-360-facts">' +
         '<div class="customer-360-fact"><dt>联系电话</dt><dd>' +
-        esc(c.primary_contact_phone || c.phone || '—') + '</dd></div>' +
+        esc(c.phone || '—') + '</dd></div>' +
         '<div class="customer-360-fact"><dt>微信</dt><dd>' +
-        esc(c.primary_contact_wechat || c.wechat || '—') + '</dd></div>' +
+        esc(c.wechat || '—') + '</dd></div>' +
         '<div class="customer-360-fact"><dt>所在地区</dt><dd>' + esc(c.location || '—') + '</dd></div>' +
         '<div class="customer-360-fact"><dt>来源 / 意向</dt><dd>' +
         esc(source + ' · ' + intent) + '</dd></div>' +

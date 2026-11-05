@@ -72,6 +72,7 @@ class MySQLSchemaDefinitionTest(unittest.TestCase):
             "schema_migrations",
         }
         self.assertTrue(expected <= set(TABLE_DDL))
+        self.assertNotIn("customer_contacts", TABLE_DDL)
 
     def test_every_table_has_standard_columns_and_no_foreign_keys(self):
         for statement in table_ddl():

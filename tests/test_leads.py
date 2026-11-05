@@ -577,7 +577,7 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(lead_detail["intent_level"], "high")
         self.assertEqual(customer_detail["intent_level"], "high")
 
-    def test_company_lead_conversion_keeps_primary_contact_searchable(self):
+    def test_company_lead_conversion_keeps_contact_in_customer_master(self):
         lead = self.create_lead(
             name="陈明",
             phone="18366326404",
@@ -599,10 +599,9 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         customer = resp.json()["customer"]
         self.assertEqual(customer["name"], "中电金信")
-        self.assertEqual(customer["company_name"], "中电金信")
-        self.assertEqual(customer["primary_contact_name"], "陈明")
-        self.assertEqual(customer["primary_contact_phone"], "18366326404")
-        self.assertEqual(customer["primary_contact_wechat"], "游戏520")
+        self.assertEqual(customer["company_name"], "陈明")
+        self.assertEqual(customer["phone"], "18366326404")
+        self.assertEqual(customer["wechat"], "游戏520")
 
         for term in ("陈明", "中电金信", "游戏520"):
             found = self.client.get(

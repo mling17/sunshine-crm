@@ -30,7 +30,7 @@
 必须同时满足：
 
 - MySQL 版本为 **8.0 及以上**（统计页面使用窗口函数）；
-- 当前程序已启动过 SQLite，`schema_migrations` 中存在 `v2_018`；
+- 当前程序已启动过 SQLite，`schema_migrations` 中存在 `v2_019`；
 - 已完成 SQLite 和 `uploads/` 的完整备份；
 - 迁移期间停止写入 CRM。建议停应用后做最终迁移。
 
@@ -57,7 +57,7 @@ docker compose stop crm
 
 ```bash
 sqlite3 "$CRM_DB" \
-  "SELECT version, applied_at FROM schema_migrations WHERE version = 'v2_018';"
+  "SELECT version, applied_at FROM schema_migrations WHERE version = 'v2_019';"
 
 sqlite3 "$CRM_DB" <<'SQL'
 SELECT m.name AS table_name,
@@ -298,10 +298,10 @@ WHERE TABLE_SCHEMA = DATABASE()
 -- 应存在最终迁移版本
 SELECT version, applied_at, note
 FROM schema_migrations
-WHERE version = 'v2_018';
+WHERE version = 'v2_019';
 ```
 
-第一段 SQL 直接列出标准字段数量不等于 `3` 的表；第二段列出所有外键；第三段列出可空的标准字段。三段查询的结果都必须为空，最后一段必须返回 `v2_018`。
+第一段 SQL 直接列出标准字段数量不等于 `3` 的表；第二段列出所有外键；第三段列出可空的标准字段。三段查询的结果都必须为空，最后一段必须返回 `v2_019`。
 
 最后核对健康检查、页面读写和附件访问。全部通过后，把 `/health` 输出、迁移表数/行数、备份文件名和验收时间写入变更记录。
 
@@ -337,7 +337,7 @@ CRM_DB=/opt/data/crm/crm.db
 
 | 现象 | 含义 | 处理 |
 |---|---|---|
-| `源库尚未完成 v2_018 迁移` | SQLite 不是当前最终结构 | 用当前版本以 SQLite 模式启动一次，确认迁移完成后重新备份 |
+| `源库尚未完成 v2_019 迁移` | SQLite 不是当前最终结构 | 用当前版本以 SQLite 模式启动一次，确认迁移完成后重新备份 |
 | `源库缺少标准字段` | 数据库没有完成审计列补齐 | 不要手工补列后直接迁移；先让当前应用完成 V2 迁移 |
 | `目标 MySQL 不是空库` | 防止误覆盖非空库 | 核对目标库；只有确认为可清空测试库时才使用 `--replace` |
 | 某表写入失败 | 字段类型、字符集或数据内容不兼容 | 保留完整报错；修正目标环境后重试，不要跳过该表 |

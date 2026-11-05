@@ -18,6 +18,7 @@ CRM V2 增量迁移 M1（幂等 / 可中断重跑 / 只增不毁）。
 6. 清空存量数据：迁移末尾一次性清空业务数据（customers/deals/follow_ups/attachments/tags/customer_tags/import_log），
    保留 users，sessions 可清；用 schema_migrations 版本号门控只执行一次。
 7. customers 表构造移除 house_note、新增 note 列（重建或 DROP COLUMN，按 SQLite 版本选方案）
+8. v2_019 仅删除无写入接口且与 customers 重叠的 customer_contacts；删除前必须回写主联系人。
 """
 
 from __future__ import annotations
@@ -32,8 +33,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_018"
-SCHEMA_USER_VERSION = 17
+MIGRATION_VERSION = "v2_019"
+SCHEMA_USER_VERSION = 18
 
 
 def default_db_path() -> Path:
@@ -107,6 +108,24 @@ def _col_guard(table: str, column: str):
 
 def _once(version: str, *tables: str):
     """一次性数据迁移 guard：表缺失 → 跳过；该版本已落账 → 跳过（绝不重复改写数据）。"""
+
+    def guard(conn: sqlite3.Connection) -> bool:
+        if any(not table_exists(conn, t) for t in tables):
+            return True
+        if not table_exists(conn, "schema_migrations"):
+            return False
+        return (
+            conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
+            ).fetchone()
+            is not None
+        )
+
+    return guard
+
+
+def _once_table(version: str, *tables: str):
+    """仅当迁移未落账且相关旧表仍存在时执行一次。"""
 
     def guard(conn: sqlite3.Connection) -> bool:
         if any(not table_exists(conn, t) for t in tables):
@@ -238,19 +257,6 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "ALTER TABLE customers ADD COLUMN company_name TEXT"),
     ("customers.owner", _col_guard("customers", "owner"),
      "ALTER TABLE customers ADD COLUMN owner TEXT"),
-    ("customer_contacts", None, """
-    CREATE TABLE IF NOT EXISTS customer_contacts (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      name        TEXT NOT NULL,
-      phone       TEXT,
-      wechat      TEXT,
-      is_primary  INTEGER NOT NULL DEFAULT 0,
-      created_at  TEXT NOT NULL,
-      updated_at  TEXT NOT NULL
-    )
-    """),
-    ("idx_cc_customer", None, "CREATE INDEX IF NOT EXISTS idx_cc_customer ON customer_contacts(customer_id)"),
     # ---------- 3. 商机扩展 ----------
     ("deals.title", _col_guard("deals", "title"), "ALTER TABLE deals ADD COLUMN title TEXT"),
     ("deals.lost_reason", _col_guard("deals", "lost_reason"), "ALTER TABLE deals ADD COLUMN lost_reason TEXT"),
@@ -1111,7 +1117,44 @@ STATEMENTS: list[tuple[str, object, str]] = [
     ("schema_migrations v2_018", None,
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_018', datetime('now'), '跟进常用短语按线索/客户/商机/订单/售后分区维护')"),
-    ("user_version v2_018", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 35. v2_019：主联系人回写客户主档并删除冗余表 ----------
+    ("customer_contacts.backfill v2_019",
+     _once_table("v2_019", "customers", "customer_contacts"),
+     """
+     UPDATE customers
+     SET company_name = COALESCE(
+             (SELECT NULLIF(TRIM(cc.name), '')
+              FROM customer_contacts cc
+              WHERE cc.customer_id = customers.id AND cc.is_delete = 0
+              ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1),
+             company_name
+         ),
+         phone = COALESCE(
+             NULLIF(phone, ''),
+             (SELECT NULLIF(TRIM(cc.phone), '')
+              FROM customer_contacts cc
+              WHERE cc.customer_id = customers.id AND cc.is_delete = 0
+              ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1)
+         ),
+         wechat = COALESCE(
+             NULLIF(wechat, ''),
+             (SELECT NULLIF(TRIM(cc.wechat), '')
+              FROM customer_contacts cc
+              WHERE cc.customer_id = customers.id AND cc.is_delete = 0
+              ORDER BY cc.is_primary DESC, cc.id ASC LIMIT 1)
+         )
+     WHERE EXISTS (
+         SELECT 1 FROM customer_contacts cc
+         WHERE cc.customer_id = customers.id AND cc.is_delete = 0
+     )
+     """),
+    ("customer_contacts.drop v2_019",
+     _once_table("v2_019", "customer_contacts"),
+     "DROP TABLE customer_contacts"),
+    ("schema_migrations v2_019", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_019', datetime('now'), '主联系人回写 customers.company_name，删除冗余 customer_contacts')"),
+    ("user_version v2_019", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -1226,7 +1269,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
 
     # 检查必要表是否存在
     required_tables = (
-        "leads", "lead_tags", "customer_contacts", "carriers", "orders",
+        "leads", "lead_tags", "carriers", "orders",
         "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
         "products", "deal_items", "order_items", "deal_quotes", "quote_items",
         "follow_up_phrases",

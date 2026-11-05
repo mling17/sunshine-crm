@@ -4,7 +4,7 @@
 >
 > 文档状态：✅ 已建立，后续随结构、依赖、接口和数据模型变化增量维护
 >
-> 架构基线：`main@cfdfbd6`，迁移版本 `v2_018`
+> 架构基线：`main@cfdfbd6`，迁移版本 `v2_019`
 
 ## 1. 架构目标
 
@@ -198,13 +198,13 @@ HTTP 边界
 
 ### 8.1 表清单
 
-MySQL 基线共 29 张表，按业务域分组如下：
+MySQL 基线共 28 张表，按业务域分组如下：
 
 | 域 | 表 |
 | --- | --- |
 | 身份 | `users`、`sessions` |
 | 线索 | `leads`、`lead_tags` |
-| 客户 | `customers`、`customer_contacts`、`customer_addresses` |
+| 客户 | `customers`、`customer_addresses` |
 | 产品 | `products` |
 | 商机与报价 | `deals`、`deal_items`、`deal_tags`、`deal_quotes`、`quote_items` |
 | 订单 | `orders`、`order_items`、`order_status_log` |
@@ -237,7 +237,8 @@ lead ──转换──▶ customer ──1:N──▶ deal ──1:N──▶ q
 
 - `follow_ups(object_type, object_id)` 挂五类业务对象。
 - `attachments(object_type, object_id)` 挂跟进、支付截图或售后凭证。
-- `customer_contacts` 和 `customer_addresses` 关联客户。
+- `customer_addresses` 关联客户。
+- 公司客户的 `customers.name` 保存公司名，`customers.company_name` 保存主联系人姓名；联系电话和微信保存在同一客户主档。
 - `carrier_contacts` 关联物流公司。
 - `deal_quotes` 和 `quote_items` 保存报价时点的产品、价格和 Excel 版本。
 - `order_items` 保存生成订单时的产品快照。
@@ -407,7 +408,7 @@ pending 待处理 → processing 处理中 → done 已完成
 
 ### 13.2 迁移
 
-- 当前迁移版本：`v2_018`。
+- 当前迁移版本：`v2_019`。
 - 启动时幂等执行基础建表、增量迁移、标准审计列补齐和种子数据。
 - 每条迁移有版本或结构 guard，可重复执行。
 - 迁移失败必须停止启动，不得带半迁移状态对外服务。
