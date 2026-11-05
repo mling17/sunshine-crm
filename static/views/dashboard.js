@@ -33,12 +33,34 @@ function dashGreeting() {
 function dashKpi(options) {
   var tag = options.href ? "a" : "div";
   var attrs = options.href ? ' href="' + esc(options.href) + '"' : "";
+  if (options.scrollTarget) {
+    attrs += ' data-dashboard-scroll="' + esc(options.scrollTarget) +
+      '" aria-controls="' + esc(options.scrollTarget) + '"';
+  }
   return "<" + tag + ' class="ds-kpi ' + esc(options.tone) + '"' + attrs + ">" +
     '<div class="ds-kpi-head"><span>' + esc(options.label) + "</span>" +
     '<span class="ds-kpi-icon">' + dashIcon(options.icon) + "</span></div>" +
     '<div class="ds-kpi-value">' + options.value + "</div>" +
     '<div class="ds-kpi-foot">' + options.foot + "</div>" +
   "</" + tag + ">";
+}
+
+function dashScrollToTarget(root, targetId) {
+  var target = root.querySelector("#" + targetId);
+  if (!target) { return; }
+
+  var topbar = document.getElementById("topbar");
+  var offset = (topbar ? topbar.getBoundingClientRect().height : 0) + 16;
+  var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+  var reduceMotion = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({
+    top: Math.max(0, top),
+    behavior: reduceMotion ? "auto" : "smooth"
+  });
+
+  var heading = target.querySelector("h2");
+  if (heading) { heading.focus({ preventScroll: true }); }
 }
 
 function dashYesterdayItem(item, all) {
@@ -195,7 +217,8 @@ function viewDashboard(root) {
           value: String(todos.length),
           tone: "blue",
           icon: "calendar",
-          href: "#/followups",
+          href: "#/dashboard",
+          scrollTarget: "today-followups",
           foot: "<span>" + overdue.length + " 条已逾期</span><span>·</span><span>按最近一条跟进计算</span>"
         }) +
         dashKpi({
@@ -203,7 +226,8 @@ function viewDashboard(root) {
           value: String(overdue.length),
           tone: "red",
           icon: "alert",
-          href: "#/followups",
+          href: "#/dashboard",
+          scrollTarget: "today-followups",
           foot: "<span>" + (overdue.length ? "需要优先处理" : "当前没有逾期") + "</span>"
         }) +
         dashKpi({
@@ -241,8 +265,10 @@ function viewDashboard(root) {
         '<div class="ds-yesterday-grid">' + yesterday.map(function (item) { return dashYesterdayItem(item, yesterday); }).join("") +
       "</div></section>" +
       '<div class="ds-work-grid">' +
-        '<section class="ds-card ds-follow-card"><div class="ds-card-head">' +
-          '<div><h2>今日待跟进</h2><span class="ds-count">' + todos.length + "</span></div>" +
+        '<section id="today-followups" class="ds-card ds-follow-card" aria-labelledby="today-followups-title">' +
+          '<div class="ds-card-head">' +
+          '<div><h2 id="today-followups-title" tabindex="-1">今日待跟进</h2><span class="ds-count">' +
+            todos.length + "</span></div>" +
           '<a class="ds-text-link" href="#/followups">查看全部</a></div><div>' + todoHtml + "</div></section>" +
         '<div class="ds-side-stack">' +
           '<section class="ds-card"><div class="ds-card-head"><div><h2>订单待办</h2></div><span>' +
@@ -269,6 +295,13 @@ function viewDashboard(root) {
           Number(button.getAttribute("data-log-fu")),
           Number(button.getAttribute("data-log-deal")) || 0
         );
+      });
+    });
+
+    $$("[data-dashboard-scroll]", root).forEach(function (control) {
+      control.addEventListener("click", function (event) {
+        event.preventDefault();
+        dashScrollToTarget(root, control.getAttribute("data-dashboard-scroll"));
       });
     });
   });
