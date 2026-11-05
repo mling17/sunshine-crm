@@ -21,6 +21,66 @@ class LeadsUiStructureTest(unittest.TestCase):
         self.assertIn("{ title: '标签'", self.js)
         self.assertIn("{ title: '意向'", self.js)
 
+    def test_list_tags_are_read_only_and_width_bounded(self):
+        start = self.js.index("{ title: '标签'")
+        end = self.js.index("{ title: '意向'", start)
+        cell = self.js[start:end]
+        self.assertIn("leadTagSummaryHtml(l.tags)", cell)
+        self.assertNotIn("data-op=\"tags\"", cell)
+        self.assertNotIn("lead-tag-add", cell)
+        self.assertIn("list.length > 2 ? 1 : list.length", self.js)
+        self.assertIn("lead-tag-more", self.js)
+
+    def test_detail_tags_open_bulk_editor_and_save_once(self):
+        for marker in (
+            "data-lead-tag-manage",
+            "function openLeadTagEditor",
+            "data-lead-tag-suggest",
+            "data-lead-tag-toggle",
+            "自定义新标签",
+            "data-lead-tag-save",
+            "data-lead-tag-cancel",
+            "选择或取消多个标签后",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.js)
+        editor = self.js[
+            self.js.index("function openLeadTagEditor"):
+            self.js.index("function invalidReasonLabel")
+        ]
+        self.assertEqual(
+            editor.count("api('/leads/' + lead.id + '/tags'"),
+            2,
+            "编辑器只应 GET 当前标签，并在保存时 PUT 一次",
+        )
+        self.assertIn("method: 'PUT'", editor)
+        self.assertIn("body: { tags: selected.map", editor)
+        toggle = editor[
+            editor.index("function toggleTag"):
+            editor.index("function addPendingTag")
+        ]
+        self.assertNotIn("api(", toggle, "点选标签只改待选状态，不能立即提交")
+
+    def test_quick_tag_panel_has_responsive_accessibility_styles(self):
+        for selector in (
+            ".lead-tag-summary",
+            ".lead-tag-chip-pair",
+            ".lead-tag-more",
+            ".lead-tag-detail-add",
+            ".lead-tag-quick-layer",
+            ".lead-tag-quick-card",
+            ".lead-tag-suggestion",
+            ".lead-tag-quick-chip",
+            ".lead-tag-quick-feedback",
+            ".lead-tag-quick-actions",
+        ):
+            with self.subTest(selector=selector):
+                self.assertIn(selector, self.css)
+        self.assertIn("@media (max-width: 767px)", self.css)
+        self.assertIn("aria-modal=\"true\"", self.js)
+        self.assertIn("aria-live=\"polite\"", self.js)
+        self.assertIn("prefers-reduced-motion: reduce", self.css)
+
     def test_lead_type_uses_dictionary_label(self):
         self.assertIn(
             "dictLabel('customer_type', l.lead_type, l.lead_type || '—')",

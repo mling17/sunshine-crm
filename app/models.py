@@ -757,6 +757,17 @@ class LeadUpdate(BaseModel):
     tags: Optional[list[TagName]] = Field(default=None, max_length=MAX_TAGS)
 
 
+class LeadTagsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tags: list[TagName] = Field(default_factory=list, max_length=MAX_TAGS)
+
+
+class LeadTagOut(BaseModel):
+    id: int
+    name: str
+
+
 class LeadOut(BaseModel):
     id: int
     name: str | None = None

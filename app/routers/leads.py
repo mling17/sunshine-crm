@@ -23,6 +23,8 @@ from app.models import (
     LeadIn,
     LeadListOut,
     LeadOut,
+    LeadTagOut,
+    LeadTagsIn,
     LeadUpdate,
     MAX_TAGS,
 )
@@ -430,6 +432,27 @@ def get_lead(lead_id: int) -> LeadDetailOut:
     """获取线索详情。"""
     with db_conn() as conn:
         return _fetch_lead_detail(conn, lead_id)
+
+
+@router.get("/leads/{lead_id}/tags", response_model=list[LeadTagOut])
+def get_lead_tags(lead_id: int) -> list[LeadTagOut]:
+    """快速标签面板：返回带关联 ID 的当前标签。"""
+    from app.lead_tags import list_lead_tags
+
+    with db_conn() as conn:
+        return [LeadTagOut(**tag) for tag in list_lead_tags(conn, lead_id)]
+
+
+@router.put("/leads/{lead_id}/tags", response_model=list[LeadTagOut])
+def replace_lead_tags(lead_id: int, payload: LeadTagsIn) -> list[LeadTagOut]:
+    """一次保存多选标签，履历只记录一条聚合变更。"""
+    from app.lead_tags import replace_lead_tags as save_lead_tags
+
+    with db_conn() as conn:
+        return [
+            LeadTagOut(**tag)
+            for tag in save_lead_tags(conn, lead_id, payload.tags)
+        ]
 
 
 @router.put("/leads/{lead_id}", response_model=LeadOut)

@@ -98,11 +98,299 @@ function leadStatusBadge(status, compact) {
         '" aria-label="' + v[1] + '">' + v[2] + '</span>';
 }
 
-function leadDetailTags(tags) {
-    if (!tags || !tags.length) { return '<span class="detail-title-empty">暂无标签</span>'; }
-    return '<span class="detail-title-tag">' + tags.map(function (tag) {
+function leadDetailTags(tags, lead, editable) {
+    var list = tags || [];
+    var tagsHtml = list.length
+        ? '<span class="detail-title-tag">' + list.map(function (tag) {
         return '<span class="tag">' + esc(tag) + '</span>';
-    }).join('') + '</span>';
+    }).join('') + '</span>'
+        : '<span class="detail-title-empty">暂无标签</span>';
+    if (!editable) { return tagsHtml; }
+    return tagsHtml +
+        '<button type="button" class="lead-tag-detail-add" data-lead-tag-manage="' + lead.id + '"' +
+        ' aria-haspopup="dialog" title="编辑线索标签" aria-label="编辑 ' +
+        esc(lead.name || '该线索') + ' 的标签">' +
+        '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">' +
+        '<path d="M10 4v12M4 10h12"></path></svg>' +
+        '<span>标签</span></button>';
+}
+
+function leadTagSummaryHtml(tags) {
+    var list = tags || [];
+    if (!list.length) { return '—'; }
+    var showCount = list.length > 2 ? 1 : list.length;
+    var shown = list.slice(0, showCount);
+    var hiddenCount = list.length - shown.length;
+    return '<div class="lead-tag-cell lead-tag-summary" title="' + esc(list.join('、')) + '">' +
+        shown.map(function (tag) {
+            return '<span class="tag lead-tag-chip' +
+                (showCount === 2 ? ' lead-tag-chip-pair' : '') +
+                '" title="' + esc(tag) + '">' + esc(tag) + '</span>';
+        }).join('') +
+        (hiddenCount ? '<span class="lead-tag-more" title="' + esc(list.slice(showCount).join('、')) +
+            '">+' + hiddenCount + '</span>' : '') +
+        '</div>';
+}
+
+var activeLeadTagQuickClose = null;
+
+function openLeadTagEditor(trigger, lead, done) {
+    if (!lead || lead.status === 'invalid' || lead.status === 'converted') {
+        toast('无效或已转化的线索不能再修改标签', true);
+        return;
+    }
+    if (activeLeadTagQuickClose) { activeLeadTagQuickClose(); }
+
+    var layer = document.createElement('div');
+    layer.className = 'lead-tag-quick-layer';
+    layer.innerHTML =
+        '<div class="lead-tag-quick-scrim"></div>' +
+        '<section class="lead-tag-quick-card" role="dialog" aria-modal="true" tabindex="-1"' +
+        ' aria-labelledby="leadTagQuickTitle" aria-describedby="leadTagQuickDesc">' +
+        '<p class="loading">正在加载标签…</p></section>';
+    document.body.appendChild(layer);
+    document.body.classList.add('lead-tag-quick-open');
+
+    var card = layer.querySelector('.lead-tag-quick-card');
+    var scrim = layer.querySelector('.lead-tag-quick-scrim');
+    var selected = [];
+    var initialNames = [];
+    var catalog = [];
+    var busy = false;
+    var notice = '';
+
+    function positionCard() {
+        if (window.innerWidth <= 767) {
+            card.style.left = '';
+            card.style.top = '';
+            card.style.maxHeight = '';
+            return;
+        }
+        var rect = trigger.getBoundingClientRect();
+        var width = Math.min(360, window.innerWidth - 24);
+        var left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12));
+        var below = window.innerHeight - rect.bottom - 20;
+        var above = rect.top - 20;
+        var top = rect.bottom + 8;
+        if (below < 300 && above > below) {
+            top = Math.max(12, rect.top - Math.min(440, above) - 8);
+        }
+        card.style.left = left + 'px';
+        card.style.top = top + 'px';
+        card.style.maxHeight = Math.max(220, Math.min(440, window.innerHeight - top - 12)) + 'px';
+    }
+
+    function close() {
+        if (layer.parentNode) { layer.parentNode.removeChild(layer); }
+        document.body.classList.remove('lead-tag-quick-open');
+        document.removeEventListener('keydown', onKeydown);
+        window.removeEventListener('resize', positionCard);
+        activeLeadTagQuickClose = null;
+        var current = document.querySelector('[data-lead-tag-manage="' + lead.id + '"]') || trigger;
+        if (current && current.focus) { current.focus(); }
+    }
+
+    function onKeydown(ev) {
+        if (ev.key === 'Escape') {
+            ev.preventDefault();
+            close();
+            return;
+        }
+        if (ev.key !== 'Tab') { return; }
+        var focusable = $$(
+            'button:not(:disabled), input:not(:disabled), [tabindex="0"]',
+            card
+        );
+        if (!focusable.length) { return; }
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (ev.shiftKey && document.activeElement === first) {
+            ev.preventDefault();
+            last.focus();
+        } else if (!ev.shiftKey && document.activeElement === last) {
+            ev.preventDefault();
+            first.focus();
+        }
+    }
+
+    function renderPanel() {
+        var assignedHtml = selected.length
+            ? selected.map(function (tag) {
+                return '<button type="button" class="lead-tag-quick-chip"' +
+                    ' data-lead-tag-toggle="' + esc(tag.name) + '" aria-pressed="true"' +
+                    ' aria-label="取消选择标签 ' + esc(tag.name) + '" title="点击取消选择">' +
+                    '<span>' + esc(tag.name) + '</span>' +
+                    '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+                    '<path d="M4 4l8 8M12 4l-8 8"></path></svg></button>';
+            }).join('')
+            : '<span class="lead-tag-quick-empty">还没有选择标签，点下方标签可多选</span>';
+
+        var selectedNames = {};
+        selected.forEach(function (tag) { selectedNames[tag.name] = true; });
+        var available = catalog.filter(function (name) { return !selectedNames[name]; });
+        var limitReached = selected.length >= MAX_TAGS;
+        var changed = selected.map(function (tag) { return tag.name; }).slice().sort().join('\u0000') !==
+            initialNames.slice().sort().join('\u0000');
+        var suggestionHtml = available.length
+            ? available.map(function (name) {
+                return '<button type="button" class="lead-tag-suggestion"' +
+                    ' data-lead-tag-suggest="' + esc(name) + '"' +
+                    (limitReached ? ' disabled' : '') + '>' +
+                    '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+                    '<path d="M8 3v10M3 8h10"></path></svg>' +
+                    '<span>' + esc(name) + '</span></button>';
+            }).join('')
+            : '<span class="lead-tag-quick-empty">' +
+                (selected.length ? '已有标签都已贴上，可继续创建新标签' : '还没有常用标签，从一个自定义标签开始') +
+                '</span>';
+
+        card.innerHTML =
+            '<header class="lead-tag-quick-head">' +
+            '<div><h3 id="leadTagQuickTitle">快速贴标签</h3>' +
+            '<p id="leadTagQuickDesc">' + esc(lead.name || '当前线索') + '</p></div>' +
+            '<button type="button" class="lead-tag-quick-close" aria-label="关闭标签面板" title="关闭">' +
+            '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">' +
+            '<path d="M5 5l10 10M15 5L5 15"></path></svg></button></header>' +
+            '<div class="lead-tag-quick-body">' +
+            '<div class="lead-tag-quick-section-head"><span>已贴标签</span>' +
+            '<span class="lead-tag-quick-count">' + selected.length + ' / ' + MAX_TAGS + '</span></div>' +
+            '<div class="lead-tag-quick-selected">' + assignedHtml + '</div>' +
+            '<div class="lead-tag-quick-section-head"><span>可多选标签</span>' +
+            '<span class="lead-tag-quick-tip">共用标签库</span></div>' +
+            '<div class="lead-tag-suggestions">' + suggestionHtml + '</div>' +
+            '<form class="lead-tag-custom-form">' +
+            '<label for="leadTagCustomInput">自定义新标签</label>' +
+            '<div class="lead-tag-custom-row">' +
+            '<input id="leadTagCustomInput" name="name" type="text" maxlength="32"' +
+            ' autocomplete="off" placeholder="例如：本周回访"' +
+            (limitReached ? ' disabled' : '') + '>' +
+            '<button type="submit" class="btn btn-primary btn-sm"' +
+            (limitReached ? ' disabled' : '') + '>加入待选</button></div>' +
+            '<p class="lead-tag-quick-help">选择或取消多个标签后，点击「保存标签」一次提交；履历只记录一条汇总变更。</p>' +
+            '</form></div>' +
+            '<div class="lead-tag-quick-feedback" role="status" aria-live="polite">' +
+            (notice || (limitReached ? '已达到 ' + MAX_TAGS + ' 个标签上限' : '待选 ' + selected.length + ' 个标签')) +
+            '</div>' +
+            '<div class="lead-tag-quick-actions">' +
+            '<button type="button" class="btn modal-cancel" data-lead-tag-cancel>取消</button>' +
+            '<button type="button" class="btn btn-primary" data-lead-tag-save' +
+            (!changed || busy ? ' disabled' : '') + '>' + (busy ? '保存中…' : '保存标签') + '</button>' +
+            '</div>';
+        positionCard();
+    }
+
+    function showError(message) {
+        var feedback = card.querySelector('.lead-tag-quick-feedback');
+        if (feedback) {
+            feedback.textContent = message || '操作失败，请稍后重试';
+            feedback.classList.add('is-error');
+        }
+        toast(message || '操作失败，请稍后重试', true);
+    }
+
+    function toggleTag(name) {
+        if (busy) { return; }
+        var existing = selected.filter(function (tag) { return tag.name === name; })[0];
+        if (existing) {
+            selected = selected.filter(function (tag) { return tag.name !== name; });
+        } else {
+            if (selected.length >= MAX_TAGS) {
+                showError('最多选择 ' + MAX_TAGS + ' 个标签');
+                return;
+            }
+            selected.push({ id: null, name: name });
+        }
+        notice = '';
+        renderPanel();
+        var next = card.querySelector('[data-lead-tag-toggle="' + esc(name) + '"]') ||
+            card.querySelector('[data-lead-tag-suggest="' + esc(name) + '"]') ||
+            card.querySelector('[data-lead-tag-save]');
+        if (next && next.focus) { next.focus({ preventScroll: true }); }
+    }
+
+    function addPendingTag(name) {
+        name = String(name || '').trim();
+        if (!name) {
+            showError('请输入标签名称');
+            return;
+        }
+        if (selected.some(function (tag) { return tag.name === name; })) {
+            notice = '「' + name + '」已在待选列表中';
+            renderPanel();
+            return;
+        }
+        if (selected.length >= MAX_TAGS) {
+            showError('最多添加 ' + MAX_TAGS + ' 个标签');
+            return;
+        }
+        selected.push({ id: null, name: name });
+        notice = '已加入待选，保存后生效';
+        renderPanel();
+    }
+
+    function saveTags() {
+        if (busy) { return; }
+        busy = true;
+        notice = '';
+        card.classList.add('is-busy');
+        renderPanel();
+        api('/leads/' + lead.id + '/tags', {
+            method: 'PUT',
+            body: { tags: selected.map(function (tag) { return tag.name; }) }
+        })
+            .then(function (tags) {
+                busy = false;
+                lead.tags = tags.map(function (tag) { return tag.name; });
+                close();
+                toast('标签已更新');
+                if (done) { done(); }
+            }).catch(function (err) {
+                busy = false;
+                card.classList.remove('is-busy');
+                renderPanel();
+                showError(err.message);
+            });
+    }
+
+    card.addEventListener('click', function (ev) {
+        var closeBtn = ev.target.closest('.lead-tag-quick-close');
+        if (closeBtn) { close(); return; }
+        if (ev.target.closest('[data-lead-tag-cancel]')) { close(); return; }
+        if (ev.target.closest('[data-lead-tag-save]')) { saveTags(); return; }
+        var selectedBtn = ev.target.closest('[data-lead-tag-toggle]');
+        if (selectedBtn) { toggleTag(selectedBtn.getAttribute('data-lead-tag-toggle')); return; }
+        var addBtn = ev.target.closest('[data-lead-tag-suggest]');
+        if (addBtn) { toggleTag(addBtn.getAttribute('data-lead-tag-suggest')); }
+    });
+    card.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var input = card.querySelector('#leadTagCustomInput');
+        addPendingTag(input ? input.value : '');
+    });
+    scrim.addEventListener('click', close);
+    document.addEventListener('keydown', onKeydown);
+    window.addEventListener('resize', positionCard);
+    activeLeadTagQuickClose = close;
+
+    Promise.all([
+        api('/leads/' + lead.id + '/tags'),
+        api('/tags').catch(function () { return []; })
+    ]).then(function (all) {
+        selected = all[0] || [];
+        initialNames = selected.map(function (tag) { return tag.name; });
+        catalog = (all[1] || []).slice().sort(function (a, b) {
+            return String(a).localeCompare(String(b), 'zh-CN');
+        });
+        renderPanel();
+        card.focus({ preventScroll: true });
+    }).catch(function (err) {
+        card.innerHTML = '<header class="lead-tag-quick-head"><div>' +
+            '<h3 id="leadTagQuickTitle">快速贴标签</h3><p id="leadTagQuickDesc">加载失败</p></div>' +
+            '<button type="button" class="lead-tag-quick-close" aria-label="关闭标签面板">×</button>' +
+            '</header><div class="lead-tag-quick-feedback is-error" role="alert">' +
+            esc(err.message) + '</div>';
+        card.querySelector('.lead-tag-quick-close').addEventListener('click', close);
+    });
 }
 
 function invalidReasonLabel(reason, other) {
@@ -154,7 +442,7 @@ function loadLeads(root) {
                 return '<span class="lead-cell-ellipsis" title="' + esc(phone) + '">' + esc(phone) + '</span>';
             }, nowrap: true },
             { title: '标签', render: function (l) {
-                return (l.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') || '—';
+                return leadTagSummaryHtml(l.tags);
             } },
             { title: '意向', render: function (l) { return leadIntentBadge(l.intent_level); }, nowrap: true },
             { title: '上次跟进', nowrap: true, render: function (l) {
@@ -435,7 +723,8 @@ function viewLeadDetail(root, rawId) {
                 '<div class="lead-detail-title-main">' +
                 '<a class="crumb lead-detail-crumb" href="#/leads">‹ 线索池</a>' +
                 '<div class="lead-detail-title-line"><h2>' + esc(name) + '</h2>' +
-                '<div class="detail-title-tags">' + leadDetailTags(l.tags) + '</div></div></div>',
+                '<div class="detail-title-tags">' +
+                leadDetailTags(l.tags, l, !invalid && !converted) + '</div></div></div>',
             badgesHtml: leadStatusBadge(l.status) + ' ' + leadIntentBadge(l.intent_level),
             infoHtml: infoGrid([
                 ['类型', leadTypeText(l)],
@@ -478,6 +767,12 @@ function viewLeadDetail(root, rawId) {
         if (invBtn) { invBtn.addEventListener('click', function () { invalidateLead(l.id); }); }
         var deleteBtn = $('#deleteLeadBtn', root);
         if (deleteBtn) { deleteBtn.addEventListener('click', function () { openLeadDeleteConfirm(l.id); }); }
+        var manageTagsBtn = $('[data-lead-tag-manage]', root);
+        if (manageTagsBtn) {
+            manageTagsBtn.addEventListener('click', function () {
+                openLeadTagEditor(manageTagsBtn, l, function () { return render(); });
+            });
+        }
     });
 }
 
