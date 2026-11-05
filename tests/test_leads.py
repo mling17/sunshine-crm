@@ -274,6 +274,23 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(len(body["items"]), 10)
         self.assertEqual(body["page"], 2)
 
+    def test_list_orders_newest_first_and_invalid_last(self):
+        oldest = self.create_lead(name="最早线索", phone="13800138001")
+        middle = self.create_lead(name="中间线索", phone="13800138002")
+        newest = self.create_lead(name="最新线索", phone="13800138003")
+        resp = self.client.post(
+            f"/api/crm/leads/{oldest['id']}/invalidate",
+            json={"invalid_reason": "no_intent"},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+        items = self.client.get("/api/crm/leads").json()["items"]
+        self.assertEqual(
+            [item["name"] for item in items],
+            [newest["name"], middle["name"], oldest["name"]],
+        )
+        self.assertEqual(items[-1]["status"], "invalid")
+
     # ---------- 修改线索 ----------
     def test_update_lead(self):
         lead = self.create_lead(phone="13800138000")

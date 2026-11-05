@@ -205,7 +205,8 @@ def list_leads(
                        AND f.kind='follow' AND f.is_delete=0
                      ORDER BY datetime(f.created_at) DESC, f.id DESC LIMIT 1) AS next_date
             FROM leads l {where_sql}
-            ORDER BY created_at DESC
+            ORDER BY CASE WHEN l.status = 'invalid' THEN 1 ELSE 0 END,
+                     l.created_at DESC, l.id DESC
             LIMIT ? OFFSET ?
             """,
             params + [size, offset],

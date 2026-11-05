@@ -1,11 +1,37 @@
 /* 客户列表页面逻辑 */
+function customerPrimaryContact(c) {
+    return String(c.primary_contact_name || '').trim();
+}
+
+function customerContactPhone(c) {
+    return String(c.primary_contact_phone || c.phone || '').trim();
+}
+
+function customerNameCellHtml(c) {
+    var contact = customerPrimaryContact(c);
+    var phone = customerContactPhone(c);
+    var secondary = [
+        c.customer_type === 'company' ? contact : '',
+        phone
+    ].filter(Boolean).join(' · ');
+    return '<div class="lead-name-cell customer-name-cell">' +
+        '<div class="lead-name-main">' +
+        '<a class="lead-name-link" href="#/customers/' + c.id + '" title="' + esc(c.name) + '">' +
+        esc(c.name) + '</a>' +
+        (secondary ? '<span class="lead-phone-text" title="' + esc(secondary) + '">' +
+            esc(secondary) + '</span>' : '') +
+        '</div>' +
+        (c.is_repeat ? '<span class="badge ok customer-repeat-badge">老客</span>' : '') +
+        '</div>';
+}
+
 function viewCustomers(root) {
     var st = state.filters;
     return api('/tags').catch(function () { return []; }).then(function (tags) {
         root.innerHTML =
             '<div class=\"card\">' +
-            '<div class=\"card-head\"><h2>客户档案</h2>' +
-            '<span class=\"small muted\">客户由线索转化，不在此新建</span></div>' +
+            '<div class=\"card-head lead-page-head\"><div><h2>客户档案</h2>' +
+            '<p class=\"card-subtitle\">客户由线索转化，不在此新建；跟进和商机都在客户档案中管理。</p></div></div>' +
             '<div class=\"searchbar\">' +
             '<input id=\"custSearch\" type=\"search\" placeholder=\"搜客户 / 公司 / 联系人 / 电话 / 微信 / 地区\" autocomplete=\"off\" value=\"' + esc(st.q) + '\">' +
             '<button type=\"button\" class=\"btn\" id=\"custSearchBtn\">搜索</button>' +
@@ -62,23 +88,15 @@ function loadCustomers(root) {
         var items = res.items || [];
         listEl.innerHTML = dataTable([
             { title: '名称', render: function (c) {
-                return '<a href="#/customers/' + c.id + '">' + esc(c.name) + '</a>' +
-                    (c.is_repeat ? ' <span class="badge ok">老客</span>' : '') +
-                    (c.customer_type === 'company'
-                        ? '<div class="small muted">联系人：' +
-                            esc(c.primary_contact_name || '—') +
-                            (c.primary_contact_phone ? ' · ' + esc(c.primary_contact_phone) : '') +
-                            '</div>'
-                        : '');
+                return customerNameCellHtml(c);
             } },
             { title: '类型', nowrap: true, render: function (c) {
                 return dictLabel('customer_type', c.customer_type, c.customer_type || '—');
             } },
             { title: '地区', render: function (c) { return esc(c.location || '—'); } },
             { title: '微信号', nowrap: true, render: function (c) { return esc(c.wechat || '—'); } },
-            { title: '联系方式', nowrap: true, render: function (c) { return esc(c.phone || '—'); } },
             { title: '标签', render: function (c) {
-                return (c.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') || '—';
+                return leadTagSummaryHtml(c.tags);
             } },
             { title: '意向', nowrap: true, render: function (c) { return leadIntentBadge(c.intent_level); } },
             { title: '商机', align: 'center', nowrap: true, render: function (c) { return (c.deals_total || 0) + ' 个'; } },
@@ -91,7 +109,8 @@ function loadCustomers(root) {
                 ]);
             } }
         ], items, st.q || st.tag ? '没有匹配的客户，换个条件试试'
-            : '还没有客户：客户由线索转化产生，请先到「线索」把线索转成客户');
+            : '还没有客户：客户由线索转化产生，请先到「线索」把线索转成客户',
+        'customer-table', 'customer-table-wrap');
 
         pagerEl.innerHTML = pagerHtml(res);
         pagerEl.onclick = function (ev) {
@@ -406,6 +425,11 @@ function viewCustomerDetail(root, rawId) {
         }
         var records = followupRecordsFromApi(all[1] || []);
         var deals = c.deals || [];
+        var tagsHtml = (c.tags || []).length
+            ? '<span class="detail-title-tag">' + c.tags.map(function (t) {
+                return '<span class="tag">' + esc(t) + '</span>';
+            }).join('') + '</span>'
+            : '<span class="detail-title-empty">暂无标签</span>';
 
         var dealHtml = deals.length
             ? '<div id=\"dealList\">' + deals.map(function (d) {
@@ -433,11 +457,11 @@ function viewCustomerDetail(root, rawId) {
             objectType: 'customer',
             title: c.name,
             titleHtml:
-                '<div class=\"entity-title-main\"><h2><a class=\"crumb\" href=\"#/customers\">‹ 客户</a> / ' +
-                esc(c.name) + '</h2><div class=\"detail-title-tags\">' +
-                (c.tags || []).map(function (t) { return '<span class=\"tag\">' + esc(t) + '</span>'; }).join('') +
-                '</div></div>',
-            badgesHtml: '<span class=\"badge muted\">' +
+                '<div class="lead-detail-title-main">' +
+                '<a class="crumb lead-detail-crumb" href="#/customers">‹ 客户</a>' +
+                '<div class="lead-detail-title-line"><h2>' + esc(c.name) + '</h2>' +
+                '<div class="detail-title-tags">' + tagsHtml + '</div></div></div>',
+            badgesHtml: '<span class="badge muted">' +
                 esc(dictLabel('customer_type', c.customer_type, c.customer_type || '—')) + '</span>',
             infoHtml: customer360OverviewHtml(c, records),
             actionsHtml: actions,

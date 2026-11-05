@@ -493,6 +493,55 @@ table.data-table.lead-table td:nth-child(10) { width: 12%; }
   line-height: 1;
 }
 
+.table-wrap.customer-table-wrap {
+  overflow-x: hidden;
+}
+
+table.data-table.customer-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+table.data-table.customer-table td {
+  overflow: hidden;
+}
+
+table.data-table.customer-table th:nth-child(1),
+table.data-table.customer-table td:nth-child(1) { width: 20%; }
+table.data-table.customer-table th:nth-child(2),
+table.data-table.customer-table td:nth-child(2) { width: 6%; }
+table.data-table.customer-table th:nth-child(3),
+table.data-table.customer-table td:nth-child(3) { width: 10%; }
+table.data-table.customer-table th:nth-child(4),
+table.data-table.customer-table td:nth-child(4) { width: 10%; }
+table.data-table.customer-table th:nth-child(5),
+table.data-table.customer-table td:nth-child(5) { width: 13%; }
+table.data-table.customer-table th:nth-child(6),
+table.data-table.customer-table td:nth-child(6) { width: 6%; }
+table.data-table.customer-table th:nth-child(7),
+table.data-table.customer-table td:nth-child(7) { width: 6%; }
+table.data-table.customer-table th:nth-child(8),
+table.data-table.customer-table td:nth-child(8) { width: 10%; }
+table.data-table.customer-table th:nth-child(9),
+table.data-table.customer-table td:nth-child(9) { width: 10%; }
+table.data-table.customer-table th:nth-child(10),
+table.data-table.customer-table td:nth-child(10) { width: 9%; }
+
+.customer-name-cell {
+  padding-right: 38px;
+}
+
+.customer-repeat-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 18px;
+}
+
 @media (max-width: 720px) {
   table.data-table.lead-table {
     min-width: 0;
@@ -504,6 +553,19 @@ table.data-table.lead-table td:nth-child(10) { width: 12%; }
   }
 
   table.data-table.lead-table td {
+    overflow: visible;
+  }
+
+  table.data-table.customer-table {
+    min-width: 0;
+    table-layout: auto;
+  }
+
+  table.data-table.customer-table td:nth-child(n) {
+    width: 100%;
+  }
+
+  table.data-table.customer-table td {
     overflow: visible;
   }
 }
