@@ -23,6 +23,9 @@ class OrderEditUiTest(unittest.TestCase):
         ]
         for marker in (
             "createOrderModal('修改订单')",
+            "name=\"order_name\"",
+            "name=\"order_no\"",
+            "订单编号（不可修改）",
             "name=\"logistics_mode\"",
             "name=\"carrier_id\"",
             "name=\"carrier_contact_id\"",
@@ -30,6 +33,9 @@ class OrderEditUiTest(unittest.TestCase):
             "receiver_name",
             "receiver_phone",
             "receiver_address",
+            "name=\"address_id\"",
+            "历史收件人及地址",
+            "api('/customers/' + order.customer_id + '/addresses')",
             "tracking_number",
             "name=\"note\"",
             "api('/orders/' + order.id, { method: 'PUT', body: payload })",
@@ -42,6 +48,12 @@ class OrderEditUiTest(unittest.TestCase):
         create = source[
             source.index("function openDealOrderModal"):
         ]
+        self.assertIn('name="order_name"', create)
+        self.assertIn("历史收件人及地址", create)
+        self.assertIn("api('/customers/' + deal.customer_id + '/addresses')", create)
+        self.assertIn("payload.address_id = Number(addressEl.value)", create)
+        self.assertIn("item.product_name_snapshot ||", create)
+        self.assertNotIn("dealItemName(item)", create)
         self.assertIn('name="carrier_contact_id"', create)
         self.assertIn("payload.carrier_contact_id = Number(carrierContactEl.value)", create)
         self.assertIn("请选择物流公司的联络人", create)

@@ -946,8 +946,14 @@ def _create_order(
     now = now_iso()
     order_status = "pending_payment" if quote_id is not None else "pending_confirmation"
     summary_item = items[0]
+    order_name = (
+        (quote["title"] if quote is not None else deal["title"])
+        or summary_item["product_name_snapshot"]
+        or summary_item["product_code_snapshot"]
+        or "订单"
+    )
     cur = conn.execute(
-        "INSERT INTO orders (order_no, customer_id, deal_id, quote_id, product_id,"
+        "INSERT INTO orders (order_no, order_name, customer_id, deal_id, quote_id, product_id,"
         " product_code_snapshot, product_name_snapshot, product_config_snapshot,"
         " product_type, model, spec, amount, product_total, discount_amount,"
         " discount_reason, product_payable,"
@@ -955,10 +961,11 @@ def _create_order(
         " carrier_contact_id, carrier_contact_name, carrier_contact_phone,"
         " logistics_fee, tracking_no, address_id, receiver_name, receiver_phone, receiver_address,"
         " status, note, owner, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?,"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?,"
         " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             order_no,
+            order_name,
             deal["customer_id"],
             deal_id,
             quote_id,

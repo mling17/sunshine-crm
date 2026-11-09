@@ -28,7 +28,7 @@ class DealTagHeaderUiTest(unittest.TestCase):
     def test_asset_versions_are_updated_for_header_layout(self):
         self.assertIn('/crm/app.css?v=20261105lead-tags6', self.index)
         self.assertIn('/crm/views/leads.js?v=20261105lead-tags6', self.index)
-        self.assertIn("const CACHE = 'crm-shell-v80';", self.sw)
+        self.assertIn("const CACHE = 'crm-shell-v81';", self.sw)
 
 
 if __name__ == "__main__":

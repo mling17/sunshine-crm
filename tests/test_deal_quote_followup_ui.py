@@ -84,7 +84,7 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             '<form id="dealOrderForm" class="order-form"',
             '<section class="order-quote-summary">',
             '<section class="order-form-section">',
-            '<h4>金额与定金</h4>',
+            '<h4>订单名称与金额</h4>',
             '<h4>物流与收货</h4>',
             '<h4>订单备注</h4>',
             'class="order-money-grid"',

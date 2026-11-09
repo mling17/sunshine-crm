@@ -247,6 +247,35 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(source_after_order["status"], "confirmed")
         self.assertEqual(source_after_order["order_id"], data["order"]["id"])
 
+    def test_order_name_inherits_quote_title_and_can_be_edited(self):
+        _, _, quote = self._quote_with_item()
+        self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        self.client.post(f"/api/crm/quotes/{quote['id']}/confirm")
+
+        ordered = self.client.post(
+            f"/api/crm/quotes/{quote['id']}/orders",
+            json={"deposit": 5, "logistics_mode": "self"},
+        )
+        self.assertEqual(ordered.status_code, 200, ordered.text)
+        order = ordered.json()["order"]
+        self.assertEqual(order["order_name"], quote["title"])
+
+        renamed = self.client.put(
+            f"/api/crm/orders/{order['id']}",
+            json={"order_name": "客厅天窗最终订单"},
+        )
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["order_name"], "客厅天窗最终订单")
+
+        immutable = self.client.put(
+            f"/api/crm/orders/{order['id']}",
+            json={"order_no": "SO-CHANGED"},
+        )
+        self.assertEqual(immutable.status_code, 400, immutable.text)
+        self.assertEqual(immutable.json()["code"], "validation_failed")
+        detail = self.client.get(f"/api/crm/orders/{order['id']}").json()
+        self.assertEqual(detail["order_no"], order["order_no"])
+
     def test_quote_confirmation_with_screenshot_returns_file_url(self):
         _, _, quote = self._quote_with_item()
         sent = self.client.post(f"/api/crm/quotes/{quote['id']}/send")

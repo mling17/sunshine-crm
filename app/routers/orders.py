@@ -52,6 +52,7 @@ STATUS_REQUIRED_FIELDS = {
 }
 
 ORDER_EDITABLE_COLUMNS = (
+    "order_name",
     "logistics_mode",
     "carrier_id",
     "carrier_contact_id",
@@ -229,6 +230,12 @@ def update_order(order_id: int, payload: OrderUpdate) -> OrderOut:
             raise HTTPException(status_code=404, detail="订单不存在")
 
         updates = payload.model_dump(exclude_unset=True)
+        if "order_name" in updates and not updates["order_name"]:
+            raise ApiError(
+                status_code=400,
+                code="order_name_required",
+                message="订单名称不能为空",
+            )
         db_updates = {
             "tracking_no" if key == "tracking_number" else key: value
             for key, value in updates.items()

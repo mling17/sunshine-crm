@@ -275,6 +275,7 @@ CREATE TABLE IF NOT EXISTS `customer_addresses` (
 CREATE TABLE IF NOT EXISTS `orders` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `order_no` VARCHAR(64) NOT NULL,
+  `order_name` VARCHAR(255),
   `customer_id` BIGINT UNSIGNED NOT NULL,
   `deal_id` BIGINT UNSIGNED NOT NULL,
   `product_type` VARCHAR(64),
@@ -709,6 +710,20 @@ FOR EACH ROW SET
     ]
 
 
+def _ensure_order_name(cursor) -> None:
+    """补齐既有 MySQL orders 表，并从来源报价单标题回填名称。"""
+    if "order_name" not in _column_names(cursor, "orders"):
+        cursor.execute("ALTER TABLE `orders` ADD COLUMN `order_name` VARCHAR(255)")
+    cursor.execute(
+        """
+        UPDATE `orders` o
+        LEFT JOIN `deal_quotes` q ON q.`id` = o.`quote_id`
+        SET o.`order_name` = COALESCE(NULLIF(TRIM(q.`title`), ''), o.`order_no`)
+        WHERE o.`order_name` IS NULL OR TRIM(o.`order_name`) = ''
+        """
+    )
+
+
 def ensure_mysql_schema() -> None:
     """建最终表结构和项目约定的审计字段触发器（幂等）。"""
     conn = _raw_connection()
@@ -717,6 +732,7 @@ def ensure_mysql_schema() -> None:
             for statement in table_ddl():
                 cursor.execute(statement)
             _drop_redundant_customer_contacts(cursor)
+            _ensure_order_name(cursor)
             for table in TABLE_DDL:
                 for statement in _standard_triggers(table, _column_names(cursor, table)):
                     cursor.execute(statement)
@@ -834,5 +850,5 @@ def mysql_runtime_seed(conn) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note)"
         " VALUES (?, ?, ?)",
-        (MIGRATION_VERSION, now, "MySQL schema baseline v2_019"),
+        (MIGRATION_VERSION, now, "MySQL schema baseline v2_020"),
     )

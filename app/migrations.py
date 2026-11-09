@@ -19,6 +19,7 @@ CRM V2 增量迁移 M1（幂等 / 可中断重跑 / 只增不毁）。
    保留 users，sessions 可清；用 schema_migrations 版本号门控只执行一次。
 7. customers 表构造移除 house_note、新增 note 列（重建或 DROP COLUMN，按 SQLite 版本选方案）
 8. v2_019 仅删除无写入接口且与 customers 重叠的 customer_contacts；删除前必须回写主联系人。
+9. v2_020 新增 orders.order_name，并从来源报价单标题回填历史订单名称。
 """
 
 from __future__ import annotations
@@ -33,8 +34,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_019"
-SCHEMA_USER_VERSION = 18
+MIGRATION_VERSION = "v2_020"
+SCHEMA_USER_VERSION = 19
 
 
 def default_db_path() -> Path:
@@ -1155,6 +1156,27 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_019', datetime('now'), '主联系人回写 customers.company_name，删除冗余 customer_contacts')"),
     ("user_version v2_019", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 36. v2_020：订单名称继承报价单并支持后续修改 ----------
+    ("orders.order_name", _col_guard("orders", "order_name"),
+     "ALTER TABLE orders ADD COLUMN order_name TEXT"),
+    ("orders.order_name_backfill_v2_020",
+     _once("v2_020", "orders", "deal_quotes"),
+     """
+     UPDATE orders
+     SET order_name = COALESCE(
+           NULLIF((
+             SELECT NULLIF(TRIM(q.title), '')
+             FROM deal_quotes q
+             WHERE q.id = orders.quote_id AND q.is_delete = 0
+           ), ''),
+           NULLIF(TRIM(order_no), '')
+         )
+     WHERE order_name IS NULL OR TRIM(order_name) = ''
+     """),
+    ("schema_migrations v2_020", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_020', datetime('now'), '订单名称继承客户已确认报价单标题并支持修改')"),
+    ("user_version v2_020", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -1286,6 +1308,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
             "product_name_snapshot", "product_config_snapshot",
         ),
         "orders": (
+            "order_name",
             "product_id", "product_code_snapshot", "product_name_snapshot",
             "product_config_snapshot", "product_total", "discount_amount",
             "product_payable", "customer_confirmed_at", "quote_id",

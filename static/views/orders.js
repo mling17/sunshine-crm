@@ -100,8 +100,10 @@ function viewOrders(root, route) {
         }).join('');
 
         var listHtml = dataTable([
-            { title: '订单号', nowrap: true, render: function (o) {
-                return '<a href="#/orders/' + o.id + '">' + esc(o.order_no) + '</a>';
+            { title: '订单名称', nowrap: true, render: function (o) {
+                return '<a href="#/orders/' + o.id + '">' +
+                    esc(o.order_name || o.order_no) + '</a>' +
+                    '<div class="small muted">' + esc(o.order_no) + '</div>';
             } },
             { title: '客户', render: function (o) {
                 return esc(o.customer_name || index[o.customer_id] || ('客户 #' + o.customer_id));
@@ -388,7 +390,8 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
         '<div class="order-command-head">' +
             '<div class="order-command-identity">' +
                 '<a class="crumb" href="#/orders">‹ 订单</a>' +
-                '<span class="order-command-no">' + esc(order.order_no) + '</span>' +
+                '<span class="order-command-no">' + esc(order.order_name || order.order_no) + '</span>' +
+                '<small class="order-command-code">' + esc(order.order_no) + '</small>' +
                 (afterSaleCount
                     ? '<span class="badge warn">售后数量 ' + afterSaleCount + '</span>' : '') +
                 '<div class="order-tags-row">' +
@@ -613,8 +616,12 @@ function openOrderEditModal(order) {
 
     modal.querySelector('.modal-body').innerHTML =
         '<form id="orderEditForm" class="form-modal form-grid" autocomplete="off">' +
-        '<p class="small muted field-wide">订单 ' + esc(order.order_no) +
-        '。产品明细、报价金额、优惠和商机来源保持只读；物流、收货、费用和备注可随时修改。</p>' +
+        '<div class="field"><label>订单名称 *</label>' +
+        '<input name="order_name" maxlength="120" required value="' +
+        esc(order.order_name || order.order_no) + '"></div>' +
+        '<div class="field"><label>订单编号（不可修改）</label>' +
+        '<input name="order_no" value="' + esc(order.order_no) + '" readonly tabindex="-1"></div>' +
+        '<p class="small muted field-wide">产品明细、报价金额、优惠和商机来源保持只读；订单名称、物流、收货、费用和备注可修改。</p>' +
         '<div class="field"><label>物流方式</label><select name="logistics_mode">' +
         LOGISTICS_MODE_OPTIONS.map(function (option) {
             return '<option value="' + option[0] + '"' +
@@ -631,6 +638,8 @@ function openOrderEditModal(order) {
         '<div class="field" data-ship><label>运单号</label>' +
         '<input name="tracking_number" maxlength="64" placeholder="可后补" value="' +
         esc(order.tracking_number || order.tracking_no || '') + '"></div>' +
+        '<div class="field field-wide" data-ship><label>历史收件人及地址</label>' +
+        '<select name="address_id"><option value="">手动填写 / 新地址</option></select></div>' +
         '<div class="field" data-ship><label>收件人 *</label>' +
         '<input name="receiver_name" maxlength="32" value="' +
         esc(order.receiver_name || '') + '"></div>' +
@@ -653,6 +662,10 @@ function openOrderEditModal(order) {
     var contactEl = form.querySelector('[name="carrier_contact_id"]');
     var feeEl = form.querySelector('[name="logistics_fee"]');
     var trackingEl = form.querySelector('[name="tracking_number"]');
+    var addressEl = form.querySelector('[name="address_id"]');
+    var receiverNameEl = form.querySelector('[name="receiver_name"]');
+    var receiverPhoneEl = form.querySelector('[name="receiver_phone"]');
+    var receiverAddressEl = form.querySelector('[name="receiver_address"]');
     var shipFields = $$('[data-ship]', modal);
 
     function refreshMode() {
@@ -670,6 +683,40 @@ function openOrderEditModal(order) {
         toast('物流公司加载失败，请稍后重试', true);
     });
 
+    var addressList = [];
+    function applyAddress() {
+        var address = addressList.filter(function (item) {
+            return String(item.id) === String(addressEl.value || '');
+        })[0];
+        if (!address) { return; }
+        receiverNameEl.value = address.receiver_name || '';
+        receiverPhoneEl.value = address.phone || '';
+        receiverAddressEl.value = address.address || '';
+    }
+    addressEl.addEventListener('change', applyAddress);
+    [receiverNameEl, receiverPhoneEl, receiverAddressEl].forEach(function (input) {
+        input.addEventListener('input', function () { addressEl.value = ''; });
+    });
+    api('/customers/' + order.customer_id + '/addresses').then(function (list) {
+        addressList = list || [];
+        addressEl.innerHTML = '<option value="">手动填写 / 新地址</option>' +
+            addressList.map(function (address) {
+                var label = [
+                    address.label,
+                    address.receiver_name,
+                    address.phone,
+                    address.address
+                ].filter(Boolean).join(' · ');
+                return '<option value="' + address.id + '">' + esc(label) + '</option>';
+            }).join('');
+        var current = addressList.filter(function (address) {
+            return address.receiver_name === (order.receiver_name || '') &&
+                address.phone === (order.receiver_phone || '') &&
+                address.address === (order.receiver_address || '');
+        })[0];
+        if (current) { addressEl.value = String(current.id); }
+    }).catch(function () { /* 历史地址加载失败时仍可手动填写 */ });
+
     modal.querySelector('.modal-cancel').addEventListener('click', function () {
         if (modal.parentNode) { document.body.removeChild(modal); }
     });
@@ -677,6 +724,7 @@ function openOrderEditModal(order) {
         ev.preventDefault();
         var mode = modeEl.value;
         var payload = {
+            order_name: String(form.querySelector('[name="order_name"]').value || '').trim(),
             logistics_mode: mode,
             carrier_id: null,
             carrier_contact_id: null,
@@ -696,9 +744,9 @@ function openOrderEditModal(order) {
                 toast('请选择物流公司的联络人；没有联络人请先到物流页维护', true);
                 return;
             }
-            payload.receiver_name = String(form.querySelector('[name="receiver_name"]').value || '').trim();
-            payload.receiver_phone = String(form.querySelector('[name="receiver_phone"]').value || '').trim();
-            payload.receiver_address = String(form.querySelector('[name="receiver_address"]').value || '').trim();
+            payload.receiver_name = String(receiverNameEl.value || '').trim();
+            payload.receiver_phone = String(receiverPhoneEl.value || '').trim();
+            payload.receiver_address = String(receiverAddressEl.value || '').trim();
             if (!payload.receiver_name || !payload.receiver_phone || !payload.receiver_address) {
                 toast('请填全收件人、收货电话和收货地址', true);
                 return;
@@ -708,6 +756,7 @@ function openOrderEditModal(order) {
             payload.logistics_fee = Number(feeEl.value) || 0;
             payload.tracking_number = String(trackingEl.value || '').trim() || null;
         }
+        if (!payload.order_name) { toast('请填写订单名称', true); return; }
         var btn = form.querySelector('button[type="submit"]');
         btn.disabled = true;
         api('/orders/' + order.id, { method: 'PUT', body: payload }).then(function () {

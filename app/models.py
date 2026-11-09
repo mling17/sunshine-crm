@@ -890,6 +890,9 @@ class OrderUpdate(BaseModel):
     商品快照、报价金额、优惠和订单来源由商机 / 报价单继承，不在这里开放修改。
     """
 
+    model_config = ConfigDict(extra="forbid")
+
+    order_name: OptionalText = Field(default=None, max_length=120)
     logistics_mode: LOGISTICS_MODE | None = None
     carrier_id: Optional[int] = Field(default=None, gt=0)
     carrier_contact_id: Optional[int] = Field(default=None, gt=0)
@@ -906,6 +909,7 @@ class OrderOut(BaseModel):
 
     id: int
     order_no: str
+    order_name: str | None = None
     customer_id: int
     deal_id: int
     quote_id: int | None = None
@@ -975,6 +979,7 @@ class OrderDetailOut(BaseModel):
 
     id: int
     order_no: str
+    order_name: str | None = None
     customer_id: int
     deal_id: int
     quote_id: int | None = None

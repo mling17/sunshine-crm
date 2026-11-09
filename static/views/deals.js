@@ -1255,7 +1255,8 @@ function openDealOrderModal(deal, customerName, items, quote) {
     }, 0);
     var quoteTitle = quote && (quote.title || quote.quote_no) || '客户已确认报价单';
     var quotePreviewHtml = (items || []).map(function (item) {
-        var productName = dealItemName(item);
+        var productName = item.product_name_snapshot ||
+            [item.product_type, item.model].filter(Boolean).join(' · ') || '未命名产品';
         var previewUrl = item.form_preview_url ? '/crm' + item.form_preview_url : '';
         return '<article class="order-quote-card">' +
             (previewUrl
@@ -1304,7 +1305,9 @@ function openDealOrderModal(deal, customerName, items, quote) {
         '</section>' +
         '<section class="order-form-section">' +
         '<div class="order-section-heading"><span>01</span><div>' +
-            '<h4>金额与定金</h4><p>优惠只作用于产品金额，运费单独计入订单应收。</p></div></div>' +
+            '<h4>订单名称与金额</h4><p>订单名称继承自客户已确认的报价单，优惠只作用于产品金额。</p></div></div>' +
+        '<div class="field order-field-wide"><label>订单名称</label>' +
+        '<input name="order_name" maxlength="120" value="' + esc(quoteTitle) + '" readonly tabindex="-1"></div>' +
         '<div class="order-money-grid">' +
         '<div class="field"><label>产品合计</label>' +
         '<div class="order-money-control"><span>¥</span>' +
@@ -1354,6 +1357,8 @@ function openDealOrderModal(deal, customerName, items, quote) {
         '<select name="carrier_contact_id"><option value="">请先选择物流公司</option></select></div>' +
         '</div>' +
         '<div class="order-address-grid" data-ship hidden>' +
+        '<div class="field order-field-wide"><label>历史收件人及地址</label>' +
+        '<select name="address_id"><option value="">手动填写 / 新地址</option></select></div>' +
         '<div class="field"><label>收货人 *</label><input name="receiver_name" maxlength="32"></div>' +
         '<div class="field"><label>收货电话 *</label><input name="receiver_phone" maxlength="32" inputmode="tel"></div>' +
         '<div class="field order-field-wide"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
@@ -1389,6 +1394,10 @@ function openDealOrderModal(deal, customerName, items, quote) {
     var modeEl = form.querySelector('[name="logistics_mode"]');
     var carrierEl = form.querySelector('[name="carrier_id"]');
     var carrierContactEl = form.querySelector('[name="carrier_contact_id"]');
+    var addressEl = form.querySelector('[name="address_id"]');
+    var receiverNameEl = form.querySelector('[name="receiver_name"]');
+    var receiverPhoneEl = form.querySelector('[name="receiver_phone"]');
+    var receiverAddressEl = form.querySelector('[name="receiver_address"]');
     var shipFields = $$('[data-ship]', modal);
 
     $$('.order-money-input.is-editable', modal).forEach(function (input) {
@@ -1455,6 +1464,34 @@ function openDealOrderModal(deal, customerName, items, quote) {
         refreshCarrierContacts();
     }).catch(function () { /* 拉不到就留空，用户可先自提 */ });
 
+    var addressList = [];
+    function applyAddress() {
+        var address = addressList.filter(function (item) {
+            return String(item.id) === String(addressEl.value || '');
+        })[0];
+        if (!address) { return; }
+        receiverNameEl.value = address.receiver_name || '';
+        receiverPhoneEl.value = address.phone || '';
+        receiverAddressEl.value = address.address || '';
+    }
+    addressEl.addEventListener('change', applyAddress);
+    [receiverNameEl, receiverPhoneEl, receiverAddressEl].forEach(function (input) {
+        input.addEventListener('input', function () { addressEl.value = ''; });
+    });
+    api('/customers/' + deal.customer_id + '/addresses').then(function (list) {
+        addressList = list || [];
+        addressEl.innerHTML = '<option value="">手动填写 / 新地址</option>' +
+            addressList.map(function (address) {
+                var label = [
+                    address.label,
+                    address.receiver_name,
+                    address.phone,
+                    address.address
+                ].filter(Boolean).join(' · ');
+                return '<option value="' + address.id + '">' + esc(label) + '</option>';
+            }).join('');
+    }).catch(function () { /* 历史地址加载失败时仍可手动填写 */ });
+
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var btn = form.querySelector('button[type="submit"]');
@@ -1487,10 +1524,11 @@ function openDealOrderModal(deal, customerName, items, quote) {
                 return;
             }
             payload.carrier_contact_id = Number(carrierContactEl.value);
-            var rn = String(form.querySelector('[name="receiver_name"]').value || '').trim();
-            var rp = String(form.querySelector('[name="receiver_phone"]').value || '').trim();
-            var ra = String(form.querySelector('[name="receiver_address"]').value || '').trim();
+            var rn = String(receiverNameEl.value || '').trim();
+            var rp = String(receiverPhoneEl.value || '').trim();
+            var ra = String(receiverAddressEl.value || '').trim();
             if (!rn || !rp || !ra) { toast('请填全收货人 / 电话 / 地址', true); return; }
+            if (addressEl.value) { payload.address_id = Number(addressEl.value); }
             payload.receiver_name = rn;
             payload.receiver_phone = rp;
             payload.receiver_address = ra;

@@ -89,9 +89,57 @@ class TestMigrations(unittest.TestCase):
         finally:
             conn.close()
         self.assertTrue(
-            {"carrier_contact_id", "carrier_contact_name", "carrier_contact_phone"}
+            {
+                "carrier_contact_id",
+                "carrier_contact_name",
+                "carrier_contact_phone",
+                "order_name",
+            }
             <= columns
         )
+
+    def test_v2_020_backfills_order_name_from_quote_title(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-11-09T10:00:00Z"
+        try:
+            customer_id = int(conn.execute(
+                "INSERT INTO customers (name, created_at, updated_at)"
+                " VALUES ('订单名称客户', ?, ?)",
+                (now, now),
+            ).lastrowid)
+            deal_id = int(conn.execute(
+                "INSERT INTO deals (customer_id, stage, amount, created_at, updated_at)"
+                " VALUES (?, 'confirmed', 8800, ?, ?)",
+                (customer_id, now, now),
+            ).lastrowid)
+            quote_id = int(conn.execute(
+                "INSERT INTO deal_quotes"
+                " (quote_no, deal_id, customer_id, title, status, amount, created_at, updated_at)"
+                " VALUES ('QT-TEST-001', ?, ?, '阳光房报价方案', 'confirmed', 8800, ?, ?)",
+                (deal_id, customer_id, now, now),
+            ).lastrowid)
+            conn.execute(
+                "INSERT INTO orders"
+                " (order_no, customer_id, deal_id, quote_id, amount, status, created_at, updated_at)"
+                " VALUES ('SO-TEST-001', ?, ?, ?, 8800, 'pending_payment', ?, ?)",
+                (customer_id, deal_id, quote_id, now, now),
+            )
+            conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_020'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        run_migrations(self.db, backup=False, verbose=False)
+
+        conn = sqlite3.connect(str(self.db))
+        try:
+            order_name = conn.execute(
+                "SELECT order_name FROM orders WHERE order_no = 'SO-TEST-001'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(order_name, "阳光房报价方案")
 
     def test_aftersale_relation_column_exists(self):
         run_migrations(self.db, backup=False, verbose=False)

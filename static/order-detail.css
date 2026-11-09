@@ -63,6 +63,12 @@
   letter-spacing: -.015em;
 }
 
+.order-command-code {
+  color: var(--order-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .order-command-state .badge {
   min-height: 22px;
 }

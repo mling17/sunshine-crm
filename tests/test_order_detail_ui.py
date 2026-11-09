@@ -52,6 +52,8 @@ class OrderDetailUiTest(unittest.TestCase):
             detail.index('class="order-command-no"'),
             detail.index('class="order-tags-row"'),
         )
+        self.assertIn("esc(order.order_name || order.order_no)", detail)
+        self.assertIn('class="order-command-code"', detail)
         self.assertIn("flex: 0 1 auto;", self.css)
 
     def test_after_sale_metric_and_section_are_conditional(self):
@@ -167,9 +169,9 @@ class OrderDetailUiTest(unittest.TestCase):
             "@media (max-width: 640px)",
         ):
             self.assertIn(marker, self.css)
-        self.assertIn('/crm/order-detail.css?v=20261104lead1', self.index)
+        self.assertIn('/crm/order-detail.css?v=20261109order-name1', self.index)
         self.assertIn("'/crm/order-detail.css'", self.sw)
-        self.assertIn("const CACHE = 'crm-shell-v80';", self.sw)
+        self.assertIn("const CACHE = 'crm-shell-v81';", self.sw)
         self.assertGreaterEqual(self.css.count("grid-template-columns: repeat(5,"), 3)
 
     def test_pending_customer_confirmation_is_not_a_frontend_state(self):
