@@ -1,6 +1,6 @@
 # 02 · 软件架构文档
 
-> 最后更新：2026-11-09（TASK-025 报价确认归档与排序）
+> 最后更新：2026-11-09（TASK-026 报价单收货信息提取）
 >
 > 文档状态：✅ 已建立，后续随结构、依赖、接口和数据模型变化增量维护
 >
@@ -187,7 +187,7 @@ HTTP 边界
 | 客户 | `#/customers`、`#/customers/{id}` | `/customers`、`/customers/{id}/360`、`/addresses` |
 | 产品 | `#/products`、`#/products/{id}` | `/products`、`/products/{id}/form-file` |
 | 商机 | `#/deals`、`#/deals/{id}` | `/deals`、`/deals/{id}/quotes`、`/deals/{id}/tags` |
-| 报价 | 商机详情内 | `/quotes/{id}/send|requote|void|confirm|orders` |
+| 报价 | 商机详情内 | `/quotes/{id}/send|requote|void|confirm|orders`、`/quotes/{id}/shipping-recipient` |
 | 订单 | `#/orders`、`#/orders/{id}` | `/orders`、`/orders/{id}/payment`、`/transition` |
 | 售后 | `#/aftersales`、`#/aftersales/{id}` | `/aftersales`、`/aftersales/{id}/finish` |
 | 物流 | `#/logistics` | `/carriers` |
@@ -354,11 +354,13 @@ pending 待处理 → processing 处理中 → done 已完成
 ### 10.3 报价单生成订单
 
 1. 校验报价单已 `confirmed` 且尚未生成订单。
-2. 复制报价明细、产品快照和下单表引用到订单。
-3. 将客户已确认报价单标题复制到 `orders.order_name`。
-4. 计算产品合计、优惠、产品应收、运费和订单应收。
-5. 校验定金及尾款恒等式，保存物流和收货快照。
-6. 商机归档为“已生成订单”，订单复制产品、价格、参数和下单表快照，写报价、订单和状态履历。
+2. 生成订单表单可调用 `GET /quotes/{id}/shipping-recipient`：服务端优先读取报价明细已持久化的 `form_content_json`，再从 `Sheet1!A2`（兼容 `A1`）和 `Sheet1!B3` 提取收货人、电话和地址；旧数据缺少内容快照时回读该版本 Excel。
+3. 多张产品下单表必须给出一致的收货信息，否则拒绝自动覆盖并提示人工填写。
+4. 复制报价明细、产品快照和下单表引用到订单。
+5. 将客户已确认报价单标题复制到 `orders.order_name`。
+6. 计算产品合计、优惠、产品应收、运费和订单应收。
+7. 校验定金及尾款恒等式，保存物流和收货快照。
+8. 商机归档为“已生成订单”，订单复制产品、价格、参数和下单表快照，写报价、订单和状态履历。
 
 ### 10.4 订单推进
 

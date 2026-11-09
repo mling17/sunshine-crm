@@ -1360,8 +1360,11 @@ function openDealOrderModal(deal, customerName, items, quote) {
         '<select name="carrier_contact_id"><option value="">请先选择物流公司</option></select></div>' +
         '</div>' +
         '<div class="order-address-grid" data-ship hidden>' +
-        '<div class="field order-field-wide"><label>历史收件人及地址</label>' +
-        '<select name="address_id"><option value="">手动填写 / 新地址</option></select></div>' +
+        '<div class="field order-field-wide order-recipient-source"><div class="order-recipient-label-row">' +
+        '<label>历史收件人及地址</label>' +
+        '<button type="button" class="btn btn-sm" data-extract-quote-recipient>从报价单提取</button>' +
+        '</div><select name="address_id"><option value="">手动填写 / 新地址</option></select>' +
+        '<span class="hint">读取报价单 Sheet1 的 A2 收货人+电话和 B3 收货地址。</span></div>' +
         '<div class="field"><label>收货人 *</label><input name="receiver_name" maxlength="32"></div>' +
         '<div class="field"><label>收货电话 *</label><input name="receiver_phone" maxlength="32" inputmode="tel"></div>' +
         '<div class="field order-field-wide"><label>收货地址 *</label><input name="receiver_address" maxlength="200"></div>' +
@@ -1401,6 +1404,7 @@ function openDealOrderModal(deal, customerName, items, quote) {
     var receiverNameEl = form.querySelector('[name="receiver_name"]');
     var receiverPhoneEl = form.querySelector('[name="receiver_phone"]');
     var receiverAddressEl = form.querySelector('[name="receiver_address"]');
+    var extractRecipientBtn = form.querySelector('[data-extract-quote-recipient]');
     var shipFields = $$('[data-ship]', modal);
 
     $$('.order-money-input.is-editable', modal).forEach(function (input) {
@@ -1494,6 +1498,28 @@ function openDealOrderModal(deal, customerName, items, quote) {
                 return '<option value="' + address.id + '">' + esc(label) + '</option>';
             }).join('');
     }).catch(function () { /* 历史地址加载失败时仍可手动填写 */ });
+
+    extractRecipientBtn.addEventListener('click', function () {
+        if (!quote || !quote.id) {
+            toast('当前报价单无法读取下单表', true);
+            return;
+        }
+        var originalLabel = extractRecipientBtn.textContent;
+        extractRecipientBtn.disabled = true;
+        extractRecipientBtn.textContent = '提取中…';
+        api('/quotes/' + quote.id + '/shipping-recipient').then(function (recipient) {
+            addressEl.value = '';
+            receiverNameEl.value = recipient.receiver_name || '';
+            receiverPhoneEl.value = recipient.receiver_phone || '';
+            receiverAddressEl.value = recipient.receiver_address || '';
+            toast('已从报价单提取收货信息');
+        }).catch(function (err) {
+            toast(err.message || '报价单中没有完整的收货信息', true);
+        }).finally(function () {
+            extractRecipientBtn.disabled = false;
+            extractRecipientBtn.textContent = originalLabel;
+        });
+    });
 
     form.addEventListener('submit', function (ev) {
         ev.preventDefault();

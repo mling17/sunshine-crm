@@ -4532,6 +4532,23 @@ table.data-table a:hover { text-decoration: underline; }
   margin-top: 12px;
 }
 
+.order-recipient-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.order-recipient-label-row > label {
+  margin: 0 !important;
+}
+
+.order-recipient-source .hint {
+  display: block;
+  margin-top: 6px;
+}
+
 .deal-order-modal .order-field-wide {
   grid-column: 1 / -1;
 }

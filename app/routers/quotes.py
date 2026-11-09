@@ -18,9 +18,11 @@ from app.models import AttachmentOut, QuoteIn, QuoteItemOut, QuoteOut
 from app.product_catalog import get_product, product_snapshot
 from app.quote_forms import (
     QuoteFormParseError,
+    extract_shipping_recipient,
     inspect_excel_form,
     normalize_form_title,
     read_sheet1_a1,
+    read_sheet1_shipping_recipient,
 )
 from app.quote_versions import (
     form_download_url,
@@ -364,6 +366,64 @@ def list_quotes(deal_id: int) -> list[QuoteOut]:
 def get_quote(quote_id: int) -> QuoteOut:
     with db_conn() as conn:
         return _quote_out(conn, _quote(conn, quote_id))
+
+
+@router.get("/quotes/{quote_id}/shipping-recipient", response_model=dict)
+def get_quote_shipping_recipient(quote_id: int) -> dict:
+    """从确认报价单的下单表读取订单收货人、电话和地址。"""
+    with db_conn() as conn:
+        quote = _quote(conn, quote_id)
+        recipients: list[dict[str, str]] = []
+        for item in _quote_items(conn, quote_id):
+            recipient = None
+            try:
+                content = json.loads(item["form_content_json"] or "{}")
+                sheets = content.get("sheets") or []
+                rows = sheets[0].get("rows") if sheets else None
+                if isinstance(rows, list):
+                    recipient = extract_shipping_recipient(rows)
+            except (AttributeError, TypeError, ValueError):
+                recipient = None
+
+            if recipient is None and item["form_storage_key"]:
+                path = resolve_upload_path(item["form_storage_key"], must_exist=False)
+                if path.is_file():
+                    try:
+                        recipient = read_sheet1_shipping_recipient(path.read_bytes())
+                    except (OSError, QuoteFormParseError):
+                        recipient = None
+            if recipient:
+                recipient["source_file_name"] = item["form_file_name"]
+                recipient["source_product_name"] = item["product_name_snapshot"]
+                recipients.append(recipient)
+
+    if not recipients:
+        raise ApiError(
+            404,
+            "quote_recipient_not_found",
+            "未在报价单下单表中找到完整的收货人、电话和地址，请手动填写",
+        )
+
+    unique = {
+        (
+            item["receiver_name"],
+            item["receiver_phone"],
+            item["receiver_address"],
+        )
+        for item in recipients
+    }
+    if len(unique) > 1:
+        raise ApiError(
+            409,
+            "quote_recipient_conflict",
+            "多张下单表的收货信息不一致，请手动确认收货信息",
+        )
+
+    return {
+        "ok": True,
+        **recipients[0],
+        "quote_no": quote["quote_no"],
+    }
 
 
 @router.post("/deals/{deal_id}/quotes", response_model=QuoteOut)

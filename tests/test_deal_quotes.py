@@ -14,6 +14,7 @@ from openpyxl import load_workbook
 from tests._util import ApiTestCase
 
 from app.db import db_conn
+from app.quote_forms import extract_shipping_recipient
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,6 +165,94 @@ class DealQuoteTest(ApiTestCase):
         ).json()
         follow_upload = next(item for item in follow_records if "上传下单表" in item["content"])
         self.assertEqual(follow_upload["detail"]["event"], "item_created")
+
+    def test_shipping_recipient_extraction_uses_a2_and_b3(self):
+        recipient = extract_shipping_recipient([
+            ["普通嵌入普通把手天窗下单表"],
+            ["收货人+电话：闫青合  139 5403 3896"],
+            ["收货地址：请填写详细地址", "山东省 菏泽市 东明县 焦元乡1号新村   德邦包邮"],
+        ])
+        self.assertEqual(
+            recipient,
+            {
+                "receiver_name": "闫青合",
+                "receiver_phone": "13954033896",
+                "receiver_address": "山东省 菏泽市 东明县 焦元乡1号新村 德邦包邮",
+                "source_cells": "Sheet1!A2，Sheet1!B3",
+            },
+        )
+        fallback = extract_shipping_recipient([
+            ["收货人+电话：李四 0531-12345678"],
+            ["第二行留空"],
+            ["收货地址：请填写详细地址", "山东省 济南市 历下区"],
+        ])
+        self.assertEqual(fallback["receiver_name"], "李四")
+        self.assertEqual(fallback["receiver_phone"], "053112345678")
+        self.assertEqual(fallback["source_cells"], "Sheet1!A1，Sheet1!B3")
+
+    def test_confirmed_quote_returns_shipping_recipient_for_order_form(self):
+        _, _, quote = self._quote_with_item()
+        item = quote["items"][0]
+        content = {
+            "filename": "菏泽闫青合下单表.xlsx",
+            "sheets": [{
+                "name": "Sheet1",
+                "rows": [
+                    ["普通嵌入普通把手天窗下单表"],
+                    ["收货人+电话：闫青合  139 5403 3896"],
+                    ["收货地址：请填写详细地址", "山东省 菏泽市 东明县 焦元乡1号新村   德邦包邮"],
+                ],
+            }],
+        }
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE quote_items SET form_content_json = ?, form_file_name = ?"
+                " WHERE id = ?",
+                (
+                    json.dumps(content, ensure_ascii=False),
+                    "菏泽闫青合下单表.xlsx",
+                    item["id"],
+                ),
+            )
+
+        response = self.client.get(
+            f"/api/crm/quotes/{quote['id']}/shipping-recipient"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["receiver_name"], "闫青合")
+        self.assertEqual(data["receiver_phone"], "13954033896")
+        self.assertEqual(
+            data["receiver_address"],
+            "山东省 菏泽市 东明县 焦元乡1号新村 德邦包邮",
+        )
+        self.assertEqual(data["source_cells"], "Sheet1!A2，Sheet1!B3")
+        self.assertEqual(data["source_file_name"], "菏泽闫青合下单表.xlsx")
+
+    def test_shipping_recipient_requires_complete_form_values(self):
+        _, _, quote = self._quote_with_item()
+        item = quote["items"][0]
+        content = {
+            "sheets": [{
+                "rows": [
+                    ["普通嵌入普通把手天窗下单表"],
+                    ["收货人+电话："],
+                    ["收货地址：请填写详细地址", "山东省 菏泽市 东明县"],
+                ],
+            }],
+        }
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE quote_items SET form_content_json = ?, form_storage_key = NULL"
+                " WHERE id = ?",
+                (json.dumps(content, ensure_ascii=False), item["id"]),
+            )
+
+        response = self.client.get(
+            f"/api/crm/quotes/{quote['id']}/shipping-recipient"
+        )
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["code"], "quote_recipient_not_found")
 
     def test_follow_up_can_link_to_quote(self):
         _, deal, quote = self._quote_with_item()

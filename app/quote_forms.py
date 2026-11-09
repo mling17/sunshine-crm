@@ -24,6 +24,69 @@ def normalize_form_title(value: Any) -> str:
     return text.replace("（", "(").replace("）", ")").lower()
 
 
+_RECEIVER_LABEL_RE = re.compile(
+    r"^\s*(?:收(?:货|件)人|联系人)\s*(?:[+＋]\s*电话)?\s*[：:]?\s*"
+)
+_MOBILE_PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+?86[-\s]?)?1[3-9](?:[-\s]?\d){9}(?!\d)"
+)
+_LANDLINE_PHONE_RE = re.compile(
+    r"(?<!\d)(?:0\d{2,3}[-\s]?\d{7,8})(?!\d)"
+)
+
+
+def _text_value(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    return re.sub(r"\s+", " ", str(value)).strip()
+
+
+def extract_shipping_recipient(
+    rows: list[list[Any]],
+) -> dict[str, str] | None:
+    """从 Sheet1 的 A2（兼容 A1）和 B3 提取单个收货人快照。"""
+
+    def cell(row_number: int, column_number: int) -> str:
+        if row_number < 1 or row_number > len(rows):
+            return ""
+        row = rows[row_number - 1]
+        if column_number < 1 or column_number > len(row):
+            return ""
+        return _text_value(row[column_number - 1])
+
+    address = cell(3, 2)
+    if not address:
+        return None
+
+    for row_number, cell_name in ((2, "A2"), (1, "A1")):
+        receiver_line = cell(row_number, 1)
+        if not receiver_line:
+            continue
+        phone_match = _MOBILE_PHONE_RE.search(receiver_line)
+        if phone_match is None:
+            phone_match = _LANDLINE_PHONE_RE.search(receiver_line)
+        if phone_match is None:
+            continue
+
+        phone_digits = re.sub(r"\D", "", phone_match.group(0))
+        if len(phone_digits) == 13 and phone_digits.startswith("86"):
+            phone_digits = phone_digits[2:]
+        if len(phone_digits) < 7:
+            continue
+
+        name = _RECEIVER_LABEL_RE.sub("", receiver_line[: phone_match.start()])
+        name = name.strip(" \t,，;；/、-")
+        if not name:
+            continue
+        return {
+            "receiver_name": name,
+            "receiver_phone": phone_digits,
+            "receiver_address": address,
+            "source_cells": f"Sheet1!{cell_name}，Sheet1!B3",
+        }
+    return None
+
+
 def _cell_value(value: Any) -> str | int | float | bool | None:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -80,6 +143,22 @@ def read_sheet1_a1(data: bytes) -> str | None:
     try:
         value = value_book.worksheets[0]["A1"].value
         return str(value).strip() if value not in (None, "") else None
+    finally:
+        formula_book.close()
+        value_book.close()
+
+
+def read_sheet1_shipping_recipient(data: bytes) -> dict[str, str] | None:
+    """直接读取上传版本的下单表，提取 A2/A1 与 B3 收货信息。"""
+    formula_book, value_book = _load_workbooks(data)
+    try:
+        value_sheet = value_book.worksheets[0]
+        rows = [
+            [value_sheet.cell(row_number, column_number).value
+             for column_number in (1, 2)]
+            for row_number in (1, 2, 3)
+        ]
+        return extract_shipping_recipient(rows)
     finally:
         formula_book.close()
         value_book.close()

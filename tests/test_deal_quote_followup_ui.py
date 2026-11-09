@@ -76,6 +76,25 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("报价单缩略图暂不可用", order_modal)
         self.assertNotIn("<h3>产品明细</h3>", order_modal)
 
+    def test_order_modal_extracts_recipient_from_confirmed_quote_form(self):
+        order_modal = self.deals[
+            self.deals.index("function openDealOrderModal"):
+        ]
+        for marker in (
+            "data-extract-quote-recipient",
+            "从报价单提取",
+            "A2 收货人+电话",
+            "B3 收货地址",
+            "/shipping-recipient",
+            "recipient.receiver_name",
+            "recipient.receiver_phone",
+            "recipient.receiver_address",
+            "addressEl.value = '';",
+        ):
+            self.assertIn(marker, order_modal)
+        self.assertIn(".order-recipient-label-row {", self.css)
+        self.assertIn(".order-recipient-source .hint {", self.css)
+
     def test_order_modal_uses_grouped_responsive_form_layout(self):
         order_modal = self.deals[
             self.deals.index("function openDealOrderModal"):
