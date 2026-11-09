@@ -40,7 +40,7 @@ class AftersaleHistoryUiTest(unittest.TestCase):
         self.assertIn("canFollow: !finished", detail)
 
     def test_script_cache_version_bumped(self):
-        self.assertIn("/crm/views/orders.js?v=20261109order-name1", self.index)
+        self.assertIn("/crm/views/orders.js?v=20261109quote-history1", self.index)
         self.assertIn("/crm/views/aftersales.js?v=20261104lead1", self.index)
 
 

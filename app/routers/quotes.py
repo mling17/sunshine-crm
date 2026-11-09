@@ -351,7 +351,10 @@ def list_quotes(deal_id: int) -> list[QuoteOut]:
     with db_conn() as conn:
         _deal(conn, deal_id)
         rows = conn.execute(
-            "SELECT * FROM deal_quotes WHERE deal_id = ? AND is_delete = 0 ORDER BY id DESC",
+            "SELECT * FROM deal_quotes WHERE deal_id = ? AND is_delete = 0"
+            " ORDER BY CASE status"
+            " WHEN 'confirmed' THEN 0 WHEN 'pending' THEN 1"
+            " WHEN 'draft' THEN 2 ELSE 3 END, updated_at DESC, id DESC",
             (deal_id,),
         ).fetchall()
         return [_quote_out(conn, row) for row in rows]
@@ -838,7 +841,7 @@ def void_quote(quote_id: int) -> QuoteOut:
         if deal["order_id"] is not None:
             raise ApiError(409, "deal_locked", "商机已生成订单，不能作废报价单")
         if quote["status"] == "void":
-            return _quote_out(conn, quote)
+            raise ApiError(409, "quote_history_locked", "历史报价单不能修改")
         if quote["status"] == "confirmed":
             raise ApiError(
                 409,
@@ -876,13 +879,15 @@ def delete_quote(quote_id: int) -> dict:
             raise ApiError(
                 409,
                 "quote_delete_locked",
-                "客户已确认的报价单不能删除或作废",
+                "客户已确认的报价单不能删除",
             )
-        if quote["status"] not in ("draft", "void"):
+        if quote["status"] == "void":
+            raise ApiError(409, "quote_history_locked", "历史报价单不能修改")
+        if quote["status"] != "draft":
             raise ApiError(
                 409,
                 "quote_delete_locked",
-                "「待客户确认」的报价单不能删除，请先作废",
+                "「待客户确认」的报价单不能删除，请先退回重新报价",
             )
         now = now_iso()
         deleted_detail = _quote_event_detail(conn, quote_id, "quote_deleted")
@@ -974,6 +979,19 @@ async def confirm_quote(
             " confirmation_note = ?, updated_at = ? WHERE id = ?",
             (now, (note or "").strip() or None, now, quote_id),
         )
+        other_quotes = conn.execute(
+            "SELECT id, quote_no, status FROM deal_quotes"
+            " WHERE deal_id = ? AND is_delete = 0 AND id <> ?"
+            " AND status <> 'void' ORDER BY id",
+            (deal["id"], quote_id),
+        ).fetchall()
+        if other_quotes:
+            conn.execute(
+                "UPDATE deal_quotes SET status = 'void', updated_at = ?"
+                " WHERE deal_id = ? AND is_delete = 0 AND id <> ?"
+                " AND status <> 'void'",
+                (now, deal["id"], quote_id),
+            )
         _sync_deal_quote_status(conn, deal["id"])
         add_entry(
             conn,
@@ -989,6 +1007,34 @@ async def confirm_quote(
             ),
             detail=_quote_event_detail(conn, quote_id, "confirmed"),
         )
+        if other_quotes:
+            add_entry(
+                conn,
+                object_type="deal",
+                object_id=deal["id"],
+                kind="quote",
+                customer_id=deal["customer_id"],
+                deal_id=deal["id"],
+                quote_id=quote_id,
+                content=(
+                    "其他报价单转为历史："
+                    + "、".join(row["quote_no"] for row in other_quotes)
+                ),
+                detail={
+                    "event": "auto_history_for_confirmation",
+                    "confirmed_quote_id": quote_id,
+                    "confirmed_quote_no": quote["quote_no"],
+                    "quotes": [
+                        {
+                            "id": int(row["id"]),
+                            "quote_no": row["quote_no"],
+                            "status_before": row["status"],
+                            "status_after": "void",
+                        }
+                        for row in other_quotes
+                    ],
+                },
+            )
         sync_pending_quote_tags(conn, deal["id"])
         return _quote_out(conn, _quote(conn, quote_id))
 

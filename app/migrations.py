@@ -20,6 +20,7 @@ CRM V2 增量迁移 M1（幂等 / 可中断重跑 / 只增不毁）。
 7. customers 表构造移除 house_note、新增 note 列（重建或 DROP COLUMN，按 SQLite 版本选方案）
 8. v2_019 仅删除无写入接口且与 customers 重叠的 customer_contacts；删除前必须回写主联系人。
 9. v2_020 新增 orders.order_name，并从来源报价单标题回填历史订单名称。
+10. v2_021 将已有客户确认商机的其他报价单统一转为历史。
 """
 
 from __future__ import annotations
@@ -34,8 +35,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_020"
-SCHEMA_USER_VERSION = 19
+MIGRATION_VERSION = "v2_021"
+SCHEMA_USER_VERSION = 20
 
 
 def default_db_path() -> Path:
@@ -1177,6 +1178,26 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_020', datetime('now'), '订单名称继承客户已确认报价单标题并支持修改')"),
     ("user_version v2_020", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 37. v2_021：客户确认后其他报价单转历史 ----------
+    ("deal_quotes.auto_history_v2_021",
+     _once("v2_021", "deals", "deal_quotes"),
+     """
+     UPDATE deal_quotes
+     SET status = 'void', updated_at = datetime('now')
+     WHERE is_delete = 0
+       AND status IN ('draft', 'pending')
+       AND EXISTS (
+         SELECT 1 FROM deal_quotes confirmed
+         WHERE confirmed.deal_id = deal_quotes.deal_id
+           AND confirmed.id <> deal_quotes.id
+           AND confirmed.status = 'confirmed'
+           AND confirmed.is_delete = 0
+       )
+     """),
+    ("schema_migrations v2_021", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_021', datetime('now'), '客户确认后其他报价单自动转为历史')"),
+    ("user_version v2_021", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 

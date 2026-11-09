@@ -76,7 +76,7 @@ QUOTE_STATUS_LABELS: Dict[str, str] = {
     "draft": "报价",
     "pending": "待客户确认",
     "confirmed": "客户已确认",
-    "void": "已作废",
+    "void": "历史",
 }
 
 # ---------------- 商机流失原因 ----------------

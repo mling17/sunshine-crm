@@ -64,7 +64,7 @@ class FollowupModalUiTest(unittest.TestCase):
         self.assertIn("followExtraHtml:", detail)
         self.assertNotIn("followExtraHtml: quotes.length", detail)
         self.assertIn("暂无报价单", detail)
-        self.assertIn("(quotes.length ? '' : ' disabled')", detail)
+        self.assertIn("(followableQuotes.length ? '' : ' disabled')", detail)
 
 
 if __name__ == "__main__":

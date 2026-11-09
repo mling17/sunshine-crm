@@ -412,11 +412,17 @@ async def create_follow_up(
     if quote_id_value is not None:
         with db_conn() as _quote_conn:
             quote_row = _quote_conn.execute(
-                "SELECT deal_id FROM deal_quotes WHERE id = ? AND is_delete = 0",
+                "SELECT deal_id, status FROM deal_quotes WHERE id = ? AND is_delete = 0",
                 (quote_id_value,),
             ).fetchone()
         if quote_row is None:
             raise HTTPException(status_code=404, detail="报价单不存在")
+        if quote_row["status"] == "void":
+            raise ApiError(
+                status_code=409,
+                code="quote_history_locked",
+                message="历史报价单不能添加关联跟进",
+            )
         expected_deal_id = int(deal_id) if deal_id else (
             object_id_value if object_type == "deal" else None
         )

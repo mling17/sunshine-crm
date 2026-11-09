@@ -850,5 +850,5 @@ def mysql_runtime_seed(conn) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note)"
         " VALUES (?, ?, ?)",
-        (MIGRATION_VERSION, now, "MySQL schema baseline v2_020"),
+        (MIGRATION_VERSION, now, "MySQL schema baseline v2_021"),
     )

@@ -569,7 +569,7 @@ class DealQuoteTest(ApiTestCase):
             unquote(new_download.headers["content-disposition"]),
         )
 
-    def test_quote_priority_void_and_delete_refresh_deal_status(self):
+    def test_quote_priority_history_and_delete_refresh_deal_status(self):
         _, deal, quote = self._quote_with_item()
         second = self.client.post(
             f"/api/crm/deals/{deal['id']}/quotes",
@@ -597,8 +597,8 @@ class DealQuoteTest(ApiTestCase):
         )
 
         voided = self.client.post(f"/api/crm/quotes/{second['id']}/void")
-        self.assertEqual(voided.status_code, 200, voided.text)
-        self.assertEqual(voided.json()["status"], "void")
+        self.assertEqual(voided.status_code, 409, voided.text)
+        self.assertEqual(voided.json()["code"], "quote_history_locked")
         self.assertEqual(
             self.client.get(f"/api/crm/deals/{deal['id']}").json()["stage"],
             "won",
@@ -613,7 +613,8 @@ class DealQuoteTest(ApiTestCase):
         )
 
         removed = self.client.delete(f"/api/crm/quotes/{second['id']}")
-        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(removed.status_code, 409, removed.text)
+        self.assertEqual(removed.json()["code"], "quote_history_locked")
         removed_confirmed = self.client.delete(f"/api/crm/quotes/{quote['id']}")
         self.assertEqual(removed_confirmed.status_code, 409, removed_confirmed.text)
         self.assertEqual(removed_confirmed.json()["code"], "quote_delete_locked")
@@ -636,7 +637,88 @@ class DealQuoteTest(ApiTestCase):
         self.assertEqual(confirmed_delete.status_code, 409, confirmed_delete.text)
         self.assertEqual(confirmed_delete.json()["code"], "quote_delete_locked")
 
-    def test_generating_order_voids_only_unconfirmed_quotes(self):
+    def test_quote_list_orders_by_status_then_updated_time(self):
+        _, deal = self._deal()
+        by_title = {}
+        for title in ("已确认", "待确认", "报价新", "历史", "报价旧"):
+            response = self.client.post(
+                f"/api/crm/deals/{deal['id']}/quotes",
+                json={"title": title},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            by_title[title] = response.json()
+
+        with db_conn() as conn:
+            for title, status, updated_at in (
+                ("已确认", "confirmed", "2026-01-01T00:00:00"),
+                ("待确认", "pending", "2026-01-10T00:00:00"),
+                ("报价新", "draft", "2026-01-20T00:00:00"),
+                ("历史", "void", "2026-02-01T00:00:00"),
+                ("报价旧", "draft", "2026-01-05T00:00:00"),
+            ):
+                conn.execute(
+                    "UPDATE deal_quotes SET status = ?, updated_at = ? WHERE id = ?",
+                    (status, updated_at, by_title[title]["id"]),
+                )
+
+        quotes = self.client.get(f"/api/crm/deals/{deal['id']}/quotes").json()
+        self.assertEqual(
+            [quote["title"] for quote in quotes],
+            ["已确认", "待确认", "报价新", "报价旧", "历史"],
+        )
+
+    def test_confirming_quote_archives_other_quotes_and_locks_history(self):
+        _, deal, quote = self._quote_with_item()
+        alternative = self.client.post(
+            f"/api/crm/deals/{deal['id']}/quotes",
+            json={"title": "未采用的备选方案"},
+        )
+        self.assertEqual(alternative.status_code, 200, alternative.text)
+        alternative = alternative.json()
+
+        self.client.post(f"/api/crm/quotes/{quote['id']}/send")
+        confirmed = self.client.post(f"/api/crm/quotes/{quote['id']}/confirm")
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+
+        quotes = self.client.get(f"/api/crm/deals/{deal['id']}/quotes").json()
+        self.assertEqual([item["status"] for item in quotes], ["confirmed", "void"])
+        history = next(item for item in quotes if item["id"] == alternative["id"])
+        self.assertEqual(history["status_label"], "历史")
+
+        delete_history = self.client.delete(f"/api/crm/quotes/{alternative['id']}")
+        self.assertEqual(delete_history.status_code, 409, delete_history.text)
+        self.assertEqual(delete_history.json()["code"], "quote_history_locked")
+
+        follow_history = self.client.post(
+            "/api/crm/follow-ups",
+            data={
+                "object_type": "deal",
+                "object_id": str(deal["id"]),
+                "quote_id": str(alternative["id"]),
+                "content": "不应允许关联历史报价单",
+            },
+        )
+        self.assertEqual(follow_history.status_code, 409, follow_history.text)
+        self.assertEqual(follow_history.json()["code"], "quote_history_locked")
+
+        lose = self.client.post(
+            f"/api/crm/deals/{deal['id']}/lose",
+            json={"lost_reason": "price"},
+        )
+        self.assertEqual(lose.status_code, 409, lose.text)
+        self.assertEqual(lose.json()["code"], "quote_already_confirmed")
+
+        timeline = self.client.get(f"/api/crm/deals/{deal['id']}").json()["timeline"]
+        history_event = next(
+            item for item in timeline
+            if item.get("detail", {}).get("event") == "auto_history_for_confirmation"
+        )
+        self.assertEqual(
+            {item["quote_no"] for item in history_event["detail"]["quotes"]},
+            {alternative["quote_no"]},
+        )
+
+    def test_generating_order_keeps_history_quotes_immutable(self):
         _, deal, quote = self._quote_with_item()
         alternative = self.client.post(
             f"/api/crm/deals/{deal['id']}/quotes",
@@ -666,16 +748,16 @@ class DealQuoteTest(ApiTestCase):
         self.assertIsNone(alternative["order_id"])
 
         timeline = self.client.get(f"/api/crm/deals/{deal['id']}").json()["timeline"]
-        auto_void = next(
+        history_event = next(
             item for item in timeline
-            if item.get("detail", {}).get("event") == "auto_void_for_order"
+            if item.get("detail", {}).get("event") == "auto_history_for_confirmation"
         )
         self.assertEqual(
-            {item["status_after"] for item in auto_void["detail"]["quotes"]},
+            {item["status_after"] for item in history_event["detail"]["quotes"]},
             {"void"},
         )
-        self.assertNotIn(quote["quote_no"], auto_void["content"])
-        self.assertIn(alternative["quote_no"], auto_void["content"])
+        self.assertNotIn(quote["quote_no"], history_event["content"])
+        self.assertIn(alternative["quote_no"], history_event["content"])
 
     def test_quote_name_is_required(self):
         _, deal = self._deal()

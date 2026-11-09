@@ -147,7 +147,7 @@ function quoteItemHtml(item, editable) {
 }
 
 function quoteFollowButtonHtml(quote, deal, placement) {
-    if (dealIsArchived(deal) || deal.stage === 'lost') { return ''; }
+    if (dealIsArchived(deal) || deal.stage === 'lost' || quote.status === 'void') { return ''; }
     var title = '直接关联报价单 ' + quote.quote_no + ' 记录跟进';
     return '<button type="button" class="btn btn-sm btn-primary deal-quote-card-follow ' +
         'deal-quote-card-follow-' + placement + '" data-quote-follow="' + quote.id + '"' +
@@ -209,7 +209,7 @@ function quoteCardsHtml(deal, quotes) {
                 quote.id + '">作废</button> ';
         }
         var canDeleteQuote = !quote.order_id && !dealIsArchived(deal) &&
-            (quote.status === 'draft' || quote.status === 'void');
+            quote.status === 'draft';
         var quoteTitle = quote.title || quote.quote_no;
         var deleteCardAction = canDeleteQuote
             ? '<button type="button" class="deal-quote-card-delete" ' +
@@ -301,12 +301,12 @@ function dealOverviewHtml(deal, customerName, quotes) {
         orderAction = '<button type="button" class="btn btn-sm btn-primary" disabled ' +
             'title="客户确认报价单后才能生成订单">生成订单</button>';
     }
-    var addQuoteAction = archived ? '' : (canAddQuote
+    var addQuoteAction = (archived || confirmedQuote) ? '' : (canAddQuote
         ? '<button type="button" class="btn btn-sm btn-primary" id="headerCreateQuote">' +
           '＋ 添加报价单</button>'
         : '<button type="button" class="btn btn-sm btn-primary" disabled ' +
           'title="已有待客户确认或客户已确认的报价单，或商机已关闭">＋ 添加报价单</button>');
-    var loseAction = archived ? '' : (canLose
+    var loseAction = (archived || confirmedQuote) ? '' : (canLose
         ? '<button type="button" class="btn btn-sm btn-danger" id="dealLose">标记流失</button>'
         : '<button type="button" class="btn btn-sm btn-danger" disabled ' +
           'title="已确认报价或商机已关闭">标记流失</button>');
@@ -799,6 +799,9 @@ function viewDealDetail(root, rawId) {
         var customerName = index[d.customer_id] || ('客户 #' + d.customer_id);
         var timelineRecords = followupRecordsFromApi(records);
         var archived = dealIsArchived(d);
+        var followableQuotes = quotes.filter(function (quote) {
+            return quote.status !== 'void';
+        });
         var canFollow = !archived && d.stage !== 'lost';
         var canEditItems = !archived && d.stage !== 'lost';
         var items = d.items || [];
@@ -833,10 +836,10 @@ function viewDealDetail(root, rawId) {
             records: timelineRecords,
             followExtraHtml:
                 '<div class="field"><label>关联报价单</label><select name="quote_id"' +
-                (quotes.length ? '' : ' disabled') + '>' +
-                (quotes.length ? '<option value="">不关联报价单</option>' :
+                (followableQuotes.length ? '' : ' disabled') + '>' +
+                (followableQuotes.length ? '<option value="">不关联报价单</option>' :
                     '<option value="">暂无报价单</option>') +
-                quotes.map(function (quote) {
+                followableQuotes.map(function (quote) {
                     return '<option value="' + quote.id + '">' + esc(quote.quote_no) +
                         ' · ' + esc(quote.status_label || quote.status) + '</option>';
                 }).join('') + '</select></div>',

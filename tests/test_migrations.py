@@ -141,6 +141,54 @@ class TestMigrations(unittest.TestCase):
             conn.close()
         self.assertEqual(order_name, "阳光房报价方案")
 
+    def test_v2_021_archives_other_quotes_after_confirmation(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-11-09T10:00:00Z"
+        try:
+            customer_id = int(conn.execute(
+                "INSERT INTO customers (name, created_at, updated_at)"
+                " VALUES ('报价归档客户', ?, ?)",
+                (now, now),
+            ).lastrowid)
+            deal_id = int(conn.execute(
+                "INSERT INTO deals (customer_id, stage, amount, created_at, updated_at)"
+                " VALUES (?, 'won', 8800, ?, ?)",
+                (customer_id, now, now),
+            ).lastrowid)
+            quote_ids = []
+            for quote_no, status in (
+                ("QT-TEST-CONFIRMED", "confirmed"),
+                ("QT-TEST-PENDING", "pending"),
+                ("QT-TEST-DRAFT", "draft"),
+            ):
+                quote_ids.append(int(conn.execute(
+                    "INSERT INTO deal_quotes"
+                    " (quote_no, deal_id, customer_id, title, status, amount,"
+                    " created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, 8800, ?, ?)",
+                    (quote_no, deal_id, customer_id, quote_no, status, now, now),
+                ).lastrowid))
+            conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_021'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        run_migrations(self.db, backup=False, verbose=False)
+        run_migrations(self.db, backup=False, verbose=False)
+
+        conn = sqlite3.connect(str(self.db))
+        try:
+            statuses = [
+                row[0] for row in conn.execute(
+                    "SELECT status FROM deal_quotes WHERE id IN (?, ?, ?) ORDER BY id",
+                    tuple(quote_ids),
+                )
+            ]
+        finally:
+            conn.close()
+        self.assertEqual(statuses, ["confirmed", "void", "void"])
+
     def test_aftersale_relation_column_exists(self):
         run_migrations(self.db, backup=False, verbose=False)
         conn = sqlite3.connect(str(self.db))

@@ -1251,6 +1251,17 @@ def lose_deal(deal_id: int, payload: dict) -> DealOut:
         old = _deal_row(conn, deal_id)
         if old["order_id"] is not None:
             raise _deal_locked()
+        confirmed = conn.execute(
+            "SELECT quote_no FROM deal_quotes"
+            " WHERE deal_id = ? AND status = 'confirmed' AND is_delete = 0",
+            (deal_id,),
+        ).fetchone()
+        if confirmed:
+            raise ApiError(
+                status_code=409,
+                code="quote_already_confirmed",
+                message=f"该商机已有客户确认的报价单 {confirmed['quote_no']}",
+            )
         if old["stage"] == "lost":
             raise ApiError(status_code=409, code="already_lost", message="该商机已判流失")
 

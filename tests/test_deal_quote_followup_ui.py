@@ -186,7 +186,7 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn('aria-label="删除报价单 ', quote_cards)
         self.assertIn('<span aria-hidden="true">×</span>', quote_cards)
         self.assertIn(
-            "quote.status === 'draft' || quote.status === 'void'",
+            "quote.status === 'draft';",
             quote_cards,
         )
         delete_binding = self.deals[
@@ -224,7 +224,11 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         )
         self.assertIn('data-quote-follow="', quote_helpers)
         self.assertIn("直接关联报价单 ", quote_helpers)
-        self.assertIn("if (dealIsArchived(deal) || deal.stage === 'lost') { return ''; }", quote_helpers)
+        self.assertIn(
+            "if (dealIsArchived(deal) || deal.stage === 'lost' || quote.status === 'void')"
+            " { return ''; }",
+            quote_helpers,
+        )
         self.assertIn('<input type="hidden" name="quote_id"', quote_helpers)
         self.assertIn("quoteFollowAssociationHtml(quote)", quote_helpers)
 
@@ -349,8 +353,8 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("lockedButtonLabel: ''", detail)
         self.assertIn("var editable = !dealIsArchived(deal);", tags)
         self.assertIn("editable && tag.deletable", tags)
-        self.assertIn("var addQuoteAction = archived ? ''", overview)
-        self.assertIn("var loseAction = archived ? ''", overview)
+        self.assertIn("var addQuoteAction = (archived || confirmedQuote) ? ''", overview)
+        self.assertIn("var loseAction = (archived || confirmedQuote) ? ''", overview)
         self.assertIn("(d.order_id ? '查看' : '跟进')", self.deals)
         self.assertIn("dealStageBadge(deal.stage, deal.stage_label, deal.order_id)", self.deals)
         self.assertIn("var tabs = [['', '全部']].concat(STAGES);", self.deals)

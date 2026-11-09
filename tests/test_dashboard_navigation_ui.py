@@ -65,7 +65,7 @@ class DashboardNavigationUiTest(unittest.TestCase):
             "/crm/views/dashboard.js?v=20261105dashboard-active1",
             self.index,
         )
-        self.assertIn("const CACHE = 'crm-shell-v81';", self.service_worker)
+        self.assertIn("const CACHE = 'crm-shell-v82';", self.service_worker)
 
 
 if __name__ == "__main__":
