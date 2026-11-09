@@ -14,7 +14,7 @@ WORKDIR /app
 
 # 项目使用 datetime.now() 生成业务日期，容器必须有业务时区数据。
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid "${APP_GID}" crm \
     && useradd --uid "${APP_UID}" --gid crm --create-home --shell /usr/sbin/nologin crm
