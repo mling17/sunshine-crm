@@ -189,6 +189,66 @@ class TestMigrations(unittest.TestCase):
             conn.close()
         self.assertEqual(statuses, ["confirmed", "void", "void"])
 
+    def test_v2_022_completes_shipped_orders_and_removes_status(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        conn = sqlite3.connect(str(self.db))
+        now = "2026-11-09T10:00:00Z"
+        try:
+            customer_id = int(conn.execute(
+                "INSERT INTO customers (name, created_at, updated_at)"
+                " VALUES ('发货状态迁移客户', ?, ?)",
+                (now, now),
+            ).lastrowid)
+            deal_id = int(conn.execute(
+                "INSERT INTO deals (customer_id, stage, amount, created_at, updated_at)"
+                " VALUES (?, 'won', 8800, ?, ?)",
+                (customer_id, now, now),
+            ).lastrowid)
+            order_id = int(conn.execute(
+                "INSERT INTO orders"
+                " (order_no, customer_id, deal_id, amount, status, shipped_at,"
+                " created_at, updated_at)"
+                " VALUES ('SO-V2-022', ?, ?, 8800, 'shipped', ?, ?, ?)",
+                (customer_id, deal_id, now, now, now),
+            ).lastrowid)
+            conn.execute(
+                "INSERT INTO dict_items"
+                " (dict_code, key, label, sort, enabled, created_at, updated_at)"
+                " VALUES ('order_status', 'shipped', '已发货', 7, 1, ?, ?)",
+                (now, now),
+            )
+            conn.execute("DELETE FROM schema_migrations WHERE version = 'v2_022'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        run_migrations(self.db, backup=False, verbose=False)
+        run_migrations(self.db, backup=False, verbose=False)
+
+        conn = sqlite3.connect(str(self.db))
+        try:
+            status, completed_at = conn.execute(
+                "SELECT status, completed_at FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+            log_count = conn.execute(
+                "SELECT COUNT(*) FROM order_status_log"
+                " WHERE order_id = ? AND from_status = 'shipped'"
+                " AND to_status = 'completed'",
+                (order_id,),
+            ).fetchone()[0]
+            dict_deleted = conn.execute(
+                "SELECT is_delete FROM dict_items"
+                " WHERE dict_code = 'order_status' AND key = 'shipped'",
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual(status, "completed")
+        self.assertIsNotNone(completed_at)
+        self.assertEqual(log_count, 1)
+        self.assertEqual(dict_deleted, 1)
+
     def test_aftersale_relation_column_exists(self):
         run_migrations(self.db, backup=False, verbose=False)
         conn = sqlite3.connect(str(self.db))

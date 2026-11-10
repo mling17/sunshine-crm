@@ -267,7 +267,7 @@ def get_dashboard() -> DashboardOut:
             """
         ).fetchone()["n"]
 
-        # 订单状态统计（8个状态）
+        # 订单状态统计（7个状态）
         orders_by_status = {
             "pending_confirmation": {"count": 0, "amount": 0.0},
             "pending_payment": {"count": 0, "amount": 0.0},
@@ -275,7 +275,6 @@ def get_dashboard() -> DashboardOut:
             "producing": {"count": 0, "amount": 0.0},
             "balance_paid": {"count": 0, "amount": 0.0},
             "ready_to_ship": {"count": 0, "amount": 0.0},
-            "shipped": {"count": 0, "amount": 0.0},
             "completed": {"count": 0, "amount": 0.0},
         }
         for row in conn.execute(_ORDERS_BY_STATUS_SQL).fetchall():

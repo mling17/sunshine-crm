@@ -1226,6 +1226,8 @@ class OrderTransitionIn(BaseModel):
     payment_screenshots: list[int] | None = Field(default=None)
     logistics_mode: str | None = Field(default=None, max_length=16)
     carrier_id: int | None = Field(default=None, gt=0)
+    carrier_contact_id: int | None = Field(default=None, gt=0)
+    logistics_fee: float | None = Field(default=None, ge=0)
     tracking_number: str | None = Field(default=None, max_length=64)
     received_at: str | None = None
     note: str | None = Field(default=None, max_length=500)

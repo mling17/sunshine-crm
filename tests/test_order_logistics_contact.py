@@ -99,7 +99,7 @@ class OrderLogisticsContactTest(ApiTestCase):
         self.assertEqual(response.status_code, 400, response.text)
         self.assertEqual(response.json()["code"], "carrier_contact_not_found")
 
-    def test_edit_order_changes_logistics_and_delivery_after_shipping(self):
+    def test_edit_order_changes_logistics_and_delivery_after_completion(self):
         _, deal = self._deal()
         first = self.create_carrier(name="发货物流甲")
         second = self.create_carrier(
@@ -109,7 +109,7 @@ class OrderLogisticsContactTest(ApiTestCase):
         order = self._create_agent_order(first, deal)
         with self.db_conn() as conn:
             conn.execute(
-                "UPDATE orders SET status = 'shipped' WHERE id = ?", (order["id"],)
+                "UPDATE orders SET status = 'completed' WHERE id = ?", (order["id"],)
             )
 
         updated = self.client.put(
@@ -128,7 +128,7 @@ class OrderLogisticsContactTest(ApiTestCase):
         )
         self.assertEqual(updated.status_code, 200, updated.text)
         data = updated.json()
-        self.assertEqual(data["status"], "shipped")
+        self.assertEqual(data["status"], "completed")
         self.assertEqual(data["carrier_id"], second["id"])
         self.assertEqual(data["carrier_contact_name"], "李经理")
         self.assertEqual(data["carrier_contact_phone"], "13982000004")

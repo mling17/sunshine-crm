@@ -15,8 +15,7 @@ var ORDER_NEXT_STEP = {
     deposit_paid: ['producing', '开始生产'],
     producing: ['balance_paid', '收尾款'],
     balance_paid: ['ready_to_ship', '备货完成'],
-    ready_to_ship: ['shipped', '发货'],
-    shipped: ['completed', '确认收货']
+    ready_to_ship: ['completed', '确认发货']
 };
 
 function canEditOrder(order) {
@@ -584,7 +583,7 @@ function renderOrderDetail(root, order, deal, quote, aftersales, index) {
             var target = next[0];
             if (target === 'deposit_paid') { showDepositPayment(order); return; }
             if (target === 'balance_paid') { showBalancePayment(order); return; }
-            if (target === 'shipped') { showShipModal(order); return; }
+            if (target === 'completed') { showShipModal(order); return; }
             transitionOrder(order, target, {}, next[1]);
         });
     }
@@ -842,8 +841,9 @@ function transitionOrder(order, toStatus, extra, confirmText) {
 
 /* 发货：确认物流方式、承运公司、联络人和运单号 */
 function showShipModal(order) {
-    var modal = createOrderModal('发货');
+    var modal = createOrderModal('确认发货');
     modal.querySelector('.modal-body').innerHTML = '<form id="shipForm" class="form-modal form-grid">' +
+        '<p class="small muted field-wide">确认发货后订单将直接进入“已完成”状态。</p>' +
         '<div class="row-2">' +
         '<div class="field"><label>物流方式</label>' +
         '<select name="logistics_mode">' +
@@ -902,7 +902,7 @@ function showShipModal(order) {
             note: String(form.querySelector('[name="note"]').value || '').trim() || null
         };
         document.body.removeChild(modal);
-        transitionOrder(order, 'shipped', extra, '发货');
+        transitionOrder(order, 'completed', extra, '确认发货');
     });
     document.body.appendChild(modal);
 }

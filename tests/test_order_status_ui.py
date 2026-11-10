@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class OrderStatusUiTest(unittest.TestCase):
     def setUp(self):
         self.source = (ROOT / "static/views/orders.js").read_text(encoding="utf-8")
+        self.app = (ROOT / "static/app.js").read_text(encoding="utf-8")
         self.css = (ROOT / "static/app.css").read_text(encoding="utf-8")
 
     def _rule(self, selector: str) -> str:
@@ -53,6 +54,15 @@ class OrderStatusUiTest(unittest.TestCase):
         active = self._rule(".progress-bar .step.active")
         self.assertIn("box-shadow:", active)
         self.assertIn("font-weight: 700", active)
+
+    def test_confirm_shipping_completes_order_without_shipped_status(self):
+        self.assertIn("ready_to_ship: ['completed', '确认发货']", self.source)
+        self.assertIn(
+            "transitionOrder(order, 'completed', extra, '确认发货')",
+            self.source,
+        )
+        self.assertNotIn("['shipped', '已发货']", self.app)
+        self.assertNotIn("'ready_to_ship': 'shipped'", self.app)
 
 
 if __name__ == "__main__":

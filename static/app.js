@@ -42,7 +42,6 @@
     ['producing', '生产中'],
     ['balance_paid', '已付尾款'],
     ['ready_to_ship', '待发货'],
-    ['shipped', '已发货'],
     ['completed', '已完成']
   ];
   var ORDER_STATUS_LABEL = {};
@@ -55,8 +54,7 @@
     'deposit_paid': 'producing',
     'producing': 'balance_paid',
     'balance_paid': 'ready_to_ship',
-    'ready_to_ship': 'shipped',
-    'shipped': 'completed',
+    'ready_to_ship': 'completed',
     'completed': null
   };
 

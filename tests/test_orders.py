@@ -1,4 +1,4 @@
-"""订单模块测试（7 态线性流 + Q1 金额强制相等 + 禁止手动建单）。"""
+"""订单模块测试（6 态线性流 + Q1 金额强制相等 + 禁止手动建单）。"""
 import unittest
 
 from tests import _bootstrap  # noqa: F401
@@ -42,11 +42,23 @@ class OrdersTest(ApiTestCase):
 
     def test_list_orders(self):
         insert_order(self.customer["id"], None, order_no="SO-20261030-002",
-                     amount=500.0, status="shipped")
+                     amount=500.0, status="completed")
         rows = self.client.get("/api/crm/orders").json()
         self.assertEqual(len(rows), 2)
-        only = self.client.get("/api/crm/orders", params={"status": "shipped"}).json()
+        only = self.client.get("/api/crm/orders", params={"status": "completed"}).json()
         self.assertEqual([r["order_no"] for r in only], ["SO-20261030-002"])
+
+    def test_order_status_dictionary_excludes_shipped(self):
+        items = self.client.get("/api/crm/dicts/order_status").json()["items"]
+        keys = [item["key"] for item in items]
+        self.assertNotIn("shipped", keys)
+        self.assertEqual(len(keys), 7)
+        self.assertTrue(
+            {
+                "pending_confirmation", "pending_payment", "deposit_paid",
+                "producing", "balance_paid", "ready_to_ship", "completed",
+            }.issubset(set(keys))
+        )
 
     # ---------- 状态机 ----------
     def test_invalid_transition(self):
@@ -79,7 +91,9 @@ class OrdersTest(ApiTestCase):
         self.assertEqual(self.transition("producing").status_code, 200)
         self.assertEqual(self.transition("balance_paid", balance=0.0).status_code, 200)
         self.assertEqual(self.transition("ready_to_ship", logistics_mode="self").status_code, 200)
-        self.assertEqual(self.transition("shipped").status_code, 200)
+        removed = self.transition("shipped")
+        self.assertEqual(removed.status_code, 400, removed.text)
+        self.assertEqual(removed.json()["code"], "invalid_transition")
         done = self.transition("completed", received_at="2026-10-31T10:00:00")
         self.assertEqual(done.status_code, 200, done.text)
         order = self.client.get(f"/api/crm/orders/{self.order['id']}").json()

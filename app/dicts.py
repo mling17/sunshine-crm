@@ -50,7 +50,7 @@ DICT_DESC = {
     "aftersale_type":   "售后单类型",
     "follow_method":    "记跟进时的方式（微信 / 电话）",
     "deal_stage":       "状态机：报价 → 待客户确认 → 成交 / 流失，只能改名",
-    "order_status":     "状态机：8 态，只能改名/排序",
+    "order_status":     "状态机：7 态，只能改名/排序",
     "aftersale_status": "状态机：待处理 → 处理中 → 已完成",
     "customer_type":    "个人 / 公司 / 其他，绑定「联系人是否必填」，只能改名",
     "follow_object":    "系统定义的跟进对象类型，只读",
@@ -149,8 +149,7 @@ DICT_SEEDS = {
         {"key": "producing", "label": "生产中", "sort": 4, "enabled": True, "used": 0},
         {"key": "balance_paid", "label": "已支付尾款", "sort": 5, "enabled": True, "used": 0},
         {"key": "ready_to_ship", "label": "待发货", "sort": 6, "enabled": True, "used": 0},
-        {"key": "shipped", "label": "已发货", "sort": 7, "enabled": True, "used": 0},
-        {"key": "completed", "label": "已完成", "sort": 8, "enabled": True, "used": 0},
+        {"key": "completed", "label": "已完成", "sort": 7, "enabled": True, "used": 0},
     ],
     "aftersale_status": [
         {"key": "pending", "label": "待处理", "sort": 1, "enabled": True, "used": 0},

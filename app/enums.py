@@ -92,7 +92,7 @@ DEAL_LOST_REASON_LABELS: Dict[str, str] = {
 # ---------------- 订单状态 ----------------
 ORDER_STATUS = Literal[
     "pending_confirmation", "pending_payment", "deposit_paid", "producing", "balance_paid",
-    "ready_to_ship", "shipped", "completed"
+    "ready_to_ship", "completed"
 ]
 #: 订单状态顺序（状态机推进顺序，前端下拉/进度条按这个顺序）
 ORDER_STATUS_ORDER = (
@@ -102,7 +102,6 @@ ORDER_STATUS_ORDER = (
     "producing",
     "balance_paid",
     "ready_to_ship",
-    "shipped",
     "completed",
 )
 
@@ -113,8 +112,11 @@ ORDER_STATUS_LABELS: Dict[str, str] = {
     "producing": "生产中",
     "balance_paid": "已支付尾款",
     "ready_to_ship": "待发货",
-    "shipped": "已发货",
     "completed": "已完成",
+}
+#: 取消“已发货”状态前的历史日志仍可显示中文。
+ORDER_STATUS_LEGACY_LABELS: Dict[str, str] = {
+    "shipped": "已发货",
 }
 
 # ---------------- 物流方式 ----------------
@@ -214,8 +216,7 @@ ORDER_FLOW: Dict[str, str | None] = {
     "deposit_paid": "producing",
     "producing": "balance_paid",
     "balance_paid": "ready_to_ship",
-    "ready_to_ship": "shipped",
-    "shipped": "completed",
+    "ready_to_ship": "completed",
     "completed": None,
 }
 

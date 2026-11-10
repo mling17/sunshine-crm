@@ -659,8 +659,7 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
         "deposit_paid": ["producing"],
         "producing": ["balance_paid"],
         "balance_paid": ["ready_to_ship"],
-        "ready_to_ship": ["shipped"],
-        "shipped": ["completed"],
+        "ready_to_ship": ["completed"],
         "completed": [],
     }
     
@@ -770,32 +769,31 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
                 [*updates.values(), order_id],
             )
             
-        elif to_status == "shipped":
-            # 已发货：允许最后一次补正物流联络人、运单和费用，并写发货时间。
+        elif to_status == "completed":
+            # 确认发货即完成；写齐物流信息、发货时间和完成时间。
             updates = order_logistics_updates(
                 conn, order_row, payload, require_tracking=True
             )
-            updates.update(status=to_status, shipped_at=now_local_iso(), updated_at=now_iso())
-            assignments = ", ".join(f"{column} = ?" for column in updates)
-            conn.execute(
-                f"UPDATE orders SET {assignments} WHERE id = ?",
-                [*updates.values(), order_id],
-            )
-            
-        elif to_status == "completed":
             # 已完成：收齐才允许（Q-D：已收 = 总额）
             paid = round(float(order_row["deposit_paid"] or 0) + float(order_row["balance_paid"] or 0), 2)
-            total = round(float(order_row["amount"] or 0), 2)
+            total = round(float(updates.get("amount", order_row["amount"]) or 0), 2)
             if paid < total:
                 raise ApiError(
                     status_code=409,
                     code="payment_incomplete",
                     message=f"还差 ¥{total - paid:,.2f} 未收，不能标记完成",
                 )
-            # 已完成：写完成时间（客户确认收货）
+            shipped_at = now_local_iso()
+            updates.update(
+                status=to_status,
+                shipped_at=shipped_at,
+                completed_at=payload.get("received_at") or shipped_at,
+                updated_at=now_iso(),
+            )
+            assignments = ", ".join(f"{column} = ?" for column in updates)
             conn.execute(
-                "UPDATE orders SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?",
-                (to_status, payload.get("received_at") or now_local_iso(), now_iso(), order_id)
+                f"UPDATE orders SET {assignments} WHERE id = ?",
+                [*updates.values(), order_id],
             )
             
         # 插入状态日志（PLANNER-V3 §3.5：event_type 区分 收款/发货/状态变更）
@@ -806,7 +804,7 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             "pending_payment": "confirm",
             "deposit_paid": "pay",
             "balance_paid": "pay",
-            "shipped": "ship",
+            "completed": "ship",
         }.get(to_status, "stage")
         if event_type == "pay":
             money = payload.get("deposit") if to_status == "deposit_paid" else payload.get("balance")
@@ -814,7 +812,7 @@ def transition(conn: Connection, order_id: int, to_status: str, payload: dict) -
             detail = _json.dumps({"amount": float(money or 0)}, ensure_ascii=False)
         elif event_type == "ship":
             tracking_no = updates.get("tracking_no", order_row["tracking_no"])
-            note = note or f"已发货，运单号 {tracking_no or '—'}"
+            note = note or f"已发货并完成，运单号 {tracking_no or '—'}"
             detail = _json.dumps({"tracking_no": tracking_no}, ensure_ascii=False)
         else:
             detail = None

@@ -1,6 +1,6 @@
 """订单管理：CRUD + 状态流转。
 
-- 订单状态流：待支付 →(定金+截图)→ 已支付定金 →(财务确认点下一步)→ 生产中 →(尾款+截图)→ 已支付尾款 →(点下一步)→ 待发货 →(物流公司+运单号，自送填"无")→ 已发货 →(确认收货)→ 已完成
+- 订单状态流：待支付 →(定金+截图)→ 已支付定金 →(财务确认点下一步)→ 生产中 →(尾款+截图)→ 已支付尾款 →(点下一步)→ 待发货 →(确认发货+运单号，自送填"无")→ 已完成
 - 所有状态变更必须通过 transition() 函数，禁止直接修改 orders.status
 - 订单状态校验 + 字段校验 + 单事务 + 日志记录
 """
@@ -30,26 +30,6 @@ router = APIRouter(
     tags=["orders"],
     dependencies=[Depends(require_auth)],
 )
-
-# 订单状态流转映射
-ORDER_TRANSITIONS = {
-    "pending_confirmation": ["pending_payment"],
-    "pending_payment": ["deposit_paid"],
-    "deposit_paid": ["producing"],
-    "producing": ["balance_paid"],
-    "balance_paid": ["ready_to_ship"],
-    "ready_to_ship": ["shipped"],
-    "shipped": ["completed"],
-    "completed": [],
-}
-
-# 订单状态对应的需要的字段
-STATUS_REQUIRED_FIELDS = {
-    "deposit_paid": ["deposit", "payment_screenshots"],
-    "balance_paid": ["balance", "payment_screenshots"],
-    "ready_to_ship": ["logistics_mode", "carrier_id", "tracking_number"],
-    "shipped": ["received_at"]
-}
 
 ORDER_EDITABLE_COLUMNS = (
     "order_name",

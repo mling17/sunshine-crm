@@ -72,7 +72,6 @@ ORDER_TONES = {
     "producing": "violet",
     "balance_paid": "cyan",
     "ready_to_ship": "cyan",
-    "shipped": "blue",
     "completed": "green",
 }
 AFTERSALE_TONES = {"pending": "red", "processing": "amber", "done": "green", "rejected": "grey"}

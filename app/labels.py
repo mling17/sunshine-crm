@@ -21,6 +21,7 @@ from app.enums import (
     FOLLOW_METHOD_LABELS,
     INTENT_LEVEL_LABELS,
     LOGISTICS_MODE_LABELS,
+    ORDER_STATUS_LEGACY_LABELS,
     ORDER_STATUS_LABELS,
     SOURCE_LABELS,
     TIMELINE_TYPE_LABELS,
@@ -47,7 +48,11 @@ def deal_stage(key: Optional[str]) -> Optional[str]:
 
 
 def order_status(key: Optional[str]) -> Optional[str]:
-    return _resolve("order_status", key, ORDER_STATUS_LABELS)
+    return _resolve(
+        "order_status",
+        key,
+        {**ORDER_STATUS_LABELS, **ORDER_STATUS_LEGACY_LABELS},
+    )
 
 
 def aftersale_status(key: Optional[str]) -> Optional[str]:

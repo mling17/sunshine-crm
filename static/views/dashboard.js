@@ -139,7 +139,9 @@ function viewDashboard(root) {
     var activities = stats.recent_activities || [];
     var alerts = stats.aftersale_sla_alerts || [];
     var overdue = todos.filter(function (item) { return Number(item.days_overdue || 0) > 0; });
-    var openStatuses = ORDER_STATUS.slice(0, 7);
+    var openStatuses = ORDER_STATUS.filter(function (pair) {
+      return pair[0] !== "completed";
+    });
     var openOrders = openStatuses.reduce(function (sum, pair) {
       return sum + Number((orders[pair[0]] || {}).count || 0);
     }, 0);
@@ -245,7 +247,7 @@ function viewDashboard(root) {
           icon: "order",
           href: "#/orders",
           foot: "<span>待支付 " + Number((orders.pending_payment || {}).count || 0) +
-            "</span><span>·</span><span>已发货 " + Number((orders.shipped || {}).count || 0) + "</span>"
+            "</span><span>·</span><span>待发货 " + Number((orders.ready_to_ship || {}).count || 0) + "</span>"
         }) +
         dashKpi({
           label: "进行中售后",

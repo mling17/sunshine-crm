@@ -122,14 +122,13 @@ class AftersaleFollowFlowTest(ApiTestCase):
             f"/api/crm/orders/{order['id']}/confirm",
             data={"note": "售后流程测试客户已确认"},
         )
-        # 走完 7 态
+        # 走完 6 态；确认发货即完成
         self.client.post(f"/api/crm/orders/{order['id']}/pay-deposit", data={"amount": "9000"})
         for target in ("producing",):
             self.client.post(f"/api/crm/orders/{order['id']}/transition", json={"to_status": target})
         self.client.post(f"/api/crm/orders/{order['id']}/pay-balance", data={"amount": "0"})
         self.client.post(f"/api/crm/orders/{order['id']}/transition",
                          json={"to_status": "ready_to_ship", "logistics_mode": "self"})
-        self.client.post(f"/api/crm/orders/{order['id']}/transition", json={"to_status": "shipped"})
         done = self.client.post(f"/api/crm/orders/{order['id']}/transition", json={"to_status": "completed"})
         self.assertEqual(done.status_code, 200, done.text)
 

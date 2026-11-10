@@ -21,6 +21,7 @@ CRM V2 增量迁移 M1（幂等 / 可中断重跑 / 只增不毁）。
 8. v2_019 仅删除无写入接口且与 customers 重叠的 customer_contacts；删除前必须回写主联系人。
 9. v2_020 新增 orders.order_name，并从来源报价单标题回填历史订单名称。
 10. v2_021 将已有客户确认商机的其他报价单统一转为历史。
+11. v2_022 取消“已发货”订单状态，将历史 shipped 订单收敛为 completed。
 """
 
 from __future__ import annotations
@@ -35,8 +36,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_021"
-SCHEMA_USER_VERSION = 20
+MIGRATION_VERSION = "v2_022"
+SCHEMA_USER_VERSION = 21
 
 
 def default_db_path() -> Path:
@@ -1198,6 +1199,38 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_021', datetime('now'), '客户确认后其他报价单自动转为历史')"),
     ("user_version v2_021", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 38. v2_022：取消“已发货”状态，确认发货即完成 ----------
+    ("orders.shipped_complete_log_v2_022",
+     _once("v2_022", "orders", "order_status_log"),
+     """
+     INSERT INTO order_status_log
+       (order_id, from_status, to_status, event_type, note, created_at)
+     SELECT id, 'shipped', 'completed', 'stage',
+            '历史订单自动完成：已取消“已发货”状态', datetime('now')
+     FROM orders
+     WHERE status = 'shipped'
+     """),
+    ("orders.shipped_to_completed_v2_022",
+     _once("v2_022", "orders"),
+     """
+     UPDATE orders
+     SET status = 'completed',
+         shipped_at = COALESCE(shipped_at, datetime('now')),
+         completed_at = COALESCE(completed_at, shipped_at, datetime('now')),
+         updated_at = datetime('now')
+     WHERE status = 'shipped'
+     """),
+    ("dict_order_status.remove_shipped_v2_022",
+     _once("v2_022", "dict_items"),
+     """
+     UPDATE dict_items
+     SET is_delete = 1, updated_at = datetime('now')
+     WHERE dict_code = 'order_status' AND key = 'shipped'
+     """),
+    ("schema_migrations v2_022", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_022', datetime('now'), '取消已发货状态，确认发货后订单直接完成')"),
+    ("user_version v2_022", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 

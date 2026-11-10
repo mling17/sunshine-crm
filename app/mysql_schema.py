@@ -848,7 +848,27 @@ def mysql_runtime_seed(conn) -> None:
             )
     seed_product_catalog(conn)
     conn.execute(
+        "INSERT INTO order_status_log"
+        " (order_id, from_status, to_status, event_type, note, created_at)"
+        " SELECT id, 'shipped', 'completed', 'stage',"
+        " '历史订单自动完成：已取消“已发货”状态', ?"
+        " FROM orders WHERE status = 'shipped'",
+        (now,),
+    )
+    conn.execute(
+        "UPDATE orders SET status = 'completed',"
+        " shipped_at = COALESCE(shipped_at, ?),"
+        " completed_at = COALESCE(completed_at, shipped_at, ?), updated_at = ?"
+        " WHERE status = 'shipped'",
+        (now, now, now),
+    )
+    conn.execute(
+        "UPDATE dict_items SET is_delete = 1, updated_at = ?"
+        " WHERE dict_code = 'order_status' AND key = 'shipped'",
+        (now,),
+    )
+    conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note)"
         " VALUES (?, ?, ?)",
-        (MIGRATION_VERSION, now, "MySQL schema baseline v2_021"),
+        (MIGRATION_VERSION, now, "MySQL schema baseline v2_022"),
     )

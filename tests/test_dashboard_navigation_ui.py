@@ -62,10 +62,10 @@ class DashboardNavigationUiTest(unittest.TestCase):
 
     def test_dashboard_script_and_cache_versions_are_refreshed(self):
         self.assertIn(
-            "/crm/views/dashboard.js?v=20261105dashboard-active1",
+            "/crm/views/dashboard.js?v=20261109order-complete1",
             self.index,
         )
-        self.assertIn("const CACHE = 'crm-shell-v83';", self.service_worker)
+        self.assertIn("const CACHE = 'crm-shell-v84';", self.service_worker)
 
 
 if __name__ == "__main__":

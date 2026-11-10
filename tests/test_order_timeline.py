@@ -107,7 +107,7 @@ class OrderTimelineTest(ApiTestCase):
         self.assertEqual(detail["balance_paid"], 7000.0)
         self.assertEqual(detail["deposit_paid"] + detail["balance_paid"], detail["amount"])
 
-    def test_tracking_is_required_at_shipping_not_stock_ready(self):
+    def test_tracking_is_required_at_shipping_completion_not_stock_ready(self):
         order = self._order()
         carrier = self.create_carrier(name="发货校验物流")
         updated = self.client.put(
@@ -137,10 +137,95 @@ class OrderTimelineTest(ApiTestCase):
 
         shipped = self.client.post(
             f"/api/crm/orders/{order['id']}/transition",
-            json={"to_status": "shipped"},
+            json={"to_status": "completed"},
         )
         self.assertEqual(shipped.status_code, 400, shipped.text)
         self.assertEqual(shipped.json()["code"], "missing_tracking_number")
+
+    def test_confirm_shipping_completes_and_keeps_logistics_contact(self):
+        order = self._order()
+        carrier = self.create_carrier(name="确认发货物流")
+        self.client.put(
+            f"/api/crm/orders/{order['id']}",
+            json={
+                "logistics_mode": "agent",
+                "carrier_id": carrier["id"],
+                "carrier_contact_id": carrier["contacts"][0]["id"],
+                "receiver_name": "王测试",
+                "receiver_phone": "13800000000",
+                "receiver_address": "济南市历下区",
+            },
+        )
+        self._pay_deposit(order["id"], 3000.0)
+        self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={"to_status": "producing"},
+        )
+        self._pay_balance(order["id"], 7000.0)
+        self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={"to_status": "ready_to_ship"},
+        )
+
+        done = self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={
+                "to_status": "completed",
+                "logistics_mode": "agent",
+                "carrier_id": carrier["id"],
+                "carrier_contact_id": carrier["contacts"][0]["id"],
+                "logistics_fee": 0,
+                "tracking_number": "SF-CONFIRM-001",
+            },
+        )
+        self.assertEqual(done.status_code, 200, done.text)
+        self.assertEqual(done.json()["order"]["status"], "completed")
+        detail = self.client.get(f"/api/crm/orders/{order['id']}").json()
+        self.assertEqual(detail["carrier_contact_name"], carrier["contacts"][0]["name"])
+        self.assertEqual(detail["tracking_number"], "SF-CONFIRM-001")
+        self.assertEqual(detail["status_log"][-1]["event_type"], "ship")
+
+    def test_confirm_shipping_cannot_complete_with_unpaid_added_freight(self):
+        order = self._order()
+        carrier = self.create_carrier(name="加运费物流")
+        self.client.put(
+            f"/api/crm/orders/{order['id']}",
+            json={
+                "logistics_mode": "agent",
+                "carrier_id": carrier["id"],
+                "carrier_contact_id": carrier["contacts"][0]["id"],
+                "receiver_name": "王测试",
+                "receiver_phone": "13800000000",
+                "receiver_address": "济南市历下区",
+            },
+        )
+        self._pay_deposit(order["id"], 3000.0)
+        self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={"to_status": "producing"},
+        )
+        self._pay_balance(order["id"], 7000.0)
+        self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={"to_status": "ready_to_ship"},
+        )
+
+        done = self.client.post(
+            f"/api/crm/orders/{order['id']}/transition",
+            json={
+                "to_status": "completed",
+                "logistics_mode": "agent",
+                "carrier_id": carrier["id"],
+                "carrier_contact_id": carrier["contacts"][0]["id"],
+                "logistics_fee": 100,
+                "tracking_number": "SF-CONFIRM-002",
+            },
+        )
+        self.assertEqual(done.status_code, 409, done.text)
+        self.assertEqual(done.json()["code"], "payment_incomplete")
+        detail = self.client.get(f"/api/crm/orders/{order['id']}").json()
+        self.assertEqual(detail["status"], "ready_to_ship")
+        self.assertEqual(detail["amount"], 10000.0)
 
     def test_completed_requires_full_payment(self):
         order = self._order(amount=10000.0, deposit=10000.0)
@@ -151,11 +236,8 @@ class OrderTimelineTest(ApiTestCase):
         self.assertEqual(zero.status_code, 200, zero.text)
         self.client.post(f"/api/crm/orders/{order['id']}/transition",
                          json={"to_status": "ready_to_ship", "logistics_mode": "self"})
-        ship = self.client.post(f"/api/crm/orders/{order['id']}/transition",
-                                json={"to_status": "shipped"})
-        self.assertEqual(ship.status_code, 200, ship.text)
         done = self.client.post(f"/api/crm/orders/{order['id']}/transition",
-                                json={"to_status": "completed"})
+                                json={"to_status": "completed", "logistics_mode": "self"})
         self.assertEqual(done.status_code, 200, done.text)
 
     def test_timeline_accumulates_events(self):
@@ -199,11 +281,11 @@ class OrderTimelineTest(ApiTestCase):
         self.assertIn("修改订单", latest["note"])
         self.assertIn("收件人", latest["note"])
 
-    def test_update_order_is_allowed_after_shipping(self):
+    def test_update_order_is_allowed_after_completion(self):
         order = self._order()
         with self.db_conn() as conn:
             conn.execute(
-                "UPDATE orders SET status = 'shipped' WHERE id = ?",
+                "UPDATE orders SET status = 'completed' WHERE id = ?",
                 (order["id"],),
             )
 

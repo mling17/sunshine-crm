@@ -46,7 +46,7 @@ class TestWorkbench(ApiTestCase):
         """测试工作台最近订单"""
         # 创建订单
         order1 = insert_order(customer_id=self.customer["id"], amount=500.0, status="completed")
-        order2 = insert_order(customer_id=self.customer["id"], amount=600.0, status="shipped")
+        order2 = insert_order(customer_id=self.customer["id"], amount=600.0, status="ready_to_ship")
         
         resp = self.client.get("/api/crm/dashboard")
         self.assertEqual(resp.status_code, 200)
@@ -68,7 +68,7 @@ class TestWorkbench(ApiTestCase):
                 self.assertEqual(order["status"], "completed")
             elif order["id"] == order2["id"]:
                 self.assertEqual(order["amount"], 600.0)
-                self.assertEqual(order["status"], "shipped")
+                self.assertEqual(order["status"], "ready_to_ship")
 
     def test_dashboard_sla_alerts(self):
         """测试工作台SLA告警"""
@@ -127,10 +127,10 @@ class TestWorkbench(ApiTestCase):
         
         # 检查订单状态统计
         orders_by_status = data["stats"]["orders_by_status"]
-        # 检查所有 8 种状态都存在且计数为 0
+        # 检查所有 7 种状态都存在且计数为 0
         expected_statuses = [
             "pending_confirmation", "pending_payment", "deposit_paid", "producing",
-            "balance_paid", "ready_to_ship", "shipped", "completed",
+            "balance_paid", "ready_to_ship", "completed",
         ]
         for status in expected_statuses:
             self.assertIn(status, orders_by_status)
