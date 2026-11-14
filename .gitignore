@@ -35,3 +35,7 @@ crm.db.bak-*
 
 # 未脱敏的内部运维文档（仅本机保留）
 ops/.private/
+
+.agents/
+.codegraph/
+
