@@ -541,6 +541,7 @@ class FollowUpOut(BaseModel):
     content: str
     detail: dict | None = None
     next_date: str | None = None
+    created_by: int | None = None
     created_at: str
 
 

@@ -1,6 +1,6 @@
 # 外部 API
 
-外部 API 供服务器之间调用，使用数据库中长期保存的完整 Bearer Token。当前版本提供新增线索；同一套 Token 鉴权将复用于后续外部接口。
+外部 API 供服务器之间调用，使用数据库中长期保存的完整 Bearer Token。当前版本提供新增线索和按手机号新增跟进。
 
 ## 认证
 
@@ -66,6 +66,48 @@ curl -X POST https://crm.example.com/api/external/v1/leads \
   }'
 ```
 
+## 新增跟进
+
+`POST /api/external/v1/follow-ups`
+
+请求类型为 `multipart/form-data`，使用同一套 Bearer Token。服务端先按规范手机号查找有效客户，再查找有效线索：
+
+- 客户优先；客户命中时不检查同号线索。
+- 无客户时使用未被删除的线索。
+- 同一目标表存在多条匹配返回 409 `ambiguous_phone`，不任意选择。
+- 唯一线索已转化或已失效时返回 409 `lead_closed`。
+- 无任何匹配时返回 404 `phone_not_found`，`detail` 为 `<规范手机号>手机号不存在`。
+
+### 请求字段
+
+| 字段 | 必填 | 规则 |
+| --- | --- | --- |
+| `phone` | 是 | 按大陆手机号规则规范化后匹配 |
+| `content` | 是 | 去首尾空格后 1～2000 字 |
+| `method` | 否 | 与页面跟进方式使用相同字典值 |
+| `next_date` | 否 | `YYYY-MM-DD` |
+| `attachments` | 否 | 重复 multipart 字段；最多 10 个，每个不超过 20MB |
+
+附件类型沿用页面白名单：图片、PDF、Excel、Word、CSV、CAD、ZIP 和 TXT；HTML、SVG、JS 等类型拒绝。所有字段和附件先完成校验，随后才写入文件、跟进和附件记录。数据库写入失败会回滚跟进、业务状态和附件行，并删除该请求已经写入的文件。
+
+### 响应与状态变化
+
+- 成功返回 201，包含规范化后的对象类型、目标 ID、跟进内容、附件元数据和 `created_by`。
+- 客户命中创建客户跟进。
+- 线索命中创建线索跟进；`new` 线索在同一事务内进入 `following`。
+- 外部跟进写入 Token 绑定用户 ID，页面 Cookie 跟进写入当前登录用户 ID；历史跟进保持空值。
+
+```bash
+curl -X POST https://crm.example.com/api/external/v1/follow-ups \
+  -H 'Authorization: Bearer <token>' \
+  -F 'phone=+86 138-0013-8000' \
+  -F 'content=已电话确认安装时间' \
+  -F 'method=phone' \
+  -F 'next_date=2026-12-01' \
+  -F 'attachments=@报价单.pdf' \
+  -F 'attachments=@现场照片.png'
+```
+
 ## 错误
 
 | HTTP | code | 含义 |
@@ -74,6 +116,9 @@ curl -X POST https://crm.example.com/api/external/v1/leads \
 | 400 | `invalid_phone` | 手机号格式非法 |
 | 400 | `validation_failed` | 字段、长度或未知字段校验失败 |
 | 409 | `duplicate_contact` | 有效线索或客户已占用该手机号 |
+| 404 | `phone_not_found` | 手机号没有对应客户或线索 |
+| 409 | `ambiguous_phone` | 客户或线索目标表存在多条同号记录 |
+| 409 | `lead_closed` | 唯一匹配线索已转化或已失效 |
 
 重复响应包含不含 Token 的最小 `duplicate_hint`：对象类型、ID、名称、规范手机号和业务状态。
 
@@ -83,6 +128,8 @@ curl -X POST https://crm.example.com/api/external/v1/leads \
 
 - `v2_023_external_lead_api.sqlite.sql`
 - `v2_023_external_lead_api.mysql.sql`
+- `v2_024_external_followups.sqlite.sql`
+- `v2_024_external_followups.mysql.sql`
 - `api_token_init.sqlite.template.sql`
 - `api_token_init.mysql.template.sql`
 

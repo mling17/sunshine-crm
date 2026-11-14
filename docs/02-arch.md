@@ -1,10 +1,10 @@
 # 02 · 软件架构文档
 
-> 最后更新：2026-11-14（TASK-029 外部 Bearer Token 与新增线索）
+> 最后更新：2026-11-14（TASK-030 外部按手机号新增跟进）
 >
 > 文档状态：✅ 已建立，后续随结构、依赖、接口和数据模型变化增量维护
 >
-> 架构基线：`main@d2324a1`，迁移版本 `v2_023`
+> 架构基线：`main@d2324a1`，迁移版本 `v2_024`
 
 ## 1. 架构目标
 
@@ -154,7 +154,8 @@ HTTP 边界
 | 模块 | 主要文件 | 责任 | 不承担 |
 | --- | --- | --- | --- |
 | 认证 | `routers/auth.py`、`security.py` | 登录、会话、改密码、显示名 | 多角色权限 |
-| 外部 API | `routers/external_leads.py`、`external_auth.py` | Bearer Token 鉴权、外部新增线索 | Cookie 回退、Token 管理界面 |
+| 外部 API | `routers/external_leads.py`、`routers/external_followups.py`、`external_auth.py` | Bearer Token 鉴权、外部新增线索和跟进 | Cookie 回退、Token 管理界面 |
+| 跟进服务 | `followup_service.py`、`routers/followups.py` | 页面/外部共用的校验、目标守卫、状态流转、附件原子写入 | 外部下载鉴权 |
 | 线索 | `routers/leads.py`、`lead_tags.py` | 线索 CRUD、状态、转化检查、标签 | 客户 360 |
 | 导入 | `routers/csvimport.py` | 模板、字段映射、预览、整批导入线索 | Excel 直接导入、客户导入 |
 | 客户 | `routers/customers.py`、`addresses.py` | 客户、联系人、地址簿、360 查询 | 脱离线索的常规新建 |
@@ -244,6 +245,7 @@ lead ──转换──▶ customer ──1:N──▶ deal ──1:N──▶ q
 - `carrier_contacts` 关联物流公司。
 - `api_tokens.user_id` 关联绑定用户；Token 校验要求用户未停用、未删除。
 - `leads.created_by` 保存页面或外部创建时的责任用户 ID；历史行为空。
+- `follow_ups.created_by` 保存页面或外部新增跟进时的责任用户 ID；历史行为空。
 - `deal_quotes` 和 `quote_items` 保存报价时点的产品、价格和 Excel 版本。
 - `orders.order_name` 保存从客户已确认报价单继承的订单名称快照，后续可在订单编辑中修改。
 - `order_items` 保存生成订单时的产品快照。
@@ -384,6 +386,14 @@ pending 待处理 → processing 处理中 → done 已完成
 4. `app/lead_service.py` 统一完成重复检查、线索插入、标签关联和创建履历，页面和外部接口共用同一写入路径。
 5. 外部路由返回 201；失败请求不写线索或标签。
 
+### 10.6 外部按手机号新增跟进
+
+1. 外部路由使用同一 Bearer Token 依赖完成鉴权，并先校验正文、日期和全部附件。
+2. `followup_service.resolve_followup_target_by_phone()` 规范化手机号，先查有效客户，再查有效线索；同表多条匹配拒绝，唯一关闭线索拒绝。
+3. 页面与外部路由都调用 `followup_service.create_follow_up_record()`。该服务校验目标、报价关联和业务状态，写跟进、迁移线索/售后状态并保存附件。
+4. 附件先写入受控上传目录；任何后续数据库失败都会回滚事务并删除该请求已经写出的文件。
+5. Token 绑定用户或 Cookie 当前用户写入 `follow_ups.created_by`，响应返回 201 或页面原有状态码。
+
 ## 11. 数据字典机制
 
 - 注册表定义：`app/dicts.py::DICT_REGISTRY`。
@@ -430,7 +440,7 @@ pending 待处理 → processing 处理中 → done 已完成
 
 ### 13.2 迁移
 
-- 当前迁移版本：`v2_023`。
+- 当前迁移版本：`v2_024`。
 - 启动时幂等执行基础建表、增量迁移、标准审计列补齐和种子数据。
 - 每条迁移有版本或结构 guard，可重复执行。
 - 迁移失败必须停止启动，不得带半迁移状态对外服务。

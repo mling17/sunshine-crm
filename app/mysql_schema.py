@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS `follow_ups` (
   `kind` VARCHAR(32) NOT NULL DEFAULT 'follow',
   `detail` LONGTEXT,
   `quote_id` BIGINT UNSIGNED,
+  `created_by` BIGINT UNSIGNED,
   `${STANDARD}`,
   PRIMARY KEY (`id`),
   KEY `idx_fu_object` (`object_type`, `object_id`),
@@ -751,6 +752,10 @@ def _ensure_external_api_columns(cursor) -> None:
     if "created_by" not in _column_names(cursor, "leads"):
         cursor.execute(
             "ALTER TABLE `leads` ADD COLUMN `created_by` BIGINT UNSIGNED"
+        )
+    if "created_by" not in _column_names(cursor, "follow_ups"):
+        cursor.execute(
+            "ALTER TABLE `follow_ups` ADD COLUMN `created_by` BIGINT UNSIGNED"
         )
 
 

@@ -37,8 +37,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_023"
-SCHEMA_USER_VERSION = 22
+MIGRATION_VERSION = "v2_024"
+SCHEMA_USER_VERSION = 23
 
 
 def default_db_path() -> Path:
@@ -1265,6 +1265,13 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_023', datetime('now'), '外部 API Token、用户启用状态与线索创建人')"),
     ("user_version v2_023", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 40. v2_024：外部跟进创建人审计 ----------
+    ("follow_ups.created_by", _col_guard("follow_ups", "created_by"),
+     "ALTER TABLE follow_ups ADD COLUMN created_by INTEGER"),
+    ("schema_migrations v2_024", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_024', datetime('now'), '外部跟进与创建人审计')"),
+    ("user_version v2_024", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -1402,7 +1409,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
             "product_payable", "customer_confirmed_at", "quote_id",
             "carrier_contact_id", "carrier_contact_name", "carrier_contact_phone",
         ),
-        "follow_ups": ("object_type", "object_id", "method", "quote_id"),
+        "follow_ups": ("object_type", "object_id", "method", "quote_id", "created_by"),
         "users": ("is_active",),
         "leads": ("created_by",),
         "attachments": ("object_type", "object_id", "follow_up_id"),

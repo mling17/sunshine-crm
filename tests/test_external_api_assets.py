@@ -7,6 +7,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from tests import _bootstrap  # noqa: F401  —— 必须在 app.* 之前初始化隔离环境
+
 from app.migrations import run_migrations
 from app.schema import ensure_schema
 
@@ -43,6 +45,36 @@ class ExternalApiAssetsTest(unittest.TestCase):
                 self.assertIn("{{EXPIRES_AT_SQL_LITERAL_OR_NULL}}", text)
                 self.assertIn("api_tokens", text)
                 self.assertNotIn("test-token-0001", text)
+
+    def test_v2_024_update_scripts_add_follow_up_creator(self):
+        for filename in (
+            "v2_024_external_followups.sqlite.sql",
+            "v2_024_external_followups.mysql.sql",
+        ):
+            with self.subTest(filename=filename):
+                text = (SQL / filename).read_text(encoding="utf-8")
+                self.assertIn("follow_ups", text)
+                self.assertIn("created_by", text)
+                self.assertIn("v2_024", text)
+                self.assertNotIn("FOREIGN KEY", text.upper())
+                self.assertNotIn(" REFERENCES ", text.upper())
+
+    def test_external_api_guide_documents_follow_up_contract(self):
+        text = (
+            ROOT / "docs" / "EXTERNAL-API.md"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "POST /api/external/v1/follow-ups",
+            "multipart/form-data",
+            "ambiguous_phone",
+            "phone_not_found",
+            "lead_closed",
+            "10 个",
+            "20MB",
+            "created_by",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
 
     def test_sqlite_v2_023_script_converges_with_application_migrations(self):
         with tempfile.TemporaryDirectory() as tmp:

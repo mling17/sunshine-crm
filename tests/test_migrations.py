@@ -310,6 +310,35 @@ class TestMigrations(unittest.TestCase):
         self.assertTrue(token_audit[1])
         self.assertEqual(token_audit[2], 0)
 
+    def test_v2_024_adds_follow_up_creator_without_rewriting_history(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        run_migrations(self.db, backup=False, verbose=False)
+
+        conn = sqlite3.connect(str(self.db))
+        try:
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(follow_ups)")
+            }
+            conn.execute(
+                "INSERT INTO follow_ups (object_type, object_id, customer_id, content, created_at)"
+                " VALUES ('customer', 1, 1, '迁移后普通跟进', '2026-11-14T00:00:00Z')"
+            )
+            historical = conn.execute(
+                "SELECT created_by FROM follow_ups ORDER BY id"
+            ).fetchall()
+            version = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = 'v2_024'"
+            ).fetchone()
+            user_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertIn("created_by", columns)
+        self.assertTrue(historical)
+        self.assertTrue(all(row[0] is None for row in historical))
+        self.assertIsNotNone(version)
+        self.assertEqual(user_version, 23)
+
     def test_aftersale_relation_column_exists(self):
         run_migrations(self.db, backup=False, verbose=False)
         conn = sqlite3.connect(str(self.db))
