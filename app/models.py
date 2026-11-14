@@ -817,6 +817,23 @@ class ExternalLeadIn(BaseModel):
     tags: list[TagName] = Field(default_factory=list, max_length=MAX_TAGS)
 
 
+class ExternalPhoneCheckIn(BaseModel):
+    """外部批量校验手机号；一次最多 500 个输入值。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phones: list[str] = Field(min_length=1, max_length=500)
+
+
+class ExternalPhoneCheckItem(BaseModel):
+    phone: str
+    exists: bool
+
+
+class ExternalPhoneCheckOut(BaseModel):
+    items: list[ExternalPhoneCheckItem]
+
+
 class LeadDetailOut(LeadOut):
     """线索详情：档案 + 标签 + 跟进记录。"""
 

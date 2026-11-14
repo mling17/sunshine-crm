@@ -274,7 +274,7 @@ def list_follow_ups(
     params: list[object] = []
     if not include_system:
         where_parts.append("(fu.kind IS NULL OR fu.kind = 'follow')")
-    
+
     if customer_id is not None:
         where_parts.append("fu.customer_id = ?")
         params.append(customer_id)

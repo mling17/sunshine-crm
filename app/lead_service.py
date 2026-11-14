@@ -45,6 +45,22 @@ def find_active_contact_by_phone(conn, phone: str) -> dict | None:
     return None
 
 
+def active_lead_phone_keys(conn, candidates: Iterable[str]) -> set[str]:
+    """返回候选号码中仍由未删除线索占用的规范化集合。"""
+    wanted = set(candidates)
+    if not wanted:
+        return set()
+    rows = conn.execute(
+        "SELECT phone FROM leads"
+        " WHERE is_delete = 0 AND phone IS NOT NULL AND TRIM(phone) <> ''"
+    ).fetchall()
+    return {
+        phone_key
+        for row in rows
+        if (phone_key := _comparison_phone(row["phone"])) in wanted
+    }
+
+
 def _normalize_tags(tags: Iterable[str]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()

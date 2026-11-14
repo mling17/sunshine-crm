@@ -1,6 +1,6 @@
 # 02 · 软件架构文档
 
-> 最后更新：2026-11-14（TASK-030 外部按手机号新增跟进）
+> 最后更新：2026-11-14（TASK-030/031 外部跟进与手机号校验）
 >
 > 文档状态：✅ 已建立，后续随结构、依赖、接口和数据模型变化增量维护
 >
@@ -154,7 +154,7 @@ HTTP 边界
 | 模块 | 主要文件 | 责任 | 不承担 |
 | --- | --- | --- | --- |
 | 认证 | `routers/auth.py`、`security.py` | 登录、会话、改密码、显示名 | 多角色权限 |
-| 外部 API | `routers/external_leads.py`、`routers/external_followups.py`、`external_auth.py` | Bearer Token 鉴权、外部新增线索和跟进 | Cookie 回退、Token 管理界面 |
+| 外部 API | `routers/external_leads.py`、`routers/external_followups.py`、`external_auth.py` | Bearer Token 鉴权、外部新增线索、跟进和批量手机号校验 | Cookie 回退、Token 管理界面 |
 | 跟进服务 | `followup_service.py`、`routers/followups.py` | 页面/外部共用的校验、目标守卫、状态流转、附件原子写入 | 外部下载鉴权 |
 | 线索 | `routers/leads.py`、`lead_tags.py` | 线索 CRUD、状态、转化检查、标签 | 客户 360 |
 | 导入 | `routers/csvimport.py` | 模板、字段映射、预览、整批导入线索 | Excel 直接导入、客户导入 |
@@ -174,6 +174,7 @@ HTTP 边界
 
 - 页面 API 统一前缀：`/api/crm`。
 - 外部 API 统一前缀：`/api/external/v1`。
+- 外部手机号校验：`POST /api/external/v1/leads/phone-check`；批次上限 500，响应只含规范手机号和存在状态。
 - 反向代理地址：`/crm/api/crm/*`。
 - 鉴权：页面 API 使用 Cookie `crm_sid`；外部 API 只使用 `Authorization: Bearer <token>`，两种凭据不能互相替代。
 - 响应：JSON；写接口使用明确的 HTTP 状态码和业务错误码。
@@ -393,6 +394,14 @@ pending 待处理 → processing 处理中 → done 已完成
 3. 页面与外部路由都调用 `followup_service.create_follow_up_record()`。该服务校验目标、报价关联和业务状态，写跟进、迁移线索/售后状态并保存附件。
 4. 附件先写入受控上传目录；任何后续数据库失败都会回滚事务并删除该请求已经写出的文件。
 5. Token 绑定用户或 Cookie 当前用户写入 `follow_ups.created_by`，响应返回 201 或页面原有状态码。
+
+### 10.7 外部批量手机号校验
+
+1. 请求先通过统一 Bearer Token 依赖，不接受 Cookie。
+2. 路由逐个规范化输入并收集从 0 开始的非法位置；任一位置非法时整批返回 400，不产生部分响应。
+3. 规范化重复值按首次出现顺序去重。
+4. `lead_service.active_lead_phone_keys()` 只扫描未删除线索，并复用与新增线索相同的规范值比较逻辑，因此 converted/invalid 线索仍算存在，软删除线索不算存在。
+5. 响应只组装规范手机号和布尔存在状态，不读取或返回客户与线索明细。
 
 ## 11. 数据字典机制
 
