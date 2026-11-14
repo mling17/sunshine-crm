@@ -4,12 +4,30 @@ from __future__ import annotations
 
 import unittest
 
-from tests._util import ApiTestCase, insert_deal, insert_follow_up, open_client
+from tests._util import (
+    ApiTestCase,
+    insert_customer,
+    insert_deal,
+    insert_follow_up,
+    open_client,
+)
 
 from app.db import db_conn
 
 
 class CustomersTest(ApiTestCase):
+    def test_direct_customer_creation_is_forbidden_and_writes_nothing(self):
+        resp = self.client.post(
+            "/api/crm/customers",
+            json={"name": "绕过线索的客户", "phone": "13800000009"},
+        )
+
+        self.assertEqual(resp.status_code, 405, resp.text)
+        self.assertEqual(resp.json()["code"], "customer_create_forbidden")
+        self.assertEqual(self.client.get("/api/crm/customers").json()["total"], 0)
+        with db_conn() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0], 0)
+
     # ---------- 建 + 列表 ----------
     def test_create_and_list(self):
         a = self.create_customer(
@@ -81,17 +99,37 @@ class CustomersTest(ApiTestCase):
         self.assertEqual(len(set(ids)), 5, "分页不重不漏")
 
     # ---------- 改 ----------
+    def test_update_rejects_phone_and_preserves_record(self):
+        customer_id = insert_customer(
+            name="李娜",
+            phone="13800000001",
+        )
+        before = self.client.get(f"/api/crm/customers/{customer_id}").json()
+
+        resp = self.client.put(
+            f"/api/crm/customers/{customer_id}",
+            json={"phone": "13800000001", "location": "不应写入的新地址"},
+        )
+
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertEqual(resp.json()["code"], "customer_phone_immutable")
+        after = self.client.get(f"/api/crm/customers/{customer_id}").json()
+        self.assertEqual(after["phone"], "13800000001")
+        self.assertEqual(after["location"], before["location"])
+        self.assertEqual(after["updated_at"], before["updated_at"])
+
     def test_update_fields(self):
         c = self.create_customer(name="张伟", location="旧地址")
 
         resp = self.client.put(
             f"/api/crm/customers/{c['id']}",
-            json={"location": "新地址", "phone": "13800000001"},
+            json={"location": "新地址", "wechat": "new-wechat"},
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         updated = resp.json()
         self.assertEqual(updated["location"], "新地址")
-        self.assertEqual(updated["phone"], "13800000001")
+        self.assertEqual(updated["wechat"], "new-wechat")
+        self.assertEqual(updated["phone"], c["phone"])
         # 没传的字段不许被清空
         self.assertEqual(updated["name"], "张伟")
         self.assertEqual(updated["id"], c["id"])
@@ -109,7 +147,6 @@ class CustomersTest(ApiTestCase):
             f"/api/crm/customers/{c['id']}",
             json={
                 "location": "新地址",
-                "phone": "13800000001",
                 "tags": ["门店", "待量尺"],
             },
         )
@@ -126,7 +163,6 @@ class CustomersTest(ApiTestCase):
         change = next(item for item in history if item["kind"] == "change")
         self.assertEqual(
             change["content"],
-            "电话由「未填写」改为「13800000001」；"
             "地区由「旧地址」改为「新地址」；"
             "标签由「重点」改为「门店、待量尺」",
         )
@@ -203,12 +239,12 @@ class CustomersTest(ApiTestCase):
         )
         self.assertEqual(self.client.delete("/api/crm/customers/9999").status_code, 403)
 
-    def test_create_requires_non_blank_name(self):
-        # 计划 §2.6：校验失败统一 400（不用 pydantic 默认 422）
-        self.assertEqual(self.client.post("/api/crm/customers", json={}).status_code, 400)
-        self.assertEqual(
-            self.client.post("/api/crm/customers", json={"name": "   "}).status_code, 400
-        )
+    def test_direct_customer_creation_is_forbidden_for_any_payload(self):
+        for payload in ({}, {"name": "   "}):
+            with self.subTest(payload=payload):
+                resp = self.client.post("/api/crm/customers", json=payload)
+                self.assertEqual(resp.status_code, 405, resp.text)
+                self.assertEqual(resp.json()["code"], "customer_create_forbidden")
 
     def test_requires_auth(self):
         anon = open_client(login_first=False)

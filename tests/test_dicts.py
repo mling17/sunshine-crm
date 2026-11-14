@@ -160,12 +160,8 @@ class DictHttpTest(ApiTestCase):
     def test_new_default_sources_are_usable(self):
         sources = ["video_account", "xianyu"]
         for index, source in enumerate(sources):
-            cust = self.client.post(
-                "/api/crm/customers",
-                json={"name": f"新来源客户{index}", "source": source},
-            )
-            self.assertEqual(cust.status_code, 200, cust.text)
-            self.assertEqual(cust.json()["source"], source)
+            cust = self.create_customer(name=f"新来源客户{index}", source=source)
+            self.assertEqual(cust["source"], source)
 
     def test_add_source_immediately_usable(self):
         created = self.client.post(
@@ -175,9 +171,9 @@ class DictHttpTest(ApiTestCase):
         self.assertEqual(created.status_code, 200, created.text)
         items = self.client.get("/api/crm/dicts/customer_source").json()["items"]
         self.assertIn("douyin", [i["key"] for i in items])
-        # 新建客户可以直接用这个来源（字典校验放行）
-        cust = self.client.post("/api/crm/customers", json={"name": "抖音客户", "source": "douyin"})
-        self.assertEqual(cust.status_code, 200, cust.text)
+        # 客户档案可以直接使用这个来源（字典校验放行）
+        cust = self.create_customer(name="抖音客户", source="douyin")
+        self.assertEqual(cust["source"], "douyin")
 
     def test_rename_propagates_to_output_labels(self):
         """A18 后半：改字典显示名，出参 *_label 必须跟着变（R1 M1）"""
@@ -211,9 +207,7 @@ class DictHttpTest(ApiTestCase):
             "/api/crm/dicts/customer_source/items", json={"key": "douyin2", "label": "抖音", "sort": 8}
         )
         for i in range(3):
-            self.client.post(
-                "/api/crm/customers", json={"name": f"抖音客户{i}", "source": "douyin2"}
-            )
+            self.create_customer(name=f"抖音客户{i}", source="douyin2")
         resp = self.client.delete("/api/crm/dicts/customer_source/items/douyin2")
         self.assertEqual(resp.status_code, 409, resp.text)
         self.assertEqual(resp.json()["code"], "dict_item_in_use")

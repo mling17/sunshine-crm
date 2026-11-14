@@ -37,6 +37,14 @@ class Customer360UiTest(unittest.TestCase):
             with self.subTest(selector=selector):
                 self.assertIn(selector, self.polish_css)
 
+    def test_customer_page_has_no_direct_create_action(self):
+        list_source = self.customers[
+            self.customers.index("function viewCustomers"):
+            self.customers.index("function loadCustomers")
+        ]
+        self.assertIn("客户由线索转化，不在此新建", list_source)
+        self.assertNotIn(">新建客户</button>", list_source)
+
     def test_customer_detail_title_matches_lead_layout(self):
         detail = self.customers[self.customers.index("function viewCustomerDetail"):]
         for marker in (
@@ -59,6 +67,23 @@ class Customer360UiTest(unittest.TestCase):
         self.assertLess(list_source.index("{ title: '商机'"), list_source.index("{ title: '订单'"))
         self.assertLess(list_source.index("{ title: '订单'"), list_source.index("{ title: '累计成交'"))
         self.assertIn("leadTagSummaryHtml(c.tags)", list_source)
+
+    def test_customer_edit_phone_is_read_only_and_not_submitted(self):
+        form_source = self.customers[
+            self.customers.index("function customerFormHtml"):
+            self.customers.index("function readCustomerForm")
+        ]
+        payload_source = self.customers[
+            self.customers.index("function readCustomerForm"):
+            self.customers.index("function chipHtml")
+        ]
+
+        self.assertRegex(
+            form_source,
+            r'<input name=\\"phone\\"[^>]*readonly',
+        )
+        self.assertIn("手机号由来源线索决定", form_source)
+        self.assertNotIn("phone:", payload_source)
 
     def test_customer_detail_restores_customer_360_and_keeps_lead_tag_display(self):
         detail = self.customers[
@@ -91,10 +116,10 @@ class Customer360UiTest(unittest.TestCase):
 
     def test_customer_360_assets_are_cache_busted(self):
         self.assertIn("/crm/customer-360.css?v=20261105customer-ui4", self.index)
-        self.assertIn("/crm/views/customers.js?v=20261105customer-ui4", self.index)
+        self.assertIn("/crm/views/customers.js?v=20261114customer-phone1", self.index)
         self.assertIn("/crm/views/shared.js?v=20261105lead-tags6", self.index)
         self.assertIn("/crm/customer-360.css", self.sw)
-        self.assertIn("crm-shell-v84", self.sw)
+        self.assertIn("crm-shell-v85", self.sw)
 
     def test_customer_360_is_responsive(self):
         self.assertIn("grid-template-columns: minmax(0, 1.08fr) minmax(340px, .92fr)", self.css)

@@ -136,7 +136,11 @@ class TagsTest(ApiTestCase):
 
     def test_update_without_tags_keeps_existing_tags(self):
         a = self.create_customer(name="客户A", tags=["重点"])
-        resp = self.client.put(f"/api/crm/customers/{a['id']}", json={"phone": "13800000001"})
+        resp = self.client.put(
+            f"/api/crm/customers/{a['id']}",
+            json={"location": "新地址"},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["tags"], ["重点"], "没传 tags 不许清空")
 
     # ---------- 删客户被禁止 → customer_tags 保留 ----------

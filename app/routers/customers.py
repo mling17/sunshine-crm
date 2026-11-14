@@ -18,7 +18,6 @@ from app.errors import ApiError
 from app.models import (
     MAX_TAGS,
     CustomerDetailOut,
-    CustomerIn,
     CustomerListOut,
     CustomerOut,
     CustomerUpdate,
@@ -54,7 +53,7 @@ _TAG_JOIN = (
 )
 
 #: PUT 允许改的列（白名单：列名会拼进 SQL，绝不能用客户端传来的 key 直接拼）
-_UPDATABLE_COLUMNS = ("name", "phone", "wechat", "location", "note", "customer_type",
+_UPDATABLE_COLUMNS = ("name", "wechat", "location", "note", "customer_type",
                       "source", "source_other", "intent_level", "company_name", "owner")
 
 _RECENT_FOLLOW_UPS_LIMIT = 20
@@ -211,53 +210,14 @@ def list_tags(
     return [row["name"] for row in rows]
 
 
-@router.post("/customers", response_model=CustomerOut)
-def create_customer(payload: CustomerIn) -> CustomerOut:
-    now = now_iso()
-    with db_conn() as conn:
-        if payload.phone:
-            exists = conn.execute(
-                "SELECT 1 FROM customers"
-                " WHERE phone = ? AND is_delete = 0",
-                (payload.phone,),
-            ).fetchone()
-            if exists:
-                raise ApiError(
-                    status_code=409,
-                    code="duplicate_phone",
-                    message=f"电话 {payload.phone} 已存在",
-                )
-        cur = conn.execute(
-            """
-            INSERT INTO customers
-                (name, phone, wechat, location, note, customer_type, source,
-                 source_other, intent_level, company_name, owner, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                payload.name,
-                payload.phone,
-                payload.wechat,
-                payload.location,
-                payload.note,
-                payload.customer_type or "personal",
-                payload.source,
-                payload.source_other,
-                payload.intent_level,
-                payload.company_name,
-                payload.owner,
-                now,
-                now,
-            ),
-        )
-        customer_id = int(cur.lastrowid or 0)
-        _set_customer_tags(conn, customer_id, payload.tags)
-        row = conn.execute(
-            f"{_CUSTOMER_SELECT} WHERE c.id = ? AND c.is_delete = 0", (customer_id,)
-        ).fetchone()
-        tags = _tags_for(conn, [customer_id]).get(customer_id, [])
-
-    return _to_out(row, tags)
+@router.post("/customers")
+def reject_customer_creation() -> dict:
+    """客户只能在线索转化事务中创建，禁止从客户路由直接建档。"""
+    raise ApiError(
+        status_code=405,
+        code="customer_create_forbidden",
+        message="客户只能由线索转化创建",
+    )
 
 
 @router.get("/customers/{customer_id}", response_model=CustomerDetailOut)
@@ -309,6 +269,12 @@ def get_customer(customer_id: int) -> CustomerDetailOut:
 @router.put("/customers/{customer_id}", response_model=CustomerOut)
 def update_customer(customer_id: int, payload: CustomerUpdate) -> CustomerOut:
     fields = payload.model_dump(exclude_unset=True)
+    if "phone" in fields:
+        raise ApiError(
+            status_code=409,
+            code="customer_phone_immutable",
+            message="客户手机号由来源线索决定，转入客户后不可修改",
+        )
     # tags 单独处理：传了（哪怕是 [] / null）才替换，没传就不动
     has_tags = "tags" in fields
     tags_payload = fields.pop("tags", None)

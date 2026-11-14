@@ -75,26 +75,62 @@ def open_client(login_first: bool = True) -> TestClient:
 def insert_customer(
     *,
     name: str = "测试客户",
-    phone: str = "13900000000",
+    phone: str | None = "13900000000",
     wechat: str | None = None,
     customer_type: str = "personal",
     source: str = "wechat",
+    source_other: str | None = None,
     intent_level: str | None = None,
     company_name: str | None = None,
+    location: str | None = None,
+    note: str | None = None,
+    owner: str | None = None,
+    tags: list[str] | None = None,
 ) -> int:
-    """直接落一条 customer"""
+    """直接落一条 customer 测试夹具。
+
+    客户创建 API 按业务约束只允许线索转化，这里用直接落库保留旧用例的
+    “已有客户”前置条件，不参与生产路径。
+    """
     now = now_iso()
     with db_conn() as conn:
         cur = conn.execute(
             """
-            INSERT INTO customers (name, phone, wechat, customer_type, source, intent_level, company_name, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO customers
+                (name, phone, wechat, customer_type, source, source_other,
+                 intent_level, company_name, location, note, owner,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (name, phone, wechat, customer_type, source, intent_level, company_name, now, now),
+            (
+                name, phone, wechat, customer_type, source, source_other,
+                intent_level, company_name, location, note, owner, now, now,
+            ),
         )
         cid = int(cur.lastrowid or 0)
+        seen: set[str] = set()
+        for raw_name in tags or []:
+            tag_name = (raw_name or "").strip()
+            if not tag_name or tag_name in seen:
+                continue
+            seen.add(tag_name)
+            conn.execute(
+                "INSERT INTO tags (name, created_at) VALUES (?, ?)"
+                " ON CONFLICT(name) DO UPDATE SET is_delete = 0, update_time = ?",
+                (tag_name, now, now),
+            )
+            tag_id = conn.execute(
+                "SELECT id FROM tags WHERE name = ?", (tag_name,)
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO customer_tags (customer_id, tag_id) VALUES (?, ?)"
+                " ON CONFLICT(customer_id, tag_id) DO UPDATE SET"
+                " is_delete = 0, update_time = ?",
+                (cid, tag_id, now),
+            )
         return IdRow(cid, id=cid, name=name, phone=phone, wechat=wechat,
-                     customer_type=customer_type, source=source, intent_level=intent_level)
+                     customer_type=customer_type, source=source,
+                     intent_level=intent_level, location=location, tags=tags or [])
 
 
 def insert_order(
@@ -192,7 +228,9 @@ class ApiTestCase(unittest.TestCase):
     # ---- 常用动作 ----
 
     def create_customer(self, **payload) -> dict:
-        resp = self.client.post("/api/crm/customers", json=payload)
+        payload.setdefault("phone", None)
+        customer_id = insert_customer(**payload)
+        resp = self.client.get(f"/api/crm/customers/{customer_id}")
         self.assertEqual(resp.status_code, 200, resp.text)
         return resp.json()
 

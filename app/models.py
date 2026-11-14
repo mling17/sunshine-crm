@@ -703,8 +703,8 @@ class ImportCommitIn(BaseModel):
     file_ref: str | None = None
     column_mapping: dict[str, str] | None = None
     source_name: str | None = None
-    #: 导入目标：customers（客户档案，默认）/ leads（线索池）
-    target: str = "customers"
+    #: 导入目标固定为线索池；客户必须由线索转化创建。
+    target: str = "leads"
 
 
 class ImportCommitOut(BaseModel):

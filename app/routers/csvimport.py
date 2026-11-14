@@ -11,7 +11,7 @@
 2. ``POST /api/crm/import/commit``：支持两种请求体
    - JSON ``{file_ref, column_mapping, source_name}``（先 preview 后 commit，推荐）；
    - multipart ``file + column_mapping(JSON 字符串)``（一次性上传+导入）。
-   按映射写 ``customers``，落 ``import_log`` 审计；**不传映射时自动复用上一次**
+   按映射写线索池，落 ``import_log`` 审计；**不传映射时自动复用上一次**
    （``import_log`` 里最近一条），换个人重导同一份表不用再点一遍映射。
 """
 
@@ -32,6 +32,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.config.settings import settings
 from app.db import db_conn
+from app.errors import ApiError
 from app.models import (
     ImportCommitIn,
     ImportCommitOut,
@@ -102,8 +103,8 @@ HEADER_ALIASES: dict[str, str] = {
     "house_note": "note",
 }
 
-#: 导入目标：customers=客户档案（存量客户；客户通常由线索转来），leads=线索池
-TARGETS = ("customers", "leads")
+#: 客户只能由线索转化产生，CSV 导入固定写入线索池。
+TARGETS = ("leads",)
 
 PREVIEW_ROWS = 5
 MAX_CSV_BYTES = 10 * 1024 * 1024
@@ -525,7 +526,7 @@ async def _read_commit_request(
 ) -> tuple[bytes | None, str | None, dict | None, str | None, str]:
     """兼容 JSON 与 multipart 两种提交方式。
 
-    返回 ``(file_bytes, file_ref, mapping, source_name, target)``；target ∈ {customers, leads}。
+    返回 ``(file_bytes, file_ref, mapping, source_name, target)``；target 固定为 leads。
     """
     content_type = (request.headers.get("content-type") or "").lower()
 
@@ -554,7 +555,13 @@ async def _read_commit_request(
         raw_ref = form.get("file_ref")
         file_ref = raw_ref if isinstance(raw_ref, str) and raw_ref else None
         raw_target = form.get("target")
-        target = raw_target if isinstance(raw_target, str) and raw_target in TARGETS else "customers"
+        target = raw_target if isinstance(raw_target, str) else "leads"
+        if target != "leads":
+            raise ApiError(
+                status_code=400,
+                code="customer_import_forbidden",
+                message="CSV 只能导入线索，客户必须由线索转化创建",
+            )
         return data, file_ref, mapping, source, target
 
     try:
@@ -567,9 +574,13 @@ async def _read_commit_request(
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"参数错误：{exc.errors()}") from None
 
-    target = body.get("target") if isinstance(body.get("target"), str) else "customers"
-    if target not in TARGETS:
-        raise HTTPException(status_code=400, detail="target 只能是 customers（客户）或 leads（线索）")
+    target = body.get("target") if isinstance(body.get("target"), str) else "leads"
+    if target != "leads":
+        raise ApiError(
+            status_code=400,
+            code="customer_import_forbidden",
+            message="CSV 只能导入线索，客户必须由线索转化创建",
+        )
     return None, payload.file_ref, payload.column_mapping, payload.source_name, target
 
 

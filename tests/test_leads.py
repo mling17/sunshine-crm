@@ -59,31 +59,9 @@ class LeadsTest(ApiTestCase):
 
     def create_customer(
         self,
-        *,
-        name: str = "李娜",
-        phone: str = "13900139000",
-        wechat: str | None = None,
-        customer_type: str = "personal",
-        company_name: str | None = None,
-        source: str = "existing",
-        source_other: str | None = None,
-        location: str | None = None,
-        note: str | None = None,
-        intent_level: str | None = None,
+        **payload: Any,
     ):
-        data = {
-            "name": name,
-            "phone": phone,
-            "wechat": wechat,
-            "customer_type": customer_type,
-            "company_name": company_name,
-            "source": source,
-            "source_other": source_other,
-            "location": location,
-            "note": note,
-            "intent_level": intent_level,
-        }
-        return self.client.post("/api/crm/customers", json=data).json()
+        return super().create_customer(**payload)
 
     def create_deal(
         self,
@@ -540,6 +518,47 @@ class LeadsTest(ApiTestCase):
         self.assertEqual(body["customer"]["created_at"], body["lead"]["created_at"])
         self.assertEqual(body["lead"]["intent_level"], "medium")
         self.assertEqual(body["customer"]["intent_level"], "medium")
+
+    def test_lead_conversion_atomically_creates_customer_and_first_opportunity(self):
+        lead = self.create_lead(
+            phone="13800138088",
+            tags=["重点"],
+            note="首条线索备注",
+        )
+        follow = self.post_follow_up(
+            "lead",
+            lead["id"],
+            content="转化前跟进",
+            next_date="2026-12-01",
+        )
+        self.assertEqual(follow.status_code, 200, follow.text)
+
+        converted = self.client.post(
+            f"/api/crm/leads/{lead['id']}/convert",
+            json={"mode": "new", "deal": {"title": "首个商机"}},
+        )
+        self.assertEqual(converted.status_code, 200, converted.text)
+        body = converted.json()
+        customer_id = body["customer"]["id"]
+        deal_id = body["deal"]["id"]
+
+        lead_detail = self.client.get(f"/api/crm/leads/{lead['id']}").json()
+        self.assertEqual(lead_detail["status"], "converted")
+        self.assertEqual(lead_detail["converted_customer_id"], customer_id)
+        self.assertEqual(lead_detail["converted_deal_id"], deal_id)
+
+        customer_detail = self.client.get(
+            f"/api/crm/customers/{customer_id}"
+        ).json()
+        self.assertEqual(customer_detail["phone"], "13800138088")
+        self.assertEqual(customer_detail["tags"], ["重点"])
+        self.assertEqual(len(customer_detail["deals"]), 1)
+        self.assertEqual(customer_detail["deals"][0]["id"], deal_id)
+        follow_contents = [
+            item["content"] for item in customer_detail["follow_ups"]
+        ]
+        self.assertIn("转化前跟进", follow_contents)
+        self.assertEqual(follow_contents.count("转化前跟进"), 1)
 
     def test_lead_conversion_and_order_upgrade_intent_to_high(self):
         lead = self.create_lead(phone="13800138000", intent_level="low")

@@ -198,8 +198,9 @@ function customerFormHtml(customer) {
         '<div class=\"field\"><label>类型</label>' +
                 '<select name="customer_type">' + dictOptions('customer_type', c.customer_type || 'personal') + '</select></div>' +
         '</div>' +
-        '<div class=\"field\"><label>电话</label>' +
-        '<input name=\"phone\" type=\"tel\" maxlength=\"32\" inputmode=\"tel\" value=\"' + esc(c.phone || '') + '\"></div>' +
+        '<div class=\"field\"><label>电话（不可修改）</label>' +
+        '<input name=\"phone\" type=\"tel\" maxlength=\"32\" inputmode=\"tel\" readonly aria-readonly=\"true\" value=\"' + esc(c.phone || '') + '\">' +
+        '<span class=\"small muted\">手机号由来源线索决定，转入客户后不可修改</span></div>' +
         '<div class=\"field\"><label>微信</label>' +
         '<input name=\"wechat\" type=\"text\" maxlength=\"64\" value=\"' + esc(c.wechat || '') + '\"></div>' +
         '<div class=\"field\"><label>地区</label>' +
@@ -226,7 +227,6 @@ function readCustomerForm(form) {
     var tags = val('tags').split(/[,，、;；\\s]+/).filter(Boolean).slice(0, MAX_TAGS);
     return {
         name: val('name'),
-        phone: val('phone') || null,
         wechat: val('wechat') || null,
         location: val('location') || null,
         customer_type: val('customer_type') || 'personal',

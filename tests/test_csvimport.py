@@ -1,4 +1,4 @@
-"""T7：CSV 导入 —— preview（表头 + 前 N 行 + 建议映射）+ commit（手动映射写 customers + import_log）。
+"""T7：CSV 导入 —— preview（表头 + 前 N 行 + 建议映射）+ commit（固定写线索池 + import_log）。
 
 零依赖：只用 stdlib ``csv``。.xlsx 不解析（V1.5 才上 openpyxl），收到就给友好提示、不报错。
 """
@@ -16,23 +16,34 @@ from app.db import db_conn
 from tests._util import ApiTestCase, open_client
 
 CSV_UTF8 = (
-    "姓名,电话,楼盘\n"
-    "张伟,13800138000,阳光花园\n"
-    "李娜,13900139000,翡翠湾\n"
-    "王强,13700137000,金地中心\n"
+    "姓名,电话,楼盘,来源\n"
+    "张伟,13800138000,阳光花园,微信\n"
+    "李娜,13900139000,翡翠湾,电话\n"
+    "王强,13700137000,金地中心,转介绍\n"
 ).encode("utf-8")
 
 CSV_GBK = (
-    "姓名,电话,楼盘\n"
-    "张伟,13800138000,阳光花园\n"
+    "姓名,电话,楼盘,来源\n"
+    "张伟,13800138000,阳光花园,微信\n"
 ).encode("gbk")
 
-MAPPING = {"姓名": "name", "电话": "phone", "楼盘": "location"}
+CSV_SECOND_BATCH = (
+    "姓名,电话,楼盘,来源\n"
+    "赵敏,13600136000,泉城花园,微信\n"
+    "孙丽,13500135000,海岸新城,电话\n"
+).encode("utf-8")
+
+MAPPING = {
+    "姓名": "name",
+    "电话": "phone",
+    "楼盘": "location",
+    "来源": "source",
+}
 
 
 class CsvImportTest(ApiTestCase):
     # ---------- 小工具 ----------
-    def preview(self, data: bytes = CSV_UTF8, filename: str = "customers.csv"):
+    def preview(self, data: bytes = CSV_UTF8, filename: str = "leads.csv"):
         return self.client.post(
             "/api/crm/import/preview",
             files={"file": (filename, data, "text/csv")},
@@ -41,15 +52,15 @@ class CsvImportTest(ApiTestCase):
     def commit_json(self, **payload):
         return self.client.post("/api/crm/import/commit", json=payload)
 
-    def commit_multipart(self, data: bytes = CSV_UTF8, filename: str = "customers.csv", mapping=None):
+    def commit_multipart(self, data: bytes = CSV_UTF8, filename: str = "leads.csv", mapping=None):
         return self.client.post(
             "/api/crm/import/commit",
             files={"file": (filename, data, "text/csv")},
             data={"column_mapping": json.dumps(mapping or MAPPING)},
         )
 
-    def customer_total(self) -> int:
-        return self.client.get("/api/crm/customers").json()["total"]
+    def lead_total(self) -> int:
+        return self.client.get("/api/crm/leads").json()["total"]
 
     def import_logs(self) -> list[dict]:
         with db_conn() as conn:
@@ -64,15 +75,15 @@ class CsvImportTest(ApiTestCase):
 
         self.assertTrue(body["ok"])
         self.assertEqual(body["kind"], "csv")
-        self.assertEqual(body["file_name"], "customers.csv")
-        self.assertEqual(body["headers"], ["姓名", "电话", "楼盘"])
-        self.assertEqual(len(body["headers"]), 3)
+        self.assertEqual(body["file_name"], "leads.csv")
+        self.assertEqual(body["headers"], ["姓名", "电话", "楼盘", "来源"])
+        self.assertEqual(len(body["headers"]), 4)
         self.assertEqual(body["total_rows"], 3)
         self.assertEqual(len(body["preview"]), 3)
         self.assertEqual(body["preview"][0]["姓名"], "张伟")
         self.assertEqual(body["preview"][0]["楼盘"], "阳光花园")
         self.assertEqual(
-            body["suggested_mapping"], {"姓名": "name", "电话": "phone", "楼盘": "location"}
+            body["suggested_mapping"], MAPPING
         )
         self.assertTrue(body["file_ref"], "commit 要靠 file_ref 取回刚上传的文件")
         self.assertRegex(body["file_ref"], r"^[0-9a-f]{32}$")
@@ -91,7 +102,7 @@ class CsvImportTest(ApiTestCase):
         resp = self.preview(CSV_GBK)
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
-        self.assertEqual(body["headers"], ["姓名", "电话", "楼盘"])
+        self.assertEqual(body["headers"], ["姓名", "电话", "楼盘", "来源"])
         self.assertEqual(body["preview"][0]["姓名"], "张伟")
         self.assertIn("gb", body["encoding"].lower())
 
@@ -119,12 +130,44 @@ class CsvImportTest(ApiTestCase):
         self.assertEqual(resp.status_code, 400, resp.text)
 
     # ---------- commit ----------
-    def test_commit_with_file_ref_imports_customers_and_audits(self):
+    def test_commit_rejects_customer_import_without_writing_rows(self):
         preview = self.preview().json()
         resp = self.commit_json(
             file_ref=preview["file_ref"],
             column_mapping=MAPPING,
-            source_name="customers.csv",
+            target="customers",
+        )
+
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["code"], "customer_import_forbidden")
+        self.assertEqual(self.lead_total(), 0)
+        with db_conn() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0], 0)
+
+    def test_multipart_commit_rejects_customer_target(self):
+        resp = self.client.post(
+            "/api/crm/import/commit",
+            files={"file": ("leads.csv", CSV_UTF8, "text/csv")},
+            data={
+                "column_mapping": json.dumps(MAPPING),
+                "target": "customers",
+            },
+        )
+
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["code"], "customer_import_forbidden")
+        self.assertEqual(
+            self.client.get("/api/crm/customers").json()["total"],
+            0,
+        )
+        self.assertEqual(self.lead_total(), 0)
+
+    def test_commit_with_file_ref_imports_leads_and_audits(self):
+        preview = self.preview().json()
+        resp = self.commit_json(
+            file_ref=preview["file_ref"],
+            column_mapping=MAPPING,
+            source_name="leads.csv",
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
@@ -134,60 +177,63 @@ class CsvImportTest(ApiTestCase):
         self.assertFalse(body["mapping_reused"])
         self.assertEqual(body["mapping_used"], MAPPING)
 
-        self.assertEqual(self.customer_total(), 3)
-        customers = self.client.get("/api/crm/customers?size=100").json()["items"]
-        by_name = {c["name"]: c for c in customers}
+        self.assertEqual(self.lead_total(), 3)
+        leads = self.client.get("/api/crm/leads?size=100").json()["items"]
+        by_name = {c["name"]: c for c in leads}
         self.assertEqual(by_name["张伟"]["phone"], "13800138000")
         self.assertEqual(by_name["张伟"]["location"], "阳光花园")
 
         logs = self.import_logs()
         self.assertEqual(len(logs), 1)
-        self.assertEqual(logs[0]["source_name"], "customers.csv")
+        self.assertEqual(logs[0]["source_name"], "leads.csv")
         self.assertEqual(logs[0]["row_count"], 3)
         self.assertEqual(json.loads(logs[0]["column_mapping"]), MAPPING)
 
-    def test_customer_import_reads_type_and_defaults_blank_to_other(self):
+    def test_default_lead_import_reads_type_and_defaults_blank_to_other(self):
         csv_bytes = (
-            "姓名,类型,电话\n"
-            "个人客户,个人,13800138000\n"
-            "批量客户,,13900139000\n"
+            "姓名,类型,电话,来源\n"
+            "个人客户,个人,13800138000,微信\n"
+            "批量客户,,13900139000,电话\n"
         ).encode("utf-8")
         preview = self.preview(csv_bytes).json()
-        mapping = {"姓名": "name", "类型": "customer_type", "电话": "phone"}
+        mapping = {
+            "姓名": "name",
+            "类型": "customer_type",
+            "电话": "phone",
+            "来源": "source",
+        }
         self.assertEqual(
             preview["suggested_mapping"],
             mapping,
         )
         resp = self.commit_json(file_ref=preview["file_ref"], column_mapping=mapping)
         self.assertEqual(resp.status_code, 200, resp.text)
-        customers = {
+        leads = {
             item["name"]: item
-            for item in self.client.get("/api/crm/customers?size=100").json()["items"]
+            for item in self.client.get("/api/crm/leads?size=100").json()["items"]
         }
-        self.assertEqual(customers["个人客户"]["customer_type"], "personal")
-        self.assertEqual(customers["个人客户"]["customer_type_label"], "个人")
-        self.assertEqual(customers["批量客户"]["customer_type"], "other")
-        self.assertEqual(customers["批量客户"]["customer_type_label"], "其他")
+        self.assertEqual(leads["个人客户"]["lead_type"], "personal")
+        self.assertEqual(leads["批量客户"]["lead_type"], "other")
 
     def test_commit_multipart_with_file(self):
         resp = self.commit_multipart()
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["imported"], 3)
-        self.assertEqual(self.customer_total(), 3)
-        self.assertEqual(self.import_logs()[0]["source_name"], "customers.csv")
+        self.assertEqual(self.lead_total(), 3)
+        self.assertEqual(self.import_logs()[0]["source_name"], "leads.csv")
 
     def test_commit_without_mapping_and_no_history_400(self):
         preview = self.preview().json()
         resp = self.commit_json(file_ref=preview["file_ref"])
         self.assertEqual(resp.status_code, 400, resp.text)
         self.assertIn("映射", resp.json()["detail"])
-        self.assertEqual(self.customer_total(), 0)
+        self.assertEqual(self.lead_total(), 0)
 
     def test_commit_reuses_last_mapping(self):
         first = self.commit_multipart().json()
         self.assertFalse(first["mapping_reused"])
 
-        preview = self.preview().json()
+        preview = self.preview(CSV_SECOND_BATCH).json()
         self.assertEqual(preview["last_mapping"], MAPPING, "preview 要把上次映射带回来给前端预填")
 
         second = self.commit_json(file_ref=preview["file_ref"])
@@ -195,28 +241,44 @@ class CsvImportTest(ApiTestCase):
         body = second.json()
         self.assertTrue(body["mapping_reused"])
         self.assertEqual(body["mapping_used"], MAPPING)
-        self.assertEqual(body["imported"], 3)
-        self.assertEqual(self.customer_total(), 6)
-        self.assertEqual([log["row_count"] for log in self.import_logs()], [3, 3])
+        self.assertEqual(body["imported"], 2)
+        self.assertEqual(self.lead_total(), 5)
+        self.assertEqual([log["row_count"] for log in self.import_logs()], [3, 2])
 
     def test_commit_explicit_mapping_overrides_last(self):
         self.commit_multipart()
-        preview = self.preview().json()
+        preview = self.preview(CSV_SECOND_BATCH).json()
         resp = self.commit_json(
             file_ref=preview["file_ref"],
-            column_mapping={"姓名": "name", "电话": "wechat", "楼盘": "note"},
+            column_mapping={
+                "姓名": "name",
+                "电话": "wechat",
+                "楼盘": "note",
+                "来源": "source",
+            },
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertFalse(resp.json()["mapping_reused"])
-        items = self.client.get("/api/crm/customers?size=100").json()["items"]
-        target = [c for c in items if c["name"] == "张伟"]
-        self.assertTrue(any(c["wechat"] == "13800138000" for c in target))
+        items = self.client.get("/api/crm/leads?size=100").json()["items"]
+        target = [c for c in items if c["name"] == "赵敏"]
+        self.assertEqual(target[0]["wechat"], "13600136000")
 
     def test_commit_skips_rows_without_name(self):
-        csv_bytes = "姓名,电话\n张伟,13800138000\n ,13900139000\n李娜,\n".encode("utf-8")
+        csv_bytes = (
+            "姓名,电话,微信,来源\n"
+            "张伟,13800138000,,微信\n"
+            " ,13900139000,,电话\n"
+            "李娜,,lina,微信\n"
+        ).encode("utf-8")
         preview = self.preview(csv_bytes).json()
         body = self.commit_json(
-            file_ref=preview["file_ref"], column_mapping={"姓名": "name", "电话": "phone"}
+            file_ref=preview["file_ref"],
+            column_mapping={
+                "姓名": "name",
+                "电话": "phone",
+                "微信": "wechat",
+                "来源": "source",
+            },
         ).json()
         self.assertEqual(body["imported"], 2)
         self.assertEqual(body["skipped"], 1)
@@ -306,6 +368,24 @@ class LeadCsvImportTest(ApiTestCase):
                 "target": "leads",
             },
         )
+
+    def test_commit_without_target_defaults_to_leads(self):
+        preview = self.client.post(
+            "/api/crm/import/preview",
+            files={"file": ("leads.csv", self.CSV, "text/csv")},
+        ).json()
+        resp = self.client.post(
+            "/api/crm/import/commit",
+            json={
+                "file_ref": preview["file_ref"],
+                "column_mapping": self.LEAD_MAPPING,
+            },
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["imported"], 2)
+        self.assertEqual(self.client.get("/api/crm/leads").json()["total"], 2)
+        self.assertEqual(self.client.get("/api/crm/customers").json()["total"], 0)
 
     def test_import_leads_defaults_to_low_and_writes_create_history(self):
         resp = self.commit_leads(self.CSV)

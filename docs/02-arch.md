@@ -1,10 +1,10 @@
 # 02 · 软件架构文档
 
-> 最后更新：2026-11-10（TASK-027 确认发货后直接完成订单）
+> 最后更新：2026-11-14（TASK-028 客户来源与手机号不变量）
 >
 > 文档状态：✅ 已建立，后续随结构、依赖、接口和数据模型变化增量维护
 >
-> 架构基线：`main@f6f7460`，迁移版本 `v2_022`
+> 架构基线：`main@d2324a1`，迁移版本 `v2_022`
 
 ## 1. 架构目标
 
@@ -155,7 +155,7 @@ HTTP 边界
 | --- | --- | --- | --- |
 | 认证 | `routers/auth.py`、`security.py` | 登录、会话、改密码、显示名 | 多角色权限 |
 | 线索 | `routers/leads.py`、`lead_tags.py` | 线索 CRUD、状态、转化检查、标签 | 客户 360 |
-| 导入 | `routers/csvimport.py` | 模板、字段映射、预览、整批导入 | Excel 直接导入 |
+| 导入 | `routers/csvimport.py` | 模板、字段映射、预览、整批导入线索 | Excel 直接导入、客户导入 |
 | 客户 | `routers/customers.py`、`addresses.py` | 客户、联系人、地址簿、360 查询 | 脱离线索的常规新建 |
 | 产品 | `routers/products.py`、`product_*` | 产品主档、下单表、识别 | 具体客户报价 |
 | 商机 | `routers/deals.py` | 商机、产品工作清单、标签、阶段派生、生成订单后归档只读 | Excel 报价明细 |
@@ -184,7 +184,7 @@ HTTP 边界
 | --- | --- | --- |
 | 工作台 | `#/dashboard` | `GET /dashboard` |
 | 线索 | `#/leads`、`#/leads/{id}/follow` | `/leads`、`/follow-ups` |
-| 客户 | `#/customers`、`#/customers/{id}` | `/customers`、`/customers/{id}/360`、`/addresses` |
+| 客户 | `#/customers`、`#/customers/{id}` | `GET/PUT /customers`、`GET /customers/{id}/360`、`/addresses`；`POST /customers` 固定拒绝 |
 | 产品 | `#/products`、`#/products/{id}` | `/products`、`/products/{id}/form-file` |
 | 商机 | `#/deals`、`#/deals/{id}` | `/deals`、`/deals/{id}/quotes`、`/deals/{id}/tags` |
 | 报价 | 商机详情内 | `/quotes/{id}/send|requote|void|confirm|orders`、`/quotes/{id}/shipping-recipient` |
@@ -343,6 +343,8 @@ pending 待处理 → processing 处理中 → done 已完成
 3. 迁移联系人、标签、意向、历史跟进和创建时间。
 4. 创建首个商机并写系统履历。
 5. 线索更新为 `converted`，提交后所有页面读取同一关系。
+
+客户手机号在这一事务中从线索复制，之后作为稳定身份锚点保持只读。客户路由不接受直接建档，CSV 导入固定写线索池；这两个旁路分别返回稳定业务错误，不产生业务行。手机号更新在读取记录和写入字段前拒绝，因此即使提交值与原值相同，也不能借机修改同请求中的其他字段。
 
 ### 10.2 报价单
 
@@ -574,6 +576,12 @@ pending 待处理 → processing 处理中 → done 已完成
 - 决策：取消 `shipped` 活跃状态，`ready_to_ship` 的下一状态直接为 `completed`；确认发货时原子写入物流信息、运单号、发货时间和完成时间。
 - 存量兼容：`v2_022` 将 `orders.status='shipped'` 收敛为 `completed`，新增一条自动完成日志，并软删除订单状态字典中的 `shipped` 项；原历史日志不重写。
 - 取舍：历史状态日志仍可能出现 `shipped`，因此保留只读兼容标签；新业务不能再进入或筛选该状态。
+
+### ADR-014 · 客户只由线索转化产生且手机号不可变
+
+- 背景：直接建客户、CSV 导入客户和编辑客户手机号会让客户缺少来源线索，或让客户与来源线索的手机号不一致，破坏后续按手机号匹配、跟进和去重。
+- 决策：客户仅由线索转化事务创建；CSV 固定导入线索；客户手机号继承来源线索且转客后不可修改。记录见 `docs/adr/0001-customer-origin-invariant.md`。
+- 取舍：历史无来源客户或手机号不一致数据不会被自动修补，而由后续上线审计报告交人工处理。
 
 ## 18. 架构约束与已知债务
 
