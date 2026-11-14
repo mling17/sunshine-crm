@@ -1,6 +1,6 @@
 # 外部 API
 
-外部 API 供服务器之间调用，使用数据库中长期保存的完整 Bearer Token。当前版本提供新增线索；同一套 Token 鉴权将复用于后续外部接口。
+外部 API 供服务器之间调用，使用数据库中长期保存的完整 Bearer Token。当前版本提供新增线索和批量手机号校验；同一套 Token 鉴权将复用于后续外部接口。
 
 ## 认证
 
@@ -66,12 +66,58 @@ curl -X POST https://crm.example.com/api/external/v1/leads \
   }'
 ```
 
+## 批量校验线索手机号
+
+`POST /api/external/v1/leads/phone-check`
+
+在推送前检查一批规范手机号是否已被未删除线索占用。请求使用与新增线索相同的 Bearer Token，不接受 Cookie。
+
+```json
+{
+  "phones": [
+    "+86 (138) 0013-8000",
+    "139 0013 9000",
+    "13700137000"
+  ]
+}
+```
+
+规则：
+
+- `phones` 必须包含 1 到 500 个值。
+- 每个值按新增线索的手机号规则规范化。
+- 规范化后的重复值会删除，保留第一次出现的顺序。
+- 只查询未删除线索；已转化和已失效但未删除的线索仍算存在。
+- 不返回客户信息、线索状态、名称、ID 或其他敏感字段。
+
+成功返回 200：
+
+```json
+{
+  "items": [
+    {"phone": "13800138000", "exists": true},
+    {"phone": "13900139000", "exists": false},
+    {"phone": "13700137000", "exists": false}
+  ]
+}
+```
+
+任一值非法时整批返回 400，不查询或返回部分结果。`invalid_positions` 使用从 0 开始的输入数组下标：
+
+```json
+{
+  "detail": "手机号格式不正确",
+  "code": "invalid_phone",
+  "invalid_positions": [1, 3]
+}
+```
+
 ## 错误
 
 | HTTP | code | 含义 |
 | --- | --- | --- |
 | 401 | `unauthorized` | Token 或绑定用户无效 |
-| 400 | `invalid_phone` | 手机号格式非法 |
+| 400 | `invalid_phone` | 新增线索手机号非法，或校验批次包含非法值；批次错误带 `invalid_positions` |
 | 400 | `validation_failed` | 字段、长度或未知字段校验失败 |
 | 409 | `duplicate_contact` | 有效线索或客户已占用该手机号 |
 
