@@ -59,6 +59,36 @@ class ExternalApiAssetsTest(unittest.TestCase):
                 self.assertNotIn("FOREIGN KEY", text.upper())
                 self.assertNotIn(" REFERENCES ", text.upper())
 
+    def test_v2_025_update_scripts_add_idempotency_storage(self):
+        for filename in (
+            "v2_025_external_idempotency.sqlite.sql",
+            "v2_025_external_idempotency.mysql.sql",
+        ):
+            with self.subTest(filename=filename):
+                text = (SQL / filename).read_text(encoding="utf-8")
+                self.assertIn("api_idempotency_records", text)
+                self.assertIn("request_hash", text)
+                self.assertIn("response_status", text)
+                self.assertIn("response_body", text)
+                self.assertIn("expires_at", text)
+                self.assertIn("v2_025", text)
+                self.assertNotIn("FOREIGN KEY", text.upper())
+                self.assertNotIn(" REFERENCES ", text.upper())
+
+    def test_external_api_guide_documents_idempotency_contract(self):
+        text = (ROOT / "docs" / "EXTERNAL-API.md").read_text(encoding="utf-8")
+        for marker in (
+            "Idempotency-Key",
+            "idempotency_conflict",
+            "invalid_idempotency_key",
+            "30 天",
+            "附件文件名、类型、大小和内容摘要",
+            "v2_025_external_idempotency.sqlite.sql",
+            "v2_025_external_idempotency.mysql.sql",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
     def test_external_api_guide_documents_follow_up_contract(self):
         text = (
             ROOT / "docs" / "EXTERNAL-API.md"
@@ -141,6 +171,40 @@ class ExternalApiAssetsTest(unittest.TestCase):
             self.assertEqual(token[0], "fixture-token")
             self.assertTrue(token[2])
             self.assertTrue(token[3])
+
+    def test_sqlite_v2_025_script_converges_with_application_migrations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "upgrade.db"
+            ensure_schema(db)
+            run_migrations(db, backup=False, verbose=False)
+            conn = sqlite3.connect(str(db))
+            try:
+                conn.execute("DROP TABLE api_idempotency_records")
+                conn.execute(
+                    "DELETE FROM schema_migrations WHERE version = 'v2_025'"
+                )
+                conn.execute("PRAGMA user_version = 23")
+                conn.executescript(
+                    (
+                        SQL / "v2_025_external_idempotency.sqlite.sql"
+                    ).read_text(encoding="utf-8")
+                )
+                columns = {
+                    row[1]
+                    for row in conn.execute(
+                        "PRAGMA table_info(api_idempotency_records)"
+                    )
+                }
+                version = conn.execute(
+                    "SELECT 1 FROM schema_migrations WHERE version = 'v2_025'"
+                ).fetchone()
+            finally:
+                conn.close()
+
+            self.assertIn("request_hash", columns)
+            self.assertIn("response_body", columns)
+            self.assertIsNotNone(version)
+            run_migrations(db, backup=False, verbose=False)
 
 
 if __name__ == "__main__":

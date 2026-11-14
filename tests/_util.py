@@ -45,7 +45,8 @@ def reset_data() -> None:
             "order_items", "attachments", "follow_ups", "quote_items", "deal_quotes",
             "carrier_contacts", "carriers",
             "deal_items", "deals", "customer_tags",
-            "lead_tags", "leads", "customers", "tags", "api_tokens", "sessions",
+            "lead_tags", "leads", "customers", "tags",
+            "api_idempotency_records", "api_tokens", "sessions",
             "import_log", "products",
         ):
             conn.execute(f"DELETE FROM {table}")

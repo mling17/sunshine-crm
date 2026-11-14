@@ -61,6 +61,7 @@ class MySQLSchemaDefinitionTest(unittest.TestCase):
             "users",
             "sessions",
             "api_tokens",
+            "api_idempotency_records",
             "customers",
             "deals",
             "follow_ups",
@@ -77,6 +78,10 @@ class MySQLSchemaDefinitionTest(unittest.TestCase):
         self.assertIn("`is_active`", TABLE_DDL["users"])
         self.assertIn("`created_by`", TABLE_DDL["leads"])
         self.assertIn("`created_by`", TABLE_DDL["follow_ups"])
+        self.assertIn(
+            "`uq_api_idempotency_scope`",
+            TABLE_DDL["api_idempotency_records"],
+        )
 
     def test_every_table_has_standard_columns_and_no_foreign_keys(self):
         for statement in table_ddl():

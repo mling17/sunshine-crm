@@ -23,6 +23,7 @@ CRM V2 增量迁移 M1（幂等 / 可中断重跑 / 只增不毁）。
 10. v2_021 将已有客户确认商机的其他报价单统一转为历史。
 11. v2_022 取消“已发货”订单状态，将历史 shipped 订单收敛为 completed。
 12. v2_023 增加外部 API Token、用户启用状态和线索创建人。
+13. v2_024 增加跟进创建人；v2_025 增加外部写接口幂等记录。
 """
 
 from __future__ import annotations
@@ -37,8 +38,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_024"
-SCHEMA_USER_VERSION = 23
+MIGRATION_VERSION = "v2_025"
+SCHEMA_USER_VERSION = 24
 
 
 def default_db_path() -> Path:
@@ -1272,6 +1273,32 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_024', datetime('now'), '外部跟进与创建人审计')"),
     ("user_version v2_024", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 41. v2_025：外部写接口幂等重试 ----------
+    ("api_idempotency_records", None, """
+     CREATE TABLE IF NOT EXISTS api_idempotency_records (
+       id                INTEGER PRIMARY KEY AUTOINCREMENT,
+       token_id          INTEGER NOT NULL,
+       endpoint          TEXT NOT NULL,
+       idempotency_key   TEXT NOT NULL,
+       request_hash      TEXT NOT NULL,
+       response_status   INTEGER,
+       response_body     TEXT,
+       expires_at        TEXT NOT NULL,
+       created_at        TEXT NOT NULL,
+       updated_at        TEXT NOT NULL,
+       create_time       TEXT NOT NULL DEFAULT '',
+       update_time       TEXT NOT NULL DEFAULT '',
+       is_delete         INTEGER NOT NULL DEFAULT 0,
+       UNIQUE(token_id, endpoint, idempotency_key)
+     )
+     """),
+    ("idx_api_idempotency_expires", None,
+     "CREATE INDEX IF NOT EXISTS idx_api_idempotency_expires"
+     " ON api_idempotency_records(expires_at)"),
+    ("schema_migrations v2_025", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_025', datetime('now'), '外部写接口幂等重试')"),
+    ("user_version v2_025", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -1389,7 +1416,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
         "leads", "lead_tags", "carriers", "orders",
         "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
         "products", "deal_items", "order_items", "deal_quotes", "quote_items",
-        "follow_up_phrases", "api_tokens",
+        "follow_up_phrases", "api_tokens", "api_idempotency_records",
     )
     for table in required_tables:
         assert table_exists(conn, table), f"缺表 {table}"

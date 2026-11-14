@@ -64,6 +64,24 @@ CREATE TABLE IF NOT EXISTS `api_tokens` (
   KEY `idx_api_tokens_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 """,
+    "api_idempotency_records": """
+CREATE TABLE IF NOT EXISTS `api_idempotency_records` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `token_id` BIGINT UNSIGNED NOT NULL,
+  `endpoint` VARCHAR(255) NOT NULL,
+  `idempotency_key` VARCHAR(255) NOT NULL,
+  `request_hash` CHAR(64) NOT NULL,
+  `response_status` INT,
+  `response_body` LONGTEXT,
+  `expires_at` VARCHAR(32) NOT NULL,
+  `created_at` VARCHAR(32) NOT NULL,
+  `updated_at` VARCHAR(32) NOT NULL,
+  `${STANDARD}`,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_api_idempotency_scope` (`token_id`, `endpoint`, `idempotency_key`),
+  KEY `idx_api_idempotency_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+""",
     "customers": """
 CREATE TABLE IF NOT EXISTS `customers` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

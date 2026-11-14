@@ -21,6 +21,22 @@ Authorization: Bearer <token>
 
 Token 明文保存在 `api_tokens.token`，数据库读取权限等同于凭据读取权限。风险和取舍见 `docs/adr/0002-plaintext-api-token-no-ip-allowlist.md`。
 
+## 幂等重试
+
+新增线索和新增跟进支持可选的请求头：
+
+```http
+Idempotency-Key: <client-generated-key>
+```
+
+- Key 由客户端生成，最长 255 个字符；空白 Key 返回 400 `invalid_idempotency_key`。
+- 幂等身份由 Token、端点和 Key 共同确定；不同 Token 或不同端点可以复用同一个 Key。
+- 相同 Key 和相同业务请求返回首次的原始状态码与 JSON，不重复创建线索、跟进、附件行或文件。
+- 相同身份但请求内容不同返回 409 `idempotency_conflict`。
+- 跟进请求的附件文件名、类型、大小和内容摘要参与请求比较。
+- 幂等记录保留 30 天；过期记录会在后续幂等请求前清理，清理后 Key 可以重新使用。
+- 手机号批量校验是只读接口，不需要 `Idempotency-Key`。
+
 ## 新增线索
 
 `POST /api/external/v1/leads`
@@ -56,6 +72,7 @@ Token 明文保存在 `api_tokens.token`，数据库读取权限等同于凭据�
 ```bash
 curl -X POST https://crm.example.com/api/external/v1/leads \
   -H 'Authorization: Bearer <token>' \
+  -H 'Idempotency-Key: lead-20261114-001' \
   -H 'Content-Type: application/json' \
   -d '{
     "phone": "+86 (138) 0013-8000",
@@ -96,10 +113,12 @@ curl -X POST https://crm.example.com/api/external/v1/leads \
 - 客户命中创建客户跟进。
 - 线索命中创建线索跟进；`new` 线索在同一事务内进入 `following`。
 - 外部跟进写入 Token 绑定用户 ID，页面 Cookie 跟进写入当前登录用户 ID；历史跟进保持空值。
+- 支持 `Idempotency-Key`；附件摘要参与请求比较，重试不会重复保存文件。
 
 ```bash
 curl -X POST https://crm.example.com/api/external/v1/follow-ups \
   -H 'Authorization: Bearer <token>' \
+  -H 'Idempotency-Key: follow-up-20261114-001' \
   -F 'phone=+86 138-0013-8000' \
   -F 'content=已电话确认安装时间' \
   -F 'method=phone' \
@@ -160,8 +179,10 @@ curl -X POST https://crm.example.com/api/external/v1/follow-ups \
 | --- | --- | --- |
 | 401 | `unauthorized` | Token 或绑定用户无效 |
 | 400 | `invalid_phone` | 新增线索手机号非法，或校验批次包含非法值；批次错误带 `invalid_positions` |
+| 400 | `invalid_idempotency_key` | Idempotency-Key 为空或超长 |
 | 400 | `validation_failed` | 字段、长度或未知字段校验失败 |
 | 409 | `duplicate_contact` | 有效线索或客户已占用该手机号 |
+| 409 | `idempotency_conflict` | 同一幂等身份被不同请求复用 |
 | 404 | `phone_not_found` | 手机号没有对应客户或线索 |
 | 409 | `ambiguous_phone` | 客户或线索目标表存在多条同号记录 |
 | 409 | `lead_closed` | 唯一匹配线索已转化或已失效 |
@@ -176,6 +197,8 @@ curl -X POST https://crm.example.com/api/external/v1/follow-ups \
 - `v2_023_external_lead_api.mysql.sql`
 - `v2_024_external_followups.sqlite.sql`
 - `v2_024_external_followups.mysql.sql`
+- `v2_025_external_idempotency.sqlite.sql`
+- `v2_025_external_idempotency.mysql.sql`
 - `api_token_init.sqlite.template.sql`
 - `api_token_init.mysql.template.sql`
 

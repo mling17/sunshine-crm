@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable
 
 from fastapi import HTTPException, UploadFile
 
@@ -311,6 +312,7 @@ def create_follow_up_record(
     quote_id: int | None = None,
     customer_id_hint: int | None = None,
     deal_id_hint: int | None = None,
+    completion: Callable[[FollowUpItemOut], None] | None = None,
 ) -> FollowUpItemOut:
     """在调用方事务内写跟进、附件和业务状态；失败时清理本次文件。"""
     content_value = clean_content(content)
@@ -470,7 +472,8 @@ def create_follow_up_record(
             _apply_stage(conn, deal_id_value, old_stage, stage)
 
         item = fetch_follow_up_item(conn, follow_up_id)
-        conn.commit()
+        if completion is not None:
+            completion(item)
         return item
     except BaseException:
         try:

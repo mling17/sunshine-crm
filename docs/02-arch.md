@@ -4,7 +4,7 @@
 >
 > 文档状态：✅ 已建立，后续随结构、依赖、接口和数据模型变化增量维护
 >
-> 架构基线：`main@d2324a1`，迁移版本 `v2_024`
+> 架构基线：`main@d2324a1`，迁移版本 `v2_025`
 
 ## 1. 架构目标
 
@@ -175,6 +175,7 @@ HTTP 边界
 - 页面 API 统一前缀：`/api/crm`。
 - 外部 API 统一前缀：`/api/external/v1`。
 - 外部手机号校验：`POST /api/external/v1/leads/phone-check`；批次上限 500，响应只含规范手机号和存在状态。
+- 外部写接口可带 `Idempotency-Key`；身份按 Token、端点、Key 三元组隔离，回放首次状态和响应体。
 - 反向代理地址：`/crm/api/crm/*`。
 - 鉴权：页面 API 使用 Cookie `crm_sid`；外部 API 只使用 `Authorization: Bearer <token>`，两种凭据不能互相替代。
 - 响应：JSON；写接口使用明确的 HTTP 状态码和业务错误码。
@@ -202,11 +203,12 @@ HTTP 边界
 
 ### 8.1 表清单
 
-MySQL 基线共 29 张表，按业务域分组如下：
+MySQL 基线共 30 张表，按业务域分组如下：
 
 | 域 | 表 |
 | --- | --- |
 | 身份 | `users`、`sessions`、`api_tokens` |
+| 外部写缓存 | `api_idempotency_records` |
 | 线索 | `leads`、`lead_tags` |
 | 客户 | `customers`、`customer_addresses` |
 | 产品 | `products` |
@@ -245,6 +247,7 @@ lead ──转换──▶ customer ──1:N──▶ deal ──1:N──▶ q
 - 公司客户的 `customers.name` 保存公司名，`customers.company_name` 保存主联系人姓名；联系电话和微信保存在同一客户主档。
 - `carrier_contacts` 关联物流公司。
 - `api_tokens.user_id` 关联绑定用户；Token 校验要求用户未停用、未删除。
+- `api_idempotency_records` 保存外部写接口的请求摘要、响应状态/正文和 30 天过期时间；不保存 Token 明文，也不建外键。
 - `leads.created_by` 保存页面或外部创建时的责任用户 ID；历史行为空。
 - `follow_ups.created_by` 保存页面或外部新增跟进时的责任用户 ID；历史行为空。
 - `deal_quotes` 和 `quote_items` 保存报价时点的产品、价格和 Excel 版本。
@@ -395,6 +398,15 @@ pending 待处理 → processing 处理中 → done 已完成
 4. 附件先写入受控上传目录；任何后续数据库失败都会回滚事务并删除该请求已经写出的文件。
 5. Token 绑定用户或 Cookie 当前用户写入 `follow_ups.created_by`，响应返回 201 或页面原有状态码。
 
+### 10.7 外部写接口幂等
+
+1. 请求带 `Idempotency-Key` 时，按 Token、端点、Key 查询未过期缓存。
+2. 相同请求摘要且已有响应时直接回放原状态码和 JSON，不再进入业务写入。
+3. 相同身份但摘要不同返回 409 `idempotency_conflict`。
+4. 首次请求先占用唯一键，再在同一个数据库事务内完成业务写入和响应缓存；失败时两者一起回滚。
+5. 跟进附件内容摘要属于请求摘要；回放不重复保存附件文件。
+6. 过期缓存由 `app.idempotency.cleanup_expired()` 在后续幂等请求前物理清理，Key 可重新使用。
+
 ### 10.7 外部批量手机号校验
 
 1. 请求先通过统一 Bearer Token 依赖，不接受 Cookie。
@@ -449,7 +461,7 @@ pending 待处理 → processing 处理中 → done 已完成
 
 ### 13.2 迁移
 
-- 当前迁移版本：`v2_024`。
+- 当前迁移版本：`v2_025`。
 - 启动时幂等执行基础建表、增量迁移、标准审计列补齐和种子数据。
 - 每条迁移有版本或结构 guard，可重复执行。
 - 迁移失败必须停止启动，不得带半迁移状态对外服务。

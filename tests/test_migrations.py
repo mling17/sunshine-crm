@@ -337,7 +337,56 @@ class TestMigrations(unittest.TestCase):
         self.assertTrue(historical)
         self.assertTrue(all(row[0] is None for row in historical))
         self.assertIsNotNone(version)
-        self.assertEqual(user_version, 23)
+        self.assertEqual(user_version, 24)
+
+    def test_v2_025_adds_idempotency_schema_with_standard_audit_columns(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        run_migrations(self.db, backup=False, verbose=False)
+
+        conn = sqlite3.connect(str(self.db))
+        try:
+            columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(api_idempotency_records)"
+                )
+            }
+            unique_indexes = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA index_list(api_idempotency_records)"
+                )
+                if row[2]
+            }
+            foreign_keys = list(
+                conn.execute("PRAGMA foreign_key_list(api_idempotency_records)")
+            )
+            version = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = 'v2_025'"
+            ).fetchone()
+            user_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertTrue(
+            {
+                "token_id",
+                "endpoint",
+                "idempotency_key",
+                "request_hash",
+                "response_status",
+                "response_body",
+                "expires_at",
+                "create_time",
+                "update_time",
+                "is_delete",
+            }
+            <= columns
+        )
+        self.assertIn("sqlite_autoindex_api_idempotency_records_1", unique_indexes)
+        self.assertEqual(foreign_keys, [])
+        self.assertIsNotNone(version)
+        self.assertEqual(user_version, 24)
 
     def test_aftersale_relation_column_exists(self):
         run_migrations(self.db, backup=False, verbose=False)
