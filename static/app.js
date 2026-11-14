@@ -229,7 +229,7 @@
     var el = document.getElementById('toast');
     if (!el) { return; }
     el.textContent = message;
-    el.className = 'toast' + (isError ? ' error' : '');
+    el.className = 'toast show' + (isError ? ' error' : '');
     el.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { el.hidden = true; }, isError ? 4200 : 2200);

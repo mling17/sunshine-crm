@@ -119,7 +119,7 @@ class Customer360UiTest(unittest.TestCase):
         self.assertIn("/crm/views/customers.js?v=20261114customer-phone1", self.index)
         self.assertIn("/crm/views/shared.js?v=20261105lead-tags6", self.index)
         self.assertIn("/crm/customer-360.css", self.sw)
-        self.assertIn("crm-shell-v85", self.sw)
+        self.assertIn("crm-shell-v86", self.sw)
 
     def test_customer_360_is_responsive(self):
         self.assertIn("grid-template-columns: minmax(0, 1.08fr) minmax(340px, .92fr)", self.css)
