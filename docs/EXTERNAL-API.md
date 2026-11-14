@@ -2,6 +2,8 @@
 
 外部 API 供服务器之间调用，使用数据库中长期保存的完整 Bearer Token。当前版本提供新增线索、按手机号新增跟进和批量手机号校验。
 
+生产更新、审计、Token 初始化和回滚边界见 `ops/ROLLOUT-EXTERNAL-API.md`。第三方集成只需阅读本文；运维执行以该上线手册为准。
+
 ## 认证
 
 请求头：
@@ -175,6 +177,20 @@ curl -X POST https://crm.example.com/api/external/v1/follow-ups \
 
 ## 错误
 
+HTTP 状态约定：
+
+| HTTP | 场景 |
+| --- | --- |
+| 200 | 手机号批量校验成功 |
+| 201 | 新增线索或新增跟进成功 |
+| 400 | Token 之外的请求参数、手机号、日期、正文、附件或幂等 Key 不合法 |
+| 401 | Bearer Token 或绑定用户无效 |
+| 404 | 按手机号新增跟进时没有匹配对象 |
+| 409 | 重复联系方式、目标歧义、线索终态、幂等 Key 冲突或并发占用 |
+| 500 | 服务端事务或幂等状态写入失败；响应不包含 Token 或数据库细节 |
+
+稳定业务错误码：
+
 | HTTP | code | 含义 |
 | --- | --- | --- |
 | 401 | `unauthorized` | Token 或绑定用户无效 |
@@ -183,6 +199,7 @@ curl -X POST https://crm.example.com/api/external/v1/follow-ups \
 | 400 | `validation_failed` | 字段、长度或未知字段校验失败 |
 | 409 | `duplicate_contact` | 有效线索或客户已占用该手机号 |
 | 409 | `idempotency_conflict` | 同一幂等身份被不同请求复用 |
+| 409 | `idempotency_in_progress` | 同一幂等身份的首个请求尚未完成 |
 | 404 | `phone_not_found` | 手机号没有对应客户或线索 |
 | 409 | `ambiguous_phone` | 客户或线索目标表存在多条同号记录 |
 | 409 | `lead_closed` | 唯一匹配线索已转化或已失效 |
@@ -191,7 +208,12 @@ curl -X POST https://crm.example.com/api/external/v1/follow-ups \
 
 ## Token 初始化
 
-数据库更新脚本和一次性模板位于 `ops/sql/`：
+生产库应从 `v2_022` 执行合并更新脚本，并由应用启动确认迁移到 `v2_025`：
+
+- `v2_022_to_v2_025.sqlite.sql`
+- `v2_022_to_v2_025.mysql.sql`
+
+分阶段脚本作为审计历史保留在 `ops/sql/`：
 
 - `v2_023_external_lead_api.sqlite.sql`
 - `v2_023_external_lead_api.mysql.sql`
@@ -202,4 +224,4 @@ curl -X POST https://crm.example.com/api/external/v1/follow-ups \
 - `api_token_init.sqlite.template.sql`
 - `api_token_init.mysql.template.sql`
 
-模板必须替换 Token 名称、Token 值、绑定用户名和可选过期时间后再执行。不要把真实 Token 写入仓库、日志、工单或文档。
+模板必须替换 Token 名称、Token 值、绑定用户名和可选过期时间后再执行，且只执行一次。不要把真实 Token 写入仓库、日志、工单或文档。完整执行顺序、preflight/postcheck 和回滚边界见 `ops/ROLLOUT-EXTERNAL-API.md`。

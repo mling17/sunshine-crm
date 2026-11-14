@@ -480,6 +480,16 @@ pending 待处理 → processing 处理中 → done 已完成
 - MySQL 物理 DDL 已符合无外键和标准字段要求。
 - SQLite 的部分历史建表语句仍带有 `REFERENCES` 声明。这些声明是遗留 DDL，后续迁移应逐步清理；新增表和物理设计不得再引入外键。
 
+### 13.4 外部 API 生产更新包
+
+- `ops/sql/v2_022_to_v2_025.*.sql` 是 `v2_022 -> v2_025` 的一次性合并更新入口；分阶段 `v2_023`、`v2_024`、`v2_025` 脚本保留用于审计和回溯。
+- SQLite 合并脚本包含新表的审计维护触发器，并与应用迁移的逻辑列、索引、版本记录和字典种子收敛。
+- MySQL 合并脚本与 `mysql_schema.py` 的定稿列和索引一致，通过 `sqlglot` MySQL 解析测试；真实写链路仍需独立 MySQL 8 环境验证。
+- `ops/sql/preflight_external_rollout.*.sql` 只读汇总客户来源、活跃商机、手机号和同客多来源异常。
+- `ops/sql/postcheck_external_rollout.*.sql` 只读返回 `check_code/status/detail`；任何 `FAIL` 都阻止开放外部流量。
+- `ops/sql/api_token_init.*.template.sql` 仅含占位符，真实 Token 由受控人员一次性初始化。
+- `ops/ROLLOUT-EXTERNAL-API.md` 是发布顺序、备份、验证和恢复边界的操作事实来源。
+
 ## 14. 聚合与查询口径
 
 ### 14.1 待跟进
