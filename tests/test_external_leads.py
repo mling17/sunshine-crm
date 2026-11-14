@@ -11,37 +11,8 @@ from app.security import now_iso
 
 
 class ExternalLeadApiTest(ApiTestCase):
-    def issue_token(
-        self,
-        token: str = "test-token-0001",
-        *,
-        username: str = "chen",
-        expires_at: str | None = None,
-        revoked_at: str | None = None,
-        user_active: bool = True,
-    ) -> int:
-        now = now_iso()
-        with db_conn() as conn:
-            user = conn.execute(
-                "SELECT id FROM users WHERE username = ? AND is_delete = 0",
-                (username,),
-            ).fetchone()
-            conn.execute(
-                "UPDATE users SET is_active = ? WHERE id = ?",
-                (1 if user_active else 0, user["id"]),
-            )
-            cur = conn.execute(
-                """
-                INSERT INTO api_tokens
-                    (name, token, user_id, expires_at, revoked_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                ("tests", token, user["id"], expires_at, revoked_at, now, now),
-            )
-            return int(cur.lastrowid or 0)
-
     def test_phone_only_lead_uses_bearer_token_and_records_creator(self):
-        token_id = self.issue_token()
+        token_id = self.issue_external_token("test-token-0001")
 
         resp = self.client.post(
             "/api/external/v1/leads",
@@ -80,10 +51,10 @@ class ExternalLeadApiTest(ApiTestCase):
         self.assertEqual(body["created_by"], row["user_id"])
 
     def test_external_auth_failures_are_indistinguishable_and_do_not_write(self):
-        self.issue_token("expired-token", expires_at="2000-01-01T00:00:00Z")
-        self.issue_token("revoked-token", revoked_at="2026-01-01T00:00:00Z")
-        self.issue_token("deleted-token")
-        self.issue_token("inactive-token", user_active=False)
+        self.issue_external_token("expired-token", expires_at="2000-01-01T00:00:00Z")
+        self.issue_external_token("revoked-token", revoked_at="2026-01-01T00:00:00Z")
+        self.issue_external_token("deleted-token")
+        self.issue_external_token("inactive-token", user_active=False)
         with db_conn() as conn:
             conn.execute(
                 "UPDATE api_tokens SET is_delete = 1 WHERE token = 'deleted-token'"
@@ -114,7 +85,7 @@ class ExternalLeadApiTest(ApiTestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0], 0)
 
     def test_optional_business_fields_are_persisted_and_tags_are_normalized(self):
-        self.issue_token()
+        self.issue_external_token("test-token-0001")
         resp = self.client.post(
             "/api/external/v1/leads",
             headers={"Authorization": "Bearer test-token-0001"},
@@ -149,7 +120,7 @@ class ExternalLeadApiTest(ApiTestCase):
         self.assertEqual(body["source"], "api")
 
     def test_invalid_phone_and_server_managed_or_unknown_fields_are_rejected(self):
-        self.issue_token()
+        self.issue_external_token("test-token-0001")
         headers = {"Authorization": "Bearer test-token-0001"}
 
         invalid_phone = self.client.post(
@@ -180,7 +151,7 @@ class ExternalLeadApiTest(ApiTestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0], 0)
 
     def test_active_lead_and_customer_conflicts_return_summary_but_soft_deleted_do_not(self):
-        self.issue_token()
+        self.issue_external_token("test-token-0001")
         headers = {"Authorization": "Bearer test-token-0001"}
 
         first = self.client.post(

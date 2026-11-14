@@ -24,6 +24,7 @@ from app.followup_service import (
     follow_up_to_item,
     photos_for,
     prepare_attachments,
+    validate_object_type,
 )
 from app.lead_service import user_id_for_username
 from app.models import (
@@ -81,16 +82,6 @@ def _clean_stage(raw: str | None) -> str | None:
     return value
 
 
-# ---------------- 跟进对象类型校验 ----------------
-
-
-def _validate_object_type(object_type: str) -> None:
-    """校验对象类型是否合法"""
-    valid_types = ["lead", "customer", "deal", "order", "aftersale"]
-    if object_type not in valid_types:
-        raise HTTPException(status_code=400, detail=f"非法对象类型 {object_type!r}")
-
-
 # ---------------- 路由 ----------------
 
 
@@ -99,7 +90,7 @@ def list_follow_phrases(
     object_type: str = Query(..., description="lead/customer/deal/order/aftersale"),
 ) -> list[FollowPhraseOut]:
     """返回某个业务对象自己的常用短语集。"""
-    _validate_object_type(object_type)
+    validate_object_type(object_type)
     with db_conn() as conn:
         rows = conn.execute(
             """
@@ -222,7 +213,7 @@ async def create_follow_up(
             object_type, object_id = "customer", customer_id
         else:
             raise HTTPException(status_code=400, detail="object_type 必填")
-    _validate_object_type(object_type)
+    validate_object_type(object_type)
 
     object_id_value = _clean_optional_int(object_id, "object_id")
     if object_id_value is None:

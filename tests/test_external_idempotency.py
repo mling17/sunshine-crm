@@ -15,23 +15,8 @@ from app.security import now_iso
 
 
 class ExternalIdempotencyTest(ApiTestCase):
-    def issue_token(self, token: str = "idempotency-token") -> None:
-        now = now_iso()
-        with db_conn() as conn:
-            user_id = conn.execute(
-                "SELECT id FROM users WHERE username = 'chen' AND is_delete = 0"
-            ).fetchone()["id"]
-            conn.execute(
-                """
-                INSERT INTO api_tokens
-                    (name, token, user_id, expires_at, revoked_at, created_at, updated_at)
-                VALUES ('idempotency-tests', ?, ?, NULL, NULL, ?, ?)
-                """,
-                (token, user_id, now, now),
-            )
-
     def test_identical_lead_retry_replays_original_response_without_duplicate(self):
-        self.issue_token()
+        self.issue_external_token("idempotency-token")
         headers = {
             "Authorization": "Bearer idempotency-token",
             "Idempotency-Key": "lead-create-001",
@@ -70,7 +55,7 @@ class ExternalIdempotencyTest(ApiTestCase):
         )
 
     def test_reusing_key_with_different_lead_request_returns_conflict(self):
-        self.issue_token()
+        self.issue_external_token("idempotency-token")
         headers = {
             "Authorization": "Bearer idempotency-token",
             "Idempotency-Key": "lead-create-conflict",
@@ -95,8 +80,8 @@ class ExternalIdempotencyTest(ApiTestCase):
         self.assertEqual(lead_count, 1)
 
     def test_key_scope_is_isolated_by_token_and_endpoint(self):
-        self.issue_token("idempotency-token-a")
-        self.issue_token("idempotency-token-b")
+        self.issue_external_token("idempotency-token-a")
+        self.issue_external_token("idempotency-token-b")
         shared_key = "shared-scope-key"
 
         token_a = self.client.post(
@@ -133,7 +118,7 @@ class ExternalIdempotencyTest(ApiTestCase):
         )
 
     def test_identical_follow_up_retry_replays_without_duplicate_rows_or_files(self):
-        self.issue_token()
+        self.issue_external_token("idempotency-token")
         customer_id = insert_customer(name="幂等客户", phone="13900139000")
         headers = {
             "Authorization": "Bearer idempotency-token",
@@ -193,7 +178,7 @@ class ExternalIdempotencyTest(ApiTestCase):
         self.assertEqual(len(files_after - files_before), 1)
 
     def test_reusing_follow_up_key_with_different_content_returns_conflict(self):
-        self.issue_token()
+        self.issue_external_token("idempotency-token")
         customer_id = insert_customer(name="冲突客户", phone="13700137000")
         headers = {
             "Authorization": "Bearer idempotency-token",
@@ -222,7 +207,7 @@ class ExternalIdempotencyTest(ApiTestCase):
         self.assertEqual(count, 1)
 
     def test_expired_record_is_cleaned_and_key_can_be_reused(self):
-        self.issue_token()
+        self.issue_external_token("idempotency-token")
         headers = {
             "Authorization": "Bearer idempotency-token",
             "Idempotency-Key": "expired-key",

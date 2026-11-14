@@ -12,7 +12,7 @@ from fastapi import HTTPException, UploadFile
 from app import labels
 from app.errors import ApiError
 from app.models import AttachmentOut, FollowUpItemOut
-from app.phone import canonicalize_mainland_mobile
+from app.phone import canonicalize_mainland_mobile, comparison_phone_key
 from app.security import now_iso, now_local_iso
 from app.storage import (
     MAX_FILE_BYTES,
@@ -93,13 +93,6 @@ async def prepare_attachments(
     return prepared
 
 
-def _canonical_phone(raw: object) -> str:
-    try:
-        return canonicalize_mainland_mobile(raw)
-    except ValueError:
-        return ""
-
-
 def resolve_followup_target_by_phone(conn, phone: str) -> tuple[str, int]:
     """客户优先，其次线索；返回唯一的有效目标。"""
     try:
@@ -117,7 +110,9 @@ def resolve_followup_target_by_phone(conn, phone: str) -> tuple[str, int]:
             " WHERE is_delete = 0 AND phone IS NOT NULL"
         ).fetchall()
         matches = [
-            row for row in rows if _canonical_phone(row["phone"]) == canonical
+            row
+            for row in rows
+            if comparison_phone_key(row["phone"]) == canonical
         ]
         if len(matches) > 1:
             raise ApiError(
@@ -143,7 +138,7 @@ def resolve_followup_target_by_phone(conn, phone: str) -> tuple[str, int]:
     )
 
 
-def _validate_object_type(object_type: str) -> None:
+def validate_object_type(object_type: str) -> None:
     if object_type not in ("lead", "customer", "deal", "order", "aftersale"):
         raise HTTPException(status_code=400, detail=f"非法对象类型 {object_type!r}")
 
@@ -185,7 +180,7 @@ def _validate_target(
     customer_id_hint: int | None,
     deal_id_hint: int | None,
 ) -> None:
-    _validate_object_type(object_type)
+    validate_object_type(object_type)
 
     if customer_id_hint and deal_id_hint:
         deal = conn.execute(

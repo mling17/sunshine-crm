@@ -97,16 +97,15 @@ async def create_external_follow_up(
             replay = claim(conn, identity)
             if replay is not None:
                 return replay
-            response: list[JSONResponse] = []
+            completed_response: JSONResponse | None = None
 
             def finish(item: FollowUpItemOut) -> None:
-                response.append(
-                    complete(
-                        conn,
-                        identity,
-                        status_code=201,
-                        response_payload=item.model_dump(mode="json"),
-                    )
+                nonlocal completed_response
+                completed_response = complete(
+                    conn,
+                    identity,
+                    status_code=201,
+                    response_payload=item.model_dump(mode="json"),
                 )
 
             object_type, object_id = resolve_followup_target_by_phone(
@@ -121,9 +120,17 @@ async def create_external_follow_up(
                 next_date=next_date_value,
                 attachments=prepared,
                 created_by=token.user_id,
+                # 在共享写入函数内完成幂等响应：若最终状态写入失败，
+                # 仍由同一异常路径回滚数据库并删除本次已写文件。
                 completion=finish,
             )
-            return response[0]
+            if completed_response is None:
+                raise ApiError(
+                    500,
+                    "idempotency_state_error",
+                    "Idempotency-Key 状态写入失败",
+                )
+            return completed_response
     except IdempotencyRace:
         with db_conn() as conn:
             return replay_after_race(conn, identity)

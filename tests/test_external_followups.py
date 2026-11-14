@@ -18,20 +18,6 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"external-followup"
 
 
 class ExternalFollowUpApiTest(ApiTestCase):
-    def issue_token(self, token: str = "followup-token") -> tuple[int, int]:
-        now = now_iso()
-        with db_conn() as conn:
-            user = conn.execute(
-                "SELECT id FROM users WHERE username = 'chen' AND is_delete = 0"
-            ).fetchone()
-            cur = conn.execute(
-                "INSERT INTO api_tokens"
-                " (name, token, user_id, created_at, updated_at)"
-                " VALUES ('followup-tests', ?, ?, ?, ?)",
-                (token, user["id"], now, now),
-            )
-            return int(cur.lastrowid or 0), int(user["id"])
-
     def auth(self, token: str = "followup-token") -> dict[str, str]:
         return {"Authorization": f"Bearer {token}"}
 
@@ -59,7 +45,8 @@ class ExternalFollowUpApiTest(ApiTestCase):
         return {path for path in root.rglob("*") if path.is_file()}
 
     def test_customer_takes_priority_and_multiple_attachments_are_atomic(self):
-        _, user_id = self.issue_token()
+        token = self.issue_external_token("followup-token")
+        user_id = token["user_id"]
         customer_id = insert_customer(
             name="客户优先",
             phone="13800138000",
@@ -112,7 +99,7 @@ class ExternalFollowUpApiTest(ApiTestCase):
         )
 
     def test_lead_fallback_creates_follow_up_and_moves_new_lead_to_following(self):
-        self.issue_token()
+        self.issue_external_token("followup-token")
         lead_id = self.insert_lead(phone="13900139000")
 
         resp = self.client.post(
@@ -137,7 +124,7 @@ class ExternalFollowUpApiTest(ApiTestCase):
         self.assertIsNotNone(follow["created_by"])
 
     def test_phone_matching_errors_are_stable(self):
-        self.issue_token()
+        self.issue_external_token("followup-token")
 
         missing = self.client.post(
             "/api/external/v1/follow-ups",
@@ -182,7 +169,7 @@ class ExternalFollowUpApiTest(ApiTestCase):
         self.assertEqual(closed.json()["code"], "lead_closed")
 
     def test_field_and_attachment_validation_happens_without_writes(self):
-        self.issue_token()
+        self.issue_external_token("followup-token")
         lead_id = self.insert_lead(phone="13800138000")
         before_files = self.upload_paths()
 
@@ -239,7 +226,7 @@ class ExternalFollowUpApiTest(ApiTestCase):
         self.assertEqual(self.upload_paths(), before_files)
 
     def test_database_failure_removes_files_written_by_request(self):
-        self.issue_token()
+        self.issue_external_token("followup-token")
         self.insert_lead(phone="13800138000")
         before_files = self.upload_paths()
         with db_conn() as conn:
@@ -279,7 +266,8 @@ class ExternalFollowUpApiTest(ApiTestCase):
             conn.execute(f"DROP TRIGGER IF EXISTS {name}")
 
     def test_token_and_cookie_authenticated_creation_record_creator(self):
-        _, token_user_id = self.issue_token()
+        token = self.issue_external_token("followup-token")
+        token_user_id = token["user_id"]
         customer_id = insert_customer(name="页面客户", phone="13800138000")
 
         external = self.client.post(

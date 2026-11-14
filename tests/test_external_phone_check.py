@@ -14,21 +14,6 @@ class ExternalPhoneCheckTest(ApiTestCase):
     ENDPOINT = "/api/external/v1/leads/phone-check"
     HEADERS = {"Authorization": "Bearer phone-check-token"}
 
-    def issue_token(self) -> None:
-        now = now_iso()
-        with db_conn() as conn:
-            user_id = conn.execute(
-                "SELECT id FROM users WHERE username = 'chen'"
-            ).fetchone()["id"]
-            conn.execute(
-                """
-                INSERT INTO api_tokens
-                    (name, token, user_id, expires_at, revoked_at, created_at, updated_at)
-                VALUES ('phone-check-tests', 'phone-check-token', ?, NULL, NULL, ?, ?)
-                """,
-                (user_id, now, now),
-            )
-
     def insert_lead(
         self,
         phone: str,
@@ -65,7 +50,7 @@ class ExternalPhoneCheckTest(ApiTestCase):
                 self.assertEqual(resp.json(), {"detail": "认证失败", "code": "unauthorized"})
 
     def test_accepts_one_and_five_hundred_values(self):
-        self.issue_token()
+        self.issue_external_token("phone-check-token")
         for phones in (
             ["13800138000"],
             [f"138{index:08d}" for index in range(500)],
@@ -80,7 +65,7 @@ class ExternalPhoneCheckTest(ApiTestCase):
                 self.assertEqual(len(resp.json()["items"]), len(phones))
 
     def test_rejects_empty_and_over_limit_batches(self):
-        self.issue_token()
+        self.issue_external_token("phone-check-token")
         for phones in (
             [],
             [f"138{index:08d}" for index in range(501)],
@@ -95,7 +80,7 @@ class ExternalPhoneCheckTest(ApiTestCase):
                 self.assertEqual(resp.json()["code"], "validation_failed")
 
     def test_malformed_batch_fails_all_and_reports_zero_based_positions(self):
-        self.issue_token()
+        self.issue_external_token("phone-check-token")
         self.insert_lead("13800138000")
         resp = self.client.post(
             self.ENDPOINT,
@@ -114,8 +99,27 @@ class ExternalPhoneCheckTest(ApiTestCase):
         self.assertEqual(resp.json()["code"], "invalid_phone")
         self.assertEqual(resp.json()["invalid_positions"], [1, 3])
 
+    def test_non_string_batch_entries_use_the_same_invalid_phone_contract(self):
+        self.issue_external_token("phone-check-token")
+        resp = self.client.post(
+            self.ENDPOINT,
+            headers=self.HEADERS,
+            json={
+                "phones": [
+                    None,
+                    "13800138000",
+                    12345,
+                    {"phone": "13700137000"},
+                ]
+            },
+        )
+
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["code"], "invalid_phone")
+        self.assertEqual(resp.json()["invalid_positions"], [0, 2, 3])
+
     def test_normalizes_and_deduplicates_in_first_occurrence_order(self):
-        self.issue_token()
+        self.issue_external_token("phone-check-token")
         self.insert_lead("13800138000")
         self.insert_lead("13900139000")
         resp = self.client.post(
@@ -145,7 +149,7 @@ class ExternalPhoneCheckTest(ApiTestCase):
         )
 
     def test_checks_active_non_deleted_leads_in_any_lifecycle_state(self):
-        self.issue_token()
+        self.issue_external_token("phone-check-token")
         phones = {
             "13800138001": ("converted", 0),
             "13800138002": ("invalid", 0),
@@ -173,7 +177,7 @@ class ExternalPhoneCheckTest(ApiTestCase):
         )
 
     def test_customer_only_match_does_not_leak_or_create_false_positive(self):
-        self.issue_token()
+        self.issue_external_token("phone-check-token")
         insert_customer(name="历史客户", phone="13800138000")
         resp = self.client.post(
             self.ENDPOINT,

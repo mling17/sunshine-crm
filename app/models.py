@@ -822,7 +822,9 @@ class ExternalPhoneCheckIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    phones: list[str] = Field(min_length=1, max_length=500)
+    #: 保留原始 JSON 值，确保非字符串项也进入统一规范化和
+    #: invalid_positions 错误契约，而不是提前变成通用校验错误。
+    phones: list[object] = Field(min_length=1, max_length=500)
 
 
 class ExternalPhoneCheckItem(BaseModel):

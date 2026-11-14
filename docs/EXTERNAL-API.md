@@ -148,7 +148,7 @@ curl -X POST https://crm.example.com/api/external/v1/follow-ups \
 规则：
 
 - `phones` 必须包含 1 到 500 个值。
-- 每个值按新增线索的手机号规则规范化。
+- 每个值按新增线索的手机号规则规范化；`null`、数字、对象等非字符串项也按非法手机号处理。
 - 规范化后的重复值会删除，保留第一次出现的顺序。
 - 只查询未删除线索；已转化和已失效但未删除的线索仍算存在。
 - 不返回客户信息、线索状态、名称、ID 或其他敏感字段。
@@ -165,7 +165,7 @@ curl -X POST https://crm.example.com/api/external/v1/follow-ups \
 }
 ```
 
-任一值非法时整批返回 400，不查询或返回部分结果。`invalid_positions` 使用从 0 开始的输入数组下标：
+任一值非法（包括非字符串项）时整批返回 400，不查询或返回部分结果。`invalid_positions` 使用从 0 开始的输入数组下标：
 
 ```json
 {

@@ -20,3 +20,11 @@ def canonicalize_mainland_mobile(raw: object) -> str:
     if not _MAINLAND_MOBILE.fullmatch(value):
         raise ValueError("手机号格式不正确")
     return value
+
+
+def comparison_phone_key(raw: object) -> str:
+    """历史数据比较键：合法号码取规范值，非法历史值只做分隔符清理。"""
+    try:
+        return canonicalize_mainland_mobile(raw)
+    except ValueError:
+        return _SEPARATORS.sub("", str(raw or "").strip())

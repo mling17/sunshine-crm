@@ -237,6 +237,38 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         return resp.json()
 
+    def issue_external_token(
+        self,
+        token: str = "test-external-token",
+        *,
+        username: str = ADMIN["username"],
+        expires_at: str | None = None,
+        revoked_at: str | None = None,
+        user_active: bool = True,
+    ) -> IdRow:
+        now = now_iso()
+        with db_conn() as conn:
+            user = conn.execute(
+                "SELECT id FROM users WHERE username = ? AND is_delete = 0",
+                (username,),
+            ).fetchone()
+            self.assertIsNotNone(user, f"missing token-bound user {username}")
+            conn.execute(
+                "UPDATE users SET is_active = ? WHERE id = ?",
+                (1 if user_active else 0, user["id"]),
+            )
+            cur = conn.execute(
+                """
+                INSERT INTO api_tokens
+                    (name, token, user_id, expires_at, revoked_at,
+                     created_at, updated_at)
+                VALUES ('tests', ?, ?, ?, ?, ?, ?)
+                """,
+                (token, user["id"], expires_at, revoked_at, now, now),
+            )
+            token_id = int(cur.lastrowid or 0)
+            return IdRow(token_id, id=token_id, user_id=int(user["id"]))
+
     def dashboard(self) -> dict:
         resp = self.client.get("/api/crm/dashboard")
         self.assertEqual(resp.status_code, 200, resp.text)

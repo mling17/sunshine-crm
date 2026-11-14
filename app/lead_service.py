@@ -7,25 +7,14 @@ from collections.abc import Iterable
 from app import labels
 from app.errors import ApiError
 from app.models import LeadOut, MAX_TAGS
-from app.phone import canonicalize_mainland_mobile
+from app.phone import comparison_phone_key
 from app.security import now_iso
 from app.timeline import add_entry
 
 
-def _legacy_phone(raw: object) -> str:
-    return "".join(str(raw or "").split()).replace("-", "").replace("(", "").replace(")", "")
-
-
-def _comparison_phone(raw: object) -> str:
-    try:
-        return canonicalize_mainland_mobile(raw)
-    except ValueError:
-        return _legacy_phone(raw)
-
-
 def find_active_contact_by_phone(conn, phone: str) -> dict | None:
     """按规范化手机号查有效线索/客户，返回最小重复摘要。"""
-    phone_key = _comparison_phone(phone)
+    phone_key = comparison_phone_key(phone)
     rows = conn.execute(
         "SELECT 'lead' AS object_type, id, name, phone, status"
         " FROM leads WHERE is_delete = 0"
@@ -34,7 +23,7 @@ def find_active_contact_by_phone(conn, phone: str) -> dict | None:
         " FROM customers WHERE is_delete = 0"
     ).fetchall()
     for row in rows:
-        if phone_key and phone_key == _comparison_phone(row["phone"]):
+        if phone_key and phone_key == comparison_phone_key(row["phone"]):
             return {
                 "object_type": row["object_type"],
                 "object_id": int(row["id"]),
@@ -57,7 +46,7 @@ def active_lead_phone_keys(conn, candidates: Iterable[str]) -> set[str]:
     return {
         phone_key
         for row in rows
-        if (phone_key := _comparison_phone(row["phone"])) in wanted
+        if (phone_key := comparison_phone_key(row["phone"])) in wanted
     }
 
 
