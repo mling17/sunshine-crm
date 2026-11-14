@@ -786,6 +786,7 @@ class LeadOut(BaseModel):
     converted_customer_id: int | None = None
     converted_deal_id: int | None = None
     owner: str | None = None
+    created_by: int | None = None
     tags: list[str] = Field(default_factory=list)
     duplicate_hint: dict | None = None
     created_at: str
@@ -795,6 +796,24 @@ class LeadOut(BaseModel):
     next_date: str | None = None
     days_overdue: int = 0
     intent_level_label: str | None = None
+
+
+class ExternalLeadIn(BaseModel):
+    """第三方新增线索；来源、状态和审计字段由服务端控制。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str = Field(min_length=1, max_length=32)
+    name: Optional[CleanName] = Field(default=None, max_length=64)
+    wechat: OptionalText = Field(default=None, max_length=64)
+    lead_type: CUSTOMER_TYPE | None = None
+    company_name: OptionalText = Field(default=None, max_length=100)
+    source_other: OptionalText = Field(default=None, max_length=100)
+    location: OptionalText = Field(default=None, max_length=200)
+    note: OptionalText = Field(default=None, max_length=500)
+    intent_level: OptionalText = Field(default=None, max_length=32)
+    owner: OptionalText = Field(default=None, max_length=32)
+    tags: list[TagName] = Field(default_factory=list, max_length=MAX_TAGS)
 
 
 class LeadDetailOut(LeadOut):

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `username` VARCHAR(64) NOT NULL,
   `password_hash` TEXT NOT NULL,
+  `is_active` TINYINT NOT NULL DEFAULT 1,
   `created_at` VARCHAR(32) NOT NULL,
   `display_name` VARCHAR(64),
   `${STANDARD}`,
@@ -45,6 +46,22 @@ CREATE TABLE IF NOT EXISTS `sessions` (
   `expires_at` VARCHAR(32) NOT NULL,
   `${STANDARD}`,
   PRIMARY KEY (`token`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+""",
+    "api_tokens": """
+CREATE TABLE IF NOT EXISTS `api_tokens` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(128) NOT NULL,
+  `token` VARCHAR(512) NOT NULL,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `expires_at` VARCHAR(32),
+  `revoked_at` VARCHAR(32),
+  `created_at` VARCHAR(32) NOT NULL,
+  `updated_at` VARCHAR(32) NOT NULL,
+  `${STANDARD}`,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_api_tokens_token` (`token`),
+  KEY `idx_api_tokens_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 """,
     "customers": """
@@ -202,6 +219,7 @@ CREATE TABLE IF NOT EXISTS `leads` (
   `converted_customer_id` BIGINT UNSIGNED,
   `converted_deal_id` BIGINT UNSIGNED,
   `owner` VARCHAR(64),
+  `created_by` BIGINT UNSIGNED,
   `created_at` VARCHAR(32) NOT NULL,
   `updated_at` VARCHAR(32) NOT NULL,
   `${STANDARD}`,
@@ -724,6 +742,18 @@ def _ensure_order_name(cursor) -> None:
     )
 
 
+def _ensure_external_api_columns(cursor) -> None:
+    """补齐既有 MySQL 库的用户启用状态和线索创建人。"""
+    if "is_active" not in _column_names(cursor, "users"):
+        cursor.execute(
+            "ALTER TABLE `users` ADD COLUMN `is_active` TINYINT NOT NULL DEFAULT 1"
+        )
+    if "created_by" not in _column_names(cursor, "leads"):
+        cursor.execute(
+            "ALTER TABLE `leads` ADD COLUMN `created_by` BIGINT UNSIGNED"
+        )
+
+
 def ensure_mysql_schema() -> None:
     """建最终表结构和项目约定的审计字段触发器（幂等）。"""
     conn = _raw_connection()
@@ -733,6 +763,7 @@ def ensure_mysql_schema() -> None:
                 cursor.execute(statement)
             _drop_redundant_customer_contacts(cursor)
             _ensure_order_name(cursor)
+            _ensure_external_api_columns(cursor)
             for table in TABLE_DDL:
                 for statement in _standard_triggers(table, _column_names(cursor, table)):
                     cursor.execute(statement)
@@ -870,5 +901,5 @@ def mysql_runtime_seed(conn) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note)"
         " VALUES (?, ?, ?)",
-        (MIGRATION_VERSION, now, "MySQL schema baseline v2_022"),
+        (MIGRATION_VERSION, now, f"MySQL schema baseline {MIGRATION_VERSION}"),
     )

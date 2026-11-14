@@ -22,6 +22,7 @@ CRM V2 增量迁移 M1（幂等 / 可中断重跑 / 只增不毁）。
 9. v2_020 新增 orders.order_name，并从来源报价单标题回填历史订单名称。
 10. v2_021 将已有客户确认商机的其他报价单统一转为历史。
 11. v2_022 取消“已发货”订单状态，将历史 shipped 订单收敛为 completed。
+12. v2_023 增加外部 API Token、用户启用状态和线索创建人。
 """
 
 from __future__ import annotations
@@ -36,8 +37,8 @@ from pathlib import Path
 
 from app.db_standard import ensure_active_lead_phone_unique, ensure_standard_columns
 
-MIGRATION_VERSION = "v2_022"
-SCHEMA_USER_VERSION = 21
+MIGRATION_VERSION = "v2_023"
+SCHEMA_USER_VERSION = 22
 
 
 def default_db_path() -> Path:
@@ -1231,6 +1232,39 @@ STATEMENTS: list[tuple[str, object, str]] = [
      "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
      "VALUES ('v2_022', datetime('now'), '取消已发货状态，确认发货后订单直接完成')"),
     ("user_version v2_022", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
+    # ---------- 39. v2_023：外部 API Token 与创建人审计 ----------
+    ("users.is_active", _col_guard("users", "is_active"),
+     "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"),
+    ("leads.created_by", _col_guard("leads", "created_by"),
+     "ALTER TABLE leads ADD COLUMN created_by INTEGER"),
+    ("api_tokens", None, """
+     CREATE TABLE IF NOT EXISTS api_tokens (
+       id          INTEGER PRIMARY KEY AUTOINCREMENT,
+       name        TEXT NOT NULL,
+       token       TEXT NOT NULL UNIQUE,
+       user_id     INTEGER NOT NULL,
+       expires_at  TEXT,
+       revoked_at  TEXT,
+       created_at  TEXT NOT NULL,
+       updated_at  TEXT NOT NULL,
+       create_time TEXT NOT NULL DEFAULT '',
+       update_time TEXT NOT NULL DEFAULT '',
+       is_delete   INTEGER NOT NULL DEFAULT 0
+     )
+     """),
+    ("idx_api_tokens_user", None,
+     "CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id)"),
+    ("standardize_audit_columns", None, ""),
+    ("dict_customer_source.api", _once("v2_023", "dict_items"),
+     """
+     INSERT OR IGNORE INTO dict_items
+       (dict_code, key, label, sort, enabled, created_at, updated_at)
+     VALUES ('customer_source', 'api', 'API', 7, 1, datetime('now'), datetime('now'))
+     """),
+    ("schema_migrations v2_023", None,
+     "INSERT OR IGNORE INTO schema_migrations (version, applied_at, note) "
+     "VALUES ('v2_023', datetime('now'), '外部 API Token、用户启用状态与线索创建人')"),
+    ("user_version v2_023", None, f"PRAGMA user_version = {SCHEMA_USER_VERSION}"),
 ]
 
 
@@ -1348,7 +1382,7 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
         "leads", "lead_tags", "carriers", "orders",
         "order_status_log", "aftersales", "aftersale_status_log", "schema_migrations",
         "products", "deal_items", "order_items", "deal_quotes", "quote_items",
-        "follow_up_phrases",
+        "follow_up_phrases", "api_tokens",
     )
     for table in required_tables:
         assert table_exists(conn, table), f"缺表 {table}"
@@ -1369,6 +1403,8 @@ def run_migrations(db_path: Path | None = None, *, backup: bool = True, verbose:
             "carrier_contact_id", "carrier_contact_name", "carrier_contact_phone",
         ),
         "follow_ups": ("object_type", "object_id", "method", "quote_id"),
+        "users": ("is_active",),
+        "leads": ("created_by",),
         "attachments": ("object_type", "object_id", "follow_up_id"),
         "quote_items": (
             "recognized_total", "a1_value", "amount_cell", "form_preview_storage_key",

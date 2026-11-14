@@ -592,7 +592,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
         "SELECT id, name, phone, wechat, lead_type, company_name, source, "
         "source_other, location, note, intent_level, status, invalid_reason, "
         "invalid_reason_other, converted_customer_id, converted_deal_id, owner, "
-        "created_at, updated_at "
+        "created_by, created_at, updated_at "
         "FROM leads WHERE id = ? AND is_delete = 0",
         (lead_id,),
     ).fetchone()

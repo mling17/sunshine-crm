@@ -60,6 +60,7 @@ class MySQLSchemaDefinitionTest(unittest.TestCase):
         expected = {
             "users",
             "sessions",
+            "api_tokens",
             "customers",
             "deals",
             "follow_ups",
@@ -73,6 +74,8 @@ class MySQLSchemaDefinitionTest(unittest.TestCase):
         }
         self.assertTrue(expected <= set(TABLE_DDL))
         self.assertNotIn("customer_contacts", TABLE_DDL)
+        self.assertIn("`is_active`", TABLE_DDL["users"])
+        self.assertIn("`created_by`", TABLE_DDL["leads"])
 
     def test_every_table_has_standard_columns_and_no_foreign_keys(self):
         for statement in table_ddl():

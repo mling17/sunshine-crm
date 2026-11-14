@@ -45,9 +45,11 @@ def reset_data() -> None:
             "order_items", "attachments", "follow_ups", "quote_items", "deal_quotes",
             "carrier_contacts", "carriers",
             "deal_items", "deals", "customer_tags",
-            "lead_tags", "leads", "customers", "tags", "sessions", "import_log", "products",
+            "lead_tags", "leads", "customers", "tags", "api_tokens", "sessions",
+            "import_log", "products",
         ):
             conn.execute(f"DELETE FROM {table}")
+        conn.execute("UPDATE users SET is_active = 1, is_delete = 0")
         # Product master is seeded reference data; recreate it after the test wipe.
         from app.product_catalog import seed_product_catalog
 

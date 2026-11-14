@@ -16,6 +16,7 @@ ENSURE_SQL: list[str] = [
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       username      TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,            -- PBKDF2：$pbkdf2$<iters>$<salt_hex>$<hash_hex>
+      is_active     INTEGER NOT NULL DEFAULT 1,
       created_at    TEXT NOT NULL
     )
     """,
@@ -25,6 +26,21 @@ ENSURE_SQL: list[str] = [
       username   TEXT NOT NULL,
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL                -- created_at + 12h（固定，不滑动 → 每天重登）
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL,
+      token       TEXT NOT NULL UNIQUE,
+      user_id     INTEGER NOT NULL,
+      expires_at  TEXT,
+      revoked_at  TEXT,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      create_time TEXT NOT NULL DEFAULT '',
+      update_time TEXT NOT NULL DEFAULT '',
+      is_delete   INTEGER NOT NULL DEFAULT 0
     )
     """,
     # ---------------- 客户 ----------------

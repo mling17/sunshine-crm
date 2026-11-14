@@ -1,10 +1,10 @@
 # 02 · 软件架构文档
 
-> 最后更新：2026-11-14（TASK-028 客户来源与手机号不变量）
+> 最后更新：2026-11-14（TASK-029 外部 Bearer Token 与新增线索）
 >
 > 文档状态：✅ 已建立，后续随结构、依赖、接口和数据模型变化增量维护
 >
-> 架构基线：`main@d2324a1`，迁移版本 `v2_022`
+> 架构基线：`main@d2324a1`，迁移版本 `v2_023`
 
 ## 1. 架构目标
 
@@ -154,6 +154,7 @@ HTTP 边界
 | 模块 | 主要文件 | 责任 | 不承担 |
 | --- | --- | --- | --- |
 | 认证 | `routers/auth.py`、`security.py` | 登录、会话、改密码、显示名 | 多角色权限 |
+| 外部 API | `routers/external_leads.py`、`external_auth.py` | Bearer Token 鉴权、外部新增线索 | Cookie 回退、Token 管理界面 |
 | 线索 | `routers/leads.py`、`lead_tags.py` | 线索 CRUD、状态、转化检查、标签 | 客户 360 |
 | 导入 | `routers/csvimport.py` | 模板、字段映射、预览、整批导入线索 | Excel 直接导入、客户导入 |
 | 客户 | `routers/customers.py`、`addresses.py` | 客户、联系人、地址簿、360 查询 | 脱离线索的常规新建 |
@@ -170,9 +171,10 @@ HTTP 边界
 
 ## 7. API 约定
 
-- 统一前缀：`/api/crm`。
+- 页面 API 统一前缀：`/api/crm`。
+- 外部 API 统一前缀：`/api/external/v1`。
 - 反向代理地址：`/crm/api/crm/*`。
-- 鉴权：Cookie `crm_sid`；除登录和健康检查外均要求有效会话。
+- 鉴权：页面 API 使用 Cookie `crm_sid`；外部 API 只使用 `Authorization: Bearer <token>`，两种凭据不能互相替代。
 - 响应：JSON；写接口使用明确的 HTTP 状态码和业务错误码。
 - 分页：列表接口按业务需要返回 `items`、`total`、`page`、`size` 或直接数组。
 - 日期：业务日期使用本地日期 `YYYY-MM-DD`；审计时间使用 ISO 时间。
@@ -198,11 +200,11 @@ HTTP 边界
 
 ### 8.1 表清单
 
-MySQL 基线共 28 张表，按业务域分组如下：
+MySQL 基线共 29 张表，按业务域分组如下：
 
 | 域 | 表 |
 | --- | --- |
-| 身份 | `users`、`sessions` |
+| 身份 | `users`、`sessions`、`api_tokens` |
 | 线索 | `leads`、`lead_tags` |
 | 客户 | `customers`、`customer_addresses` |
 | 产品 | `products` |
@@ -240,6 +242,8 @@ lead ──转换──▶ customer ──1:N──▶ deal ──1:N──▶ q
 - `customer_addresses` 关联客户。
 - 公司客户的 `customers.name` 保存公司名，`customers.company_name` 保存主联系人姓名；联系电话和微信保存在同一客户主档。
 - `carrier_contacts` 关联物流公司。
+- `api_tokens.user_id` 关联绑定用户；Token 校验要求用户未停用、未删除。
+- `leads.created_by` 保存页面或外部创建时的责任用户 ID；历史行为空。
 - `deal_quotes` 和 `quote_items` 保存报价时点的产品、价格和 Excel 版本。
 - `orders.order_name` 保存从客户已确认报价单继承的订单名称快照，后续可在订单编辑中修改。
 - `order_items` 保存生成订单时的产品快照。
@@ -372,6 +376,14 @@ pending 待处理 → processing 处理中 → done 已完成
 3. 失败时整体回滚，不允许出现状态变了但日志或金额没写。
 4. 订单完成后才允许建立售后。
 
+### 10.5 外部新增线索
+
+1. `external_auth.require_external_token()` 只解析 Bearer 请求头，并校验 Token 未删除、未撤销、未过期且绑定用户启用。
+2. 外部请求只允许业务字段；来源固定 `api`、状态固定 `new`、默认类型 `other`，Token 绑定用户写入 `created_by`。
+3. 手机号使用 `app/phone.py` 规范为大陆手机号；有效线索或客户冲突返回 409 摘要。
+4. `app/lead_service.py` 统一完成重复检查、线索插入、标签关联和创建履历，页面和外部接口共用同一写入路径。
+5. 外部路由返回 201；失败请求不写线索或标签。
+
 ## 11. 数据字典机制
 
 - 注册表定义：`app/dicts.py::DICT_REGISTRY`。
@@ -418,7 +430,7 @@ pending 待处理 → processing 处理中 → done 已完成
 
 ### 13.2 迁移
 
-- 当前迁移版本：`v2_022`。
+- 当前迁移版本：`v2_023`。
 - 启动时幂等执行基础建表、增量迁移、标准审计列补齐和种子数据。
 - 每条迁移有版本或结构 guard，可重复执行。
 - 迁移失败必须停止启动，不得带半迁移状态对外服务。
@@ -582,6 +594,12 @@ pending 待处理 → processing 处理中 → done 已完成
 - 背景：直接建客户、CSV 导入客户和编辑客户手机号会让客户缺少来源线索，或让客户与来源线索的手机号不一致，破坏后续按手机号匹配、跟进和去重。
 - 决策：客户仅由线索转化事务创建；CSV 固定导入线索；客户手机号继承来源线索且转客后不可修改。记录见 `docs/adr/0001-customer-origin-invariant.md`。
 - 取舍：历史无来源客户或手机号不一致数据不会被自动修补，而由后续上线审计报告交人工处理。
+
+### ADR-015 · 外部 API Token 明文保存且不限制来源 IP
+
+- 背景：外部服务端集成不能依赖浏览器 Cookie；项目明确要求 Token 长期保存在数据库中，并允许集成服务器迁移。
+- 决策：`api_tokens.token` 保存完整 Token，支持多行、可选过期、撤销和用户绑定；请求只接受 Bearer 头，不增加 IP 白名单。
+- 取舍：数据库读取权限等同凭据读取权限，必须通过备份、账号和日志管理降低泄露风险；泄露后用 `revoked_at` 撤销。详见 `docs/adr/0002-plaintext-api-token-no-ip-allowlist.md`。
 
 ## 18. 架构约束与已知债务
 

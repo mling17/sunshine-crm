@@ -99,6 +99,7 @@ DICT_SEEDS = {
         {"key": "existing", "label": "老客户", "sort": 4, "enabled": True, "used": 0},
         {"key": "stock", "label": "存量", "sort": 5, "enabled": True, "used": 0},
         {"key": "other", "label": "其他", "sort": 6, "enabled": True, "used": 0},
+        {"key": "api", "label": "API", "sort": 7, "enabled": True, "used": 0},
         {"key": "video_account", "label": "视频号", "sort": 1001, "enabled": True, "used": 0},
         {"key": "xianyu", "label": "咸鱼", "sort": 1002, "enabled": True, "used": 0},
     ],

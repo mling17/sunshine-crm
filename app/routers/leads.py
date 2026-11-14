@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db import db_conn
 from app.errors import ApiError
-from app import labels
 from app.models import (
     LeadConvertCheckOut,
     LeadConvertIn,
@@ -30,6 +29,11 @@ from app.models import (
 )
 from app.routers.auth import require_auth
 from app.security import now_iso
+from app.lead_service import (
+    create_lead_record,
+    fetch_lead as _fetch_lead,
+    user_id_for_username,
+)
 from app.services import convert_lead, read_images
 
 _FALLBACK_SOURCES = ("wechat", "phone", "referral", "existing", "stock", "other")
@@ -65,37 +69,13 @@ router = APIRouter(
 # ---------------- 查询helper ----------------
 
 
-def _fetch_lead(conn, lead_id: int) -> LeadOut:
-    row = conn.execute(
-        """
-        SELECT id, name, phone, wechat, lead_type, company_name, source,
-               source_other, location, note, intent_level, status,
-               invalid_reason, invalid_reason_other, converted_customer_id,
-               converted_deal_id, owner, created_at, updated_at
-        FROM leads WHERE id = ? AND is_delete = 0
-        """,
-        (lead_id,),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="线索不存在")
-    tag_rows = conn.execute(
-        "SELECT t.name FROM tags t JOIN lead_tags lt ON t.id = lt.tag_id"
-        " WHERE lt.lead_id = ? AND lt.is_delete = 0 AND t.is_delete = 0"
-        " ORDER BY t.id",
-        (lead_id,),
-    ).fetchall()
-    data = dict(row)
-    data["intent_level_label"] = labels.intent_level(data.get("intent_level"))
-    return LeadOut(**data, tags=[r[0] for r in tag_rows])
-
-
 def _fetch_lead_detail(conn, lead_id: int) -> LeadDetailOut:
     row = conn.execute(
         """
         SELECT id, name, phone, wechat, lead_type, company_name, source,
                source_other, location, note, intent_level, status,
                invalid_reason, invalid_reason_other, converted_customer_id,
-               converted_deal_id, owner, created_at, updated_at
+               converted_deal_id, owner, created_by, created_at, updated_at
         FROM leads WHERE id = ? AND is_delete = 0
         """,
         (lead_id,),
@@ -195,7 +175,7 @@ def list_leads(
             SELECT l.id, l.name, l.phone, l.wechat, l.lead_type, l.company_name, l.source,
                    l.source_other, l.location, l.note, l.intent_level, l.status,
                    l.invalid_reason, l.invalid_reason_other, l.converted_customer_id,
-                   l.converted_deal_id, l.owner, l.created_at, l.updated_at,
+                   l.converted_deal_id, l.owner, l.created_by, l.created_at, l.updated_at,
                    (SELECT MAX(f.created_at) FROM follow_ups f
                      WHERE f.object_type='lead' AND f.object_id=l.id
                        AND f.kind='follow' AND f.is_delete=0)
@@ -244,7 +224,10 @@ def list_leads(
 
 
 @router.post("/leads", response_model=LeadOut)
-def create_lead(lead_in: LeadIn) -> LeadOut:
+def create_lead(
+    lead_in: LeadIn,
+    username: str = Depends(require_auth),
+) -> LeadOut:
     """建线索。名称、电话和来源必填，错误通过业务码返回给前端展示。"""
     if not lead_in.name:
         raise ApiError(status_code=400, code="name_required", message="名称不能为空")
@@ -257,112 +240,26 @@ def create_lead(lead_in: LeadIn) -> LeadOut:
     if not _source_allowed(lead_in.source):
         raise HTTPException(status_code=400, detail="来源无效：请先在「数据字典 → 客户来源」里添加该来源")
     
-    created_at = now_iso()
     # 定稿：新建线索意向默认「中」（PAGES-V2 §7.3）
     intent_level = (lead_in.intent_level or "medium")
     with db_conn() as conn:
-        # 检查是否有重复线索或客户（Q6）
-        duplicate_hint = None
-        candidates = [
-            {"object_type": "lead", **dict(row)}
-            for row in conn.execute(
-                "SELECT id, name, phone FROM leads"
-                " WHERE is_delete = 0"
-            ).fetchall()
-        ] + [
-            {"object_type": "customer", **dict(row)}
-            for row in conn.execute(
-                "SELECT id, name, phone FROM customers WHERE is_delete = 0"
-            ).fetchall()
-        ]
-        for candidate in candidates:
-            phone_match = phone_key and phone_key == _normalize_phone(candidate["phone"])
-            if phone_match:
-                duplicate_hint = {
-                    "object_type": candidate["object_type"],
-                    "object_id": candidate["id"],
-                    "name": candidate["name"] or "未知",
-                    "phone": phone_key,
-                }
-                break
-
-        if duplicate_hint:
-            contact = duplicate_hint.get("phone") or duplicate_hint.get("wechat")
-            raise ApiError(
-                status_code=409,
-                code="duplicate_contact",
-                message=f"联系方式已存在：{duplicate_hint['name']}（{contact}）",
-                duplicate_hint=duplicate_hint,
-            )
-
-        cur = conn.execute(
-            """
-            INSERT INTO leads 
-                (name, phone, wechat, lead_type, company_name, source, source_other,
-                 location, note, intent_level, status, owner, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                lead_in.name,
-                phone_key or None,
-                lead_in.wechat,
-                lead_in.lead_type,
-                lead_in.company_name,
-                lead_in.source,
-                lead_in.source_other,
-                lead_in.location,
-                lead_in.note,
-                intent_level,
-                "new",
-                lead_in.owner,
-                created_at,
-                created_at,
-            ),
-        )
-        lead_id = int(cur.lastrowid or 0)
-        
-        # 保存标签
-        if lead_in.tags:
-            for tag_name in lead_in.tags[:MAX_TAGS]:
-                # 查找或创建标签
-                tag_row = conn.execute(
-                    "SELECT id FROM tags WHERE name = ?",
-                    (tag_name,),
-                ).fetchone()
-                if tag_row is None:
-                    cur = conn.execute(
-                        "INSERT INTO tags (name, created_at) VALUES (?, ?)",
-                        (tag_name, now_iso()),
-                    )
-                    tag_id = int(cur.lastrowid or 0)
-                else:
-                    conn.execute(
-                        "UPDATE tags SET is_delete = 0, update_time = ? WHERE id = ?",
-                        (now_iso(), tag_row["id"]),
-                    )
-                    tag_id = tag_row["id"]
-                
-                # 关联标签
-                conn.execute(
-                    "INSERT INTO lead_tags (lead_id, tag_id) VALUES (?, ?)"
-                    " ON CONFLICT(lead_id, tag_id) DO UPDATE SET"
-                    " is_delete = 0, update_time = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
-                    (lead_id, tag_id),
-                )
-        
-        # 系统履历：创建（跟进页时间线要能看到「✨创建」，与 demo 一致）
-        from app.timeline import add_entry as _add_entry
-        _add_entry(
+        lead_id = create_lead_record(
             conn,
-            object_type="lead",
-            object_id=lead_id,
-            kind="create",
-            content="创建线索：" + (lead_in.name or lead_in.phone or lead_in.wechat or ""),
+            name=lead_in.name,
+            phone=phone_key,
+            wechat=lead_in.wechat,
+            lead_type=lead_in.lead_type,
+            company_name=lead_in.company_name,
+            source=lead_in.source,
+            source_other=lead_in.source_other,
+            location=lead_in.location,
+            note=lead_in.note,
+            intent_level=intent_level,
+            owner=lead_in.owner,
+            tags=lead_in.tags,
+            created_by=user_id_for_username(conn, username),
         )
-
-        lead = _fetch_lead(conn, lead_id)
-    
-    return lead
+        return _fetch_lead(conn, lead_id)
 
 
 @router.get("/leads/convert-check", response_model=LeadConvertCheckOut)

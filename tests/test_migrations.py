@@ -249,6 +249,67 @@ class TestMigrations(unittest.TestCase):
         self.assertEqual(log_count, 1)
         self.assertEqual(dict_deleted, 1)
 
+    def test_v2_023_adds_external_api_schema_and_active_user_default(self):
+        run_migrations(self.db, backup=False, verbose=False)
+        run_migrations(self.db, backup=False, verbose=False)
+
+        conn = sqlite3.connect(str(self.db))
+        try:
+            user_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(users)")
+            }
+            lead_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(leads)")
+            }
+            token_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(api_tokens)")
+            }
+            user_active = conn.execute(
+                "SELECT is_active FROM users WHERE username = 'chen'"
+            ).fetchone()[0]
+            api_source = conn.execute(
+                "SELECT label, enabled FROM dict_items"
+                " WHERE dict_code = 'customer_source' AND key = 'api'"
+                " AND is_delete = 0"
+            ).fetchone()
+            version = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = 'v2_023'"
+            ).fetchone()
+            token_fks = list(conn.execute("PRAGMA foreign_key_list(api_tokens)"))
+            now = "2026-11-14T00:00:00Z"
+            user_id = conn.execute(
+                "SELECT id FROM users WHERE username = 'chen'"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO api_tokens"
+                " (name, token, user_id, created_at, updated_at)"
+                " VALUES ('audit', 'audit-token', ?, ?, ?)",
+                (user_id, now, now),
+            )
+            token_audit = conn.execute(
+                "SELECT create_time, update_time, is_delete"
+                " FROM api_tokens WHERE token = 'audit-token'"
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertIn("is_active", user_columns)
+        self.assertEqual(user_active, 1)
+        self.assertIn("created_by", lead_columns)
+        self.assertTrue(
+            {
+                "name", "token", "user_id", "expires_at", "revoked_at",
+                "created_at", "updated_at", "create_time", "update_time", "is_delete",
+            }
+            <= token_columns
+        )
+        self.assertEqual(api_source, ("API", 1))
+        self.assertIsNotNone(version)
+        self.assertEqual(token_fks, [])
+        self.assertTrue(token_audit[0])
+        self.assertTrue(token_audit[1])
+        self.assertEqual(token_audit[2], 0)
+
     def test_aftersale_relation_column_exists(self):
         run_migrations(self.db, backup=False, verbose=False)
         conn = sqlite3.connect(str(self.db))

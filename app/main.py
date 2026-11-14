@@ -32,6 +32,7 @@ from app.routers import (
     dashboard,
     deals,
     dicts,
+    external_leads,
     followups,
     leads,
     orders,
@@ -154,6 +155,7 @@ app.include_router(aftersales.router)
 app.include_router(addresses.router)
 app.include_router(stats.router)
 app.include_router(dicts.router)
+app.include_router(external_leads.router)
 
 
 @app.get("/", include_in_schema=False)
