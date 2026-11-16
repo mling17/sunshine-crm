@@ -50,7 +50,7 @@ EXT_BY_MIME: dict[str, str] = {
 MAX_PHOTO_BYTES = 20 * 1024 * 1024
 MAX_FILE_BYTES = 20 * 1024 * 1024
 #: 一条跟进最多挂几个附件
-MAX_FILES_PER_FOLLOWUP = 10
+MAX_FILES_PER_FOLLOWUP = 20
 
 #: 允许的非图片附件（跟进附件允许保存 HTML；执行风险由下载侧强制 attachment + nosniff 隔离）
 ALLOWED_DOC_EXT: frozenset[str] = frozenset(

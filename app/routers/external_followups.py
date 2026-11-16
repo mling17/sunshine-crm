@@ -43,7 +43,7 @@ async def create_external_follow_up(
     next_date: str | None = Form(default=None),
     attachments: list[UploadFile] = File(
         default=[],
-        description="重复字段；最多 10 个，单个不超过 20MB",
+        description="重复字段；最多 20 个，单个不超过 20MB",
     ),
     token: ExternalTokenContext = Depends(require_external_token),
 ) -> FollowUpItemOut | JSONResponse:
