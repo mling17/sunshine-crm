@@ -35,6 +35,13 @@ class FollowupModalUiTest(unittest.TestCase):
         self.assertNotIn("<span>需要</span>", self.modal)
         self.assertIn("nextDate.disabled = !nextOn.checked", self.modal)
 
+    def test_followup_attachment_copy_covers_new_formats(self):
+        self.assertIn(
+            "附件（图片 / 文档 / HTML / DWG / 音视频 / ZIP，最多 10 个、单个 ≤20MB）",
+            self.modal,
+        )
+        self.assertIn('<input type="file" name="photos" multiple>', self.modal)
+
     def test_quote_field_precedes_next_followup_time(self):
         extra_html = self.modal.index("(opts.extraHtml || '')")
         next_followup = self.modal.index("下次跟进时间")

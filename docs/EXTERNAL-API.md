@@ -107,7 +107,7 @@ curl -X POST https://crm.example.com/api/external/v1/leads \
 | `next_date` | 否 | `YYYY-MM-DD` |
 | `attachments` | 否 | 重复 multipart 字段；最多 10 个，每个不超过 20MB |
 
-附件类型沿用页面白名单：图片、PDF、Excel、Word、CSV、CAD、ZIP 和 TXT；HTML、SVG、JS 等类型拒绝。所有字段和附件先完成校验，随后才写入文件、跟进和附件记录。数据库写入失败会回滚跟进、业务状态和附件行，并删除该请求已经写入的文件。
+附件类型沿用页面白名单：图片、PDF、Excel、Word、CSV、CAD、ZIP、TXT、HTML/HTM 和常见音视频；SVG、JS 等类型拒绝。HTML 和音视频下载时强制附件Disposition。所有字段和附件先完成校验，随后才写入文件、跟进和附件记录。数据库写入失败会回滚跟进、业务状态和附件行，并删除该请求已经写入的文件。
 
 ### 响应与状态变化
 

@@ -432,8 +432,8 @@ pending 待处理 → processing 处理中 → done 已完成
 - 存储键格式为 `YYYY/MM/DD/<uuid>.<ext>`。
 - 文件名经过清洗，存储路径不能由客户端任意指定。
 - 单条跟进最多 10 个附件，单文件最大 20MB。
-- 附件白名单覆盖图片、PDF、Excel、Word、DWG/DXF 和 ZIP。
-- 扩展名和 MIME/文件签名双层校验；HTML、SVG、JS 等可执行页面类型拒绝。
+- 附件白名单覆盖图片、PDF、Office 文档、CSV、DWG/DXF、ZIP、TXT、HTML/HTM 和常见音视频文件。
+- 下载侧对 HTML 和音视频仍强制 `attachment`，并统一加 `nosniff`；SVG、JS 等可执行页面类型继续拒绝。
 - 保存失败或事务回滚不得产生可见业务记录。
 
 ### 12.2 下载

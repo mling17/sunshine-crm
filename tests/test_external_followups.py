@@ -186,7 +186,7 @@ class ExternalFollowUpApiTest(ApiTestCase):
             ),
             (
                 {"phone": "13800138000", "content": "危险附件"},
-                [("attachments", ("x.html", b"<script>x</script>", "text/html"))],
+                [("attachments", ("x.svg", b"<svg onload=x></svg>", "image/svg+xml"))],
             ),
         ]
         for data, files in cases:

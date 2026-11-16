@@ -20,7 +20,7 @@ from fastapi import HTTPException
 
 from app.config.settings import settings
 
-#: 允许的图片扩展名（只存图，杜绝把 .html/.svg 之类的可执行内容塞进上传目录）
+#: 允许的图片扩展名（存储白名单；HTML 的执行风险在下载侧隔离）
 ALLOWED_IMAGE_EXT: frozenset[str] = frozenset(
     {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif"}
 )
@@ -52,9 +52,14 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 #: 一条跟进最多挂几个附件
 MAX_FILES_PER_FOLLOWUP = 10
 
-#: 允许的非图片附件（PLANNER-V3 §6.5 白名单；.html/.svg/.js 一律不收）
+#: 允许的非图片附件（跟进附件允许保存 HTML；执行风险由下载侧强制 attachment + nosniff 隔离）
 ALLOWED_DOC_EXT: frozenset[str] = frozenset(
-    {".pdf", ".xls", ".xlsx", ".doc", ".docx", ".csv", ".dwg", ".dxf", ".zip", ".txt"}
+    {
+        ".pdf", ".xls", ".xlsx", ".doc", ".docx", ".csv", ".dwg", ".dxf", ".zip", ".txt",
+        ".html", ".htm",
+        ".mp3", ".wav", ".m4a", ".aac", ".wma",
+        ".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp",
+    }
 )
 
 DOC_MIME_BY_EXT: dict[str, str] = {
@@ -68,6 +73,19 @@ DOC_MIME_BY_EXT: dict[str, str] = {
     ".dxf": "image/vnd.dxf",
     ".zip": "application/zip",
     ".txt": "text/plain",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".wma": "audio/x-ms-wma",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+    ".3gp": "video/3gpp",
 }
 
 
@@ -81,7 +99,7 @@ def ext_and_mime_any(filename: str | None) -> tuple[str, str]:
     raise HTTPException(
         status_code=400,
         detail=(
-            "不支持的附件类型：只接受图片、PDF、Excel、Word、CSV、CAD(dwg/dxf)、ZIP、TXT"
+            "不支持的附件类型：只接受图片、PDF、Excel、Word、CSV、CAD(dwg/dxf)、ZIP、TXT、HTML、音视频"
         ),
     )
 

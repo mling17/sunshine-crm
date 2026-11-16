@@ -39,10 +39,31 @@ class FileUploadTest(ApiTestCase):
         self.assertEqual(resp.status_code, 400, resp.text)
         self.assertIn("20MB", resp.json()["detail"])
 
+    def test_html_and_media_allowed_but_downloaded_as_attachment(self):
+        c = self.create_customer(name="张附件")
+        cases = [
+            ("页面.html", b"<script>alert(1)</script>", "text/html"),
+            ("语音.mp3", b"ID3demo", "audio/mpeg"),
+            ("现场.mp4", b"ftypisom", "video/mp4"),
+        ]
+        resp = self._post_files(
+            c["id"], [("files", (name, payload, mime)) for name, payload, mime in cases]
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["photo_count"], 3)
+        self.assertEqual(
+            {item["mime_type"] for item in resp.json()["photos"]},
+            {"text/html", "audio/mpeg", "video/mp4"},
+        )
+        for item in resp.json()["photos"]:
+            got = self.client.get(f"/api/crm/attachments/{item['id']}")
+            self.assertEqual(got.status_code, 200)
+            self.assertIn("attachment", got.headers.get("content-disposition", ""))
+            self.assertEqual(got.headers.get("x-content-type-options"), "nosniff")
+
     def test_dangerous_type_rejected(self):
         c = self.create_customer(name="张附件")
         for name, payload in (
-            ("x.html", b"<script>alert(1)</script>"),
             ("x.svg", b"<svg onload=alert(1)></svg>"),
             ("x.js", b"alert(1)"),
         ):

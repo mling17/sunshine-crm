@@ -52,8 +52,8 @@ function followupFormHtml(index, preCustomer, preDeal) {
           STAGES.map(function (p) { return '<option value="' + p[0] + '">' + p[1] + '</option>'; }).join('') +
         '</select></div>' +
     '</div>' +
-    '<div class="field"><label>照片（最多 ' + MAX_PHOTOS + ' 张，单张 ≤' + MAX_PHOTO_MB + 'MB）</label>' +
-      '<input type="file" id="fuPhotos" name="photos" accept="image/*" capture="environment" multiple></div>' +
+    '<div class="field"><label>附件（最多 ' + MAX_PHOTOS + ' 个，单个 ≤' + MAX_PHOTO_MB + 'MB）</label>' +
+      '<input type="file" id="fuPhotos" name="files" multiple></div>' +
     '<div class="form-actions"><button type="submit" class="btn btn-primary">保存跟进</button></div>' +
   '</form>';
 }
@@ -112,7 +112,7 @@ function viewFollowups(root, route) {
     });
     photosInput.addEventListener('change', function () {
       if (photosInput.files.length > MAX_PHOTOS) {
-        toast('一条跟进最多 ' + MAX_PHOTOS + ' 张照片，已清空选择', true);
+        toast('一条跟进最多 ' + MAX_PHOTOS + ' 个附件，已清空选择', true);
         photosInput.value = '';
       }
     });
@@ -126,12 +126,12 @@ function viewFollowups(root, route) {
       var customerId = customerSel.value;
       if (!customerId) { toast('先选客户', true); return; }
       if (!content) { toast('跟进内容不能为空', true); return; }
-      if (photosInput.files.length > MAX_PHOTOS) { toast('照片最多 ' + MAX_PHOTOS + ' 张', true); return; }
+      if (photosInput.files.length > MAX_PHOTOS) { toast('附件最多 ' + MAX_PHOTOS + ' 个', true); return; }
 
       var tooBig = Array.prototype.some.call(photosInput.files, function (f) {
         return f.size > MAX_PHOTO_MB * 1024 * 1024;
       });
-      if (tooBig) { toast('有照片超过 ' + MAX_PHOTO_MB + 'MB', true); return; }
+      if (tooBig) { toast('有附件超过 ' + MAX_PHOTO_MB + 'MB', true); return; }
 
       var fd = new FormData();
       fd.append('customer_id', customerId);
@@ -142,12 +142,12 @@ function viewFollowups(root, route) {
         fd.append('deal_id', dealSel.value);
         if (stageSel.value) { fd.append('stage', stageSel.value); }
       }
-      Array.prototype.forEach.call(photosInput.files, function (file) { fd.append('photos', file); });
+      Array.prototype.forEach.call(photosInput.files, function (file) { fd.append('files', file); });
 
       btn.disabled = true;
       btn.textContent = '保存中…';
       api('/follow-ups', { method: 'POST', body: fd }).then(function (item) {
-        toast('已记录跟进' + (item && item.photo_count ? '（' + item.photo_count + ' 张照片）' : ''));
+        toast('已记录跟进' + (item && item.photo_count ? '（' + item.photo_count + ' 个附件）' : ''));
         // 提交后清掉 URL 里的预填参数，避免表单又被填上一次
         navigate('#/followups');
       }).catch(function (err) {

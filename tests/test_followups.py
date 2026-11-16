@@ -133,23 +133,25 @@ class FollowUpsTest(ApiTestCase):
         self.assertEqual(bad.status_code, 400, bad.text)
         self.assertIn("10", bad.json()["detail"])
 
-    def test_non_image_allowed_and_html_rejected(self):
-        """定稿 v2.4：附件任意类型（PDF/Excel/图纸…）；.html/.svg 这类可执行内容仍然拒"""
+    def test_non_image_and_html_allowed(self):
+        """跟进附件支持文档/图纸/HTML；下载侧仍强制 attachment，避免 HTML 被执行"""
         c = self.create_customer(name="王强")
         ok = self.client.post(
             "/api/crm/follow-ups",
             data={"customer_id": str(c["id"]), "content": "报价单"},
-            files=[("files", ("quote.xlsx", b"PK\x03\x04demo", "application/vnd.ms-excel"))],
+            files=[
+                ("files", ("quote.xlsx", b"PK\x03\x04demo", "application/vnd.ms-excel")),
+                ("files", ("图纸.dwg", b"AC1032demo", "application/acad")),
+                ("files", ("notes.html", b"<p>notes</p>", "text/html")),
+            ],
         )
         self.assertEqual(ok.status_code, 200, ok.text)
-        self.assertEqual(ok.json()["photo_count"], 1)
+        self.assertEqual(ok.json()["photo_count"], 3)
 
-        bad = self.client.post(
-            "/api/crm/follow-ups",
-            data={"customer_id": str(c["id"]), "content": "网页"},
-            files=[("files", ("x.html", b"<script>alert(1)</script>", "text/html"))],
-        )
-        self.assertEqual(bad.status_code, 400, bad.text)
+        for item in ok.json()["photos"]:
+            got = self.client.get(f"/api/crm/attachments/{item['id']}")
+            self.assertEqual(got.status_code, 200)
+            self.assertIn("attachment", got.headers.get("content-disposition", ""))
 
     def test_three_photos_allowed(self):
         c = self.create_customer(name="赵敏")
