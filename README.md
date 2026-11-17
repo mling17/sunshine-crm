@@ -39,10 +39,17 @@ static/              前端
   views/             每页一个文件（leads.js 线索、deals.js 商机、...）
   demo/              设计稿（对照用，不参与发版）
   icons/ manifest.json
-docs/                设计与测试文档
-  TC-LEADS.md/.csv   线索页测试用例（85 条，含执行结果）
-  gen_lead_testcases.py  用例生成器
-  BUSINESS-ARCH-V2.md PAGES-V2.md PLANNER-V2.md PLANNER-V3.md
+docs/                设计与测试文档（索引见 docs/README.md）
+  README.md          文档索引与维护约定
+  01-prd.md 02-arch.md 03-progress.md  核心事实源
+  BUSINESS-QUOTE-FLOW.md PAGES-V2.md PLANNER-V3.md PRODUCT-MODULE.md
+  EXTERNAL-API.md    外部 API 契约
+  DATABASE-*.md      数据库迁移、备份与恢复
+  TC-LEADS.md/.csv   线索页手工回归用例（92 条，含执行结果）
+  TC-DEALS.md        商机页历史测试记录
+  gen_lead_testcases.py  线索用例生成器
+  adr/ agents/       架构决策与 Agent 工作流
+  archive/           已归档的历史方案
 ops/                 部署运维
   deploy-frontend.sh 前端发版（拷 static 到 nginx 并自检）
   crm-api.service    systemd 单元
@@ -98,7 +105,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8010
 
 ## 测试
 
-- 手工回归：`docs/TC-LEADS.md`（线索页 85 条，分 12 个模块；同内容另有 `.csv` 便于导入表格工具）
+- 手工回归：`docs/TC-LEADS.md`（线索页 92 条，分 13 个模块；同内容另有 `.csv` 便于导入表格工具）
 - 自动化：`pytest tests/`
 
 ## License

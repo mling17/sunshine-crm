@@ -4,7 +4,7 @@ SQLite 的 V2 迁移链包含 PRAGMA、表重建和 SQLite 触发器，不能直
 这里保存最终结构，应用每次启动幂等执行 ``CREATE TABLE IF NOT EXISTS``；
 数据从旧 SQLite 导入时由 ``ops/migrate_sqlite_to_mysql.py`` 负责。
 
-设计约束与项目 AGENT.md 对齐：
+设计约束与项目 AGENTS.md 对齐：
 - 所有业务表都有 create_time / update_time / is_delete；
 - 不创建数据库外键，引用一致性由业务层维护。
 """
@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS `customer_tags` (
 CREATE TABLE IF NOT EXISTS `leads` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `name` VARCHAR(255),
-  `phone` VARCHAR(64),
+  `phone` VARCHAR(255),
   `wechat` VARCHAR(128),
   `lead_type` VARCHAR(32) NOT NULL DEFAULT 'personal',
   `company_name` VARCHAR(255),
@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS `leads` (
   `created_at` VARCHAR(32) NOT NULL,
   `updated_at` VARCHAR(32) NOT NULL,
   `${STANDARD}`,
-  `active_phone` VARCHAR(64)
+  `active_phone` VARCHAR(255)
     GENERATED ALWAYS AS (CASE WHEN `is_delete` = 0 THEN `phone` ELSE NULL END) STORED,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_leads_phone_active` (`active_phone`),

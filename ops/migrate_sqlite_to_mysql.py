@@ -31,6 +31,8 @@ from app.mysql_schema import TABLE_DDL, ensure_mysql_schema, _raw_connection
 COPY_ORDER = (
     "users",
     "sessions",
+    "api_tokens",
+    "api_idempotency_records",
     "customers",
     "customer_addresses",
     "tags",
