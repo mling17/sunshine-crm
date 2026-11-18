@@ -269,6 +269,108 @@ class LeadsTest(ApiTestCase):
         )
         self.assertEqual(items[-1]["status"], "invalid")
 
+    # ---------- 列表分页/排序白名单（Ticket #9） ----------
+
+    def test_list_leads_size_whitelist(self):
+        for i in range(15):
+            self.create_lead(name=f"白名单{i}", phone=f"1380013810{i:02d}")
+        for size in (10, 20, 50, 100, 500):
+            resp = self.client.get(f"/api/crm/leads?size={size}")
+            self.assertEqual(resp.status_code, 200, resp.text)
+            self.assertEqual(resp.json()["size"], size)
+        for bad in (0, 1, 15, 200, 501, -10):
+            resp = self.client.get(f"/api/crm/leads?size={bad}")
+            self.assertEqual(resp.status_code, 400, f"size={bad}")
+
+    def test_list_leads_page_must_be_positive(self):
+        self.create_lead(name="分页", phone="13800138077")
+        for bad in (0, -1):
+            resp = self.client.get(f"/api/crm/leads?page={bad}")
+            self.assertEqual(resp.status_code, 400, f"page={bad}")
+        resp = self.client.get("/api/crm/leads")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["size"], 20)  # 默认 20
+
+    def test_list_leads_invalid_sort_or_order_400(self):
+        for url in (
+            "/api/crm/leads?sort=phone",
+            "/api/crm/leads?sort=name;DROP TABLE leads",
+            "/api/crm/leads?sort=created_at&order=up",
+            "/api/crm/leads?sort=location&order=1 desc",
+        ):
+            with self.subTest(url=url):
+                resp = self.client.get(url)
+                self.assertEqual(resp.status_code, 400, resp.text)
+
+    def test_list_leads_sort_by_location_nulls_last(self):
+        self.create_lead(name="杭州线索", phone="13800138201", location="杭州")
+        self.create_lead(name="北京线索", phone="13800138202", location="北京")
+        self.create_lead(name="无地区线索", phone="13800138203")
+
+        resp = self.client.get("/api/crm/leads?sort=location&order=asc&size=500")
+        names = [item["name"] for item in resp.json()["items"]]
+        self.assertEqual(names[:2], ["北京线索", "杭州线索"])
+        self.assertEqual(names[-1], "无地区线索")
+
+        resp = self.client.get("/api/crm/leads?sort=location&order=desc&size=500")
+        names = [item["name"] for item in resp.json()["items"]]
+        self.assertEqual(names[:2], ["杭州线索", "北京线索"])
+        self.assertEqual(names[-1], "无地区线索")
+
+    def test_list_leads_explicit_sort_uses_id_desc_tiebreak(self):
+        ids = []
+        for i in range(3):
+            ids.append(self.create_lead(name=f"稳定{i}", phone=f"1380013840{i}")["id"])
+        # 三条 created_at 压成同一秒：显式排序必须有稳定次键 id DESC（最新建的在前）
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE leads SET created_at = '2026-11-18T00:00:00Z' WHERE id = ?",
+                (ids[0],),
+            )
+            conn.execute(
+                "UPDATE leads SET created_at = '2026-11-18T00:00:00Z' WHERE id = ?",
+                (ids[1],),
+            )
+            conn.execute(
+                "UPDATE leads SET created_at = '2026-11-18T00:00:00Z' WHERE id = ?",
+                (ids[2],),
+            )
+        resp = self.client.get("/api/crm/leads?sort=created_at&order=asc&size=500")
+        names = [item["name"] for item in resp.json()["items"]]
+        self.assertEqual(names, ["稳定2", "稳定1", "稳定0"])
+
+    def test_list_leads_sort_by_last_follow(self):
+        early = self.create_lead(name="早跟进", phone="13800138501")
+        late = self.create_lead(name="晚跟进", phone="13800138502")
+        self.create_lead(name="无跟进", phone="13800138503")
+        self.post_follow_up("lead", early["id"], content="第一次", next_date="2026-11-20")
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE follow_ups SET created_at = '2026-11-01T00:00:00Z'"
+                " WHERE object_type = 'lead' AND object_id = ?",
+                (early["id"],),
+            )
+        self.post_follow_up("lead", late["id"], content="第二次", next_date="2026-11-21")
+
+        resp = self.client.get("/api/crm/leads?sort=last_follow&order=desc&size=500")
+        names = [item["name"] for item in resp.json()["items"]]
+        self.assertEqual(names, ["晚跟进", "早跟进", "无跟进"])
+
+        resp = self.client.get("/api/crm/leads?sort=last_follow&order=asc&size=500")
+        names = [item["name"] for item in resp.json()["items"]]
+        self.assertEqual(names, ["早跟进", "晚跟进", "无跟进"])
+
+    def test_list_leads_default_order_keeps_invalid_sink(self):
+        ok = self.create_lead(name="默认正常", phone="13800138601")
+        bad = self.create_lead(name="默认无效", phone="13800138602")
+        self.client.post(
+            f"/api/crm/leads/{bad['id']}/invalidate", json={"invalid_reason": "no_intent"}
+        )
+        resp = self.client.get("/api/crm/leads?sort=&size=500")
+        names = [item["name"] for item in resp.json()["items"]]
+        self.assertEqual(names.index("默认无效"), len(names) - 1)
+        self.assertLess(names.index("默认正常"), names.index("默认无效"))
+
     # ---------- 修改线索 ----------
     def test_update_lead(self):
         lead = self.create_lead(phone="13800138000")

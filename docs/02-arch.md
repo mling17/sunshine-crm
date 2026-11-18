@@ -180,6 +180,7 @@ HTTP 边界
 - 鉴权：页面 API 使用 Cookie `crm_sid`；外部 API 只使用 `Authorization: Bearer <token>`，两种凭据不能互相替代。
 - 响应：JSON；写接口使用明确的 HTTP 状态码和业务错误码。
 - 分页：列表接口按业务需要返回 `items`、`total`、`page`、`size` 或直接数组。
+- 列表分页/排序（Ticket #9 起）：`page >= 1`；`size` 白名单 `[10,20,50,100,500]`，默认 20；`sort` 只接受服务端白名单 key（映射到白名单 SQL 表达式，禁止拼接前端列名），`order` 限 `asc|desc`；非法一律 400。可空排序列升/降序均 NULL 沉底；显式排序稳定次键 `id DESC`；未传 `sort` 时各列表维持既有默认口径（线索页：无效线索沉底 → `created_at DESC` → `id DESC`）。
 - 日期：业务日期使用本地日期 `YYYY-MM-DD`；审计时间使用 ISO 时间。
 - 金额：数值型字段，服务端统一 `round(value, 2)` 后校验。
 
@@ -526,6 +527,7 @@ pending 待处理 → processing 处理中 → done 已完成
 - 单页应用，hash 路由，避免 nginx 需要为每个路径配置回退。
 - `app.js` 负责登录、会话、导航、全局状态、字典加载和路由分发。
 - `views/*.js` 按页面拆分；公共表格、弹窗、跟进时间线、金额格式化放在 `shared.js`。
+- 共享列表外壳（Ticket #9 起）统一放在 `shared.js`：`dataTable` 的列带 `sortKey` 即渲染三态（asc → desc → 默认）可排序表头，`listPagerHtml` 提供窗口化页码按钮与每页条数选择器，`bindListShell` 统一事件委托；列表页把 `page/size/sort/order` 写入 hash URL（`history.replaceState`，不触发重渲染），改排序或每页条数回第 1 页。线索页已接入，其余列表页按 issue #8 逐步迁移。
 - 页面级样式与共享样式分开，避免修改某页影响全站。
 - 图片查看器当前页弹出，不新开浏览器标签。
 - 金额遮罩只影响显示，不改变 API 数据。
@@ -635,6 +637,12 @@ pending 待处理 → processing 处理中 → done 已完成
 - 背景：直接建客户、CSV 导入客户和编辑客户手机号会让客户缺少来源线索，或让客户与来源线索的手机号不一致，破坏后续按手机号匹配、跟进和去重。
 - 决策：客户仅由线索转化事务创建；CSV 固定导入线索；客户手机号继承来源线索且转客后不可修改。记录见 `docs/adr/0001-customer-origin-invariant.md`。
 - 取舍：历史无来源客户或手机号不一致数据不会被自动修补，而由后续上线审计报告交人工处理。
+
+### ADR-016 · 列表排序走服务端白名单，状态写 hash URL
+
+- 背景：8 个列表页要统一分页与可排序表头（issue #8/#9）；排序若拼接前端传来的列名会有注入和隐式耦合风险，纯前端排序在 500 条/页下也不可接受。
+- 决策：排序 key 由后端白名单映射为固定 SQL 表达式（线索页含派生 `last_follow_at`），`size` 限白名单档位，`order` 限 `asc|desc`，非法一律 400；可空列统一 NULL 沉底，显式排序固定 `id DESC` 次键。前端列表状态（`page/size/sort/order`）写入 hash URL 以支持刷新/分享保持，用 `history.replaceState` 同步避免打断输入焦点。
+- 取舍：URL 中的列表状态与搜索词/标签页状态分离（后者仍在内存 `state.filters`），深链只能还原分页排序；每个列表页默认排序仍由各自后端维护。
 
 ### ADR-015 · 外部 API Token 明文保存且不限制来源 IP
 

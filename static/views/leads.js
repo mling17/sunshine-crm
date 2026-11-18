@@ -1,4 +1,46 @@
 /* 线索列表页面逻辑 */
+/* ---------------- 列表外壳状态（Ticket #9）：page/size/sort/order 存于 hash URL ----------------
+ * 刷新或分享链接后状态保持；改 sort/size 自动回第 1 页；
+ * 状态写入用 history.replaceState（不触发 hashchange，避免重渲染打断搜索框焦点）。
+ */
+var LEAD_PAGE_SIZES = [10, 20, 50, 100, 500];
+var LEAD_SORT_KEYS = ['type', 'source', 'location', 'intent', 'last_follow', 'created_at'];
+
+function readLeadListQuery(query) {
+    var page = parseInt(query.get('page'), 10);
+    var size = parseInt(query.get('size'), 10);
+    var sort = query.get('sort') || '';
+    var order = query.get('order') || '';
+    if (!(page >= 1)) { page = 1; }
+    if (LEAD_PAGE_SIZES.indexOf(size) < 0) { size = 20; }
+    if (LEAD_SORT_KEYS.indexOf(sort) < 0) { sort = ''; }
+    if (order !== 'asc' && order !== 'desc') { order = 'desc'; }
+    return { page: page, size: size, sort: sort, order: order };
+}
+
+function leadListHash(list) {
+    var p = new URLSearchParams();
+    p.set('page', String(list.page));
+    p.set('size', String(list.size));
+    if (list.sort) {
+        p.set('sort', list.sort);
+        p.set('order', list.order);
+    }
+    return '#/leads?' + p.toString();
+}
+
+/* 状态变更统一入口：合并 patch 写 hash；改 size/sort 时自动把 page 归 1 */
+function updateLeadListState(root, patch) {
+    var cur = readLeadListQuery(parseRoute().query);
+    var next = { page: cur.page, size: cur.size, sort: cur.sort, order: cur.order };
+    Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
+    if (patch.page === undefined && (patch.size !== undefined || patch.sort !== undefined)) {
+        next.page = 1;
+    }
+    if (!next.sort) { next.order = 'desc'; }
+    history.replaceState(null, '', leadListHash(next));
+    return next;
+}
 /* ---------------- 线索列表（表格，对齐 demo 定稿） ----------------
  * 定稿口径：表格列 = 名称 / 来源 / 地区 / 微信号 / 联系方式 / 标签 / 意向 / 上次跟进 / 创建时间 / 操作
  *           操作 = 编辑（弹层）/ 跟进（详情页）；转商机只在跟进页发起
@@ -35,7 +77,18 @@ function viewLeads(root) {
         '</div>' +
         '<div class="tabs" id="leadTabs">' + tabHtml + '</div>' +
         '</div>' +
-        '<div class="card"><div id="leadList"><p class="loading">加载中…</p></div><div id="leadPager"></div></div>';
+        '<div class="card" id="leadShell"><div id="leadList"><p class="loading">加载中…</p></div><div id="leadPager"></div></div>';
+
+    bindListShell($('#leadShell', root), {
+        onPage: function (p) { updateLeadListState(root, { page: p }); loadLeads(root); },
+        onSize: function (s) { updateLeadListState(root, { size: s }); loadLeads(root); },
+        onSort: function (key, order) {
+            var nextOrder = cycleSortOrder(order);
+            if (nextOrder) { updateLeadListState(root, { sort: key, order: nextOrder }); }
+            else { updateLeadListState(root, { sort: '' }); }
+            loadLeads(root);
+        }
+    });
 
     $('#toggleNewLead', root).addEventListener('click', function () { openLeadFormModal(root); });
     $('#btnImportLead', root).addEventListener('click', function () { openLeadImportModal(root); });
@@ -44,7 +97,7 @@ function viewLeads(root) {
     var timer = null;
     function applySearch() {
         st.q = String(searchEl.value || '').trim();
-        st.page = 1;
+        updateLeadListState(root, { page: 1 });
         loadLeads(root);
     }
     searchEl.addEventListener('input', function () {
@@ -61,7 +114,7 @@ function viewLeads(root) {
         if (!btn) { return; }
         st.status = btn.getAttribute('data-status') || '';
         $$('.tab-btn', root).forEach(function (b) { b.classList.toggle('active', b === btn); });
-        st.page = 1;
+        updateLeadListState(root, { page: 1 });
         loadLeads(root);
     });
 
@@ -411,9 +464,11 @@ function loadLeads(root) {
     if (!listEl) { return Promise.resolve(); }
     listEl.innerHTML = '<p class="loading">加载中…</p>';
 
+    var list = readLeadListQuery(parseRoute().query);
     var params = new URLSearchParams();
-    params.set('page', String(st.page || 1));
-    params.set('size', String(PAGE_SIZE));
+    params.set('page', String(list.page));
+    params.set('size', String(list.size));
+    if (list.sort) { params.set('sort', list.sort); params.set('order', list.order); }
     if (st.q) { params.set('search', st.q); }
     if (st.status) { params.set('status', st.status); }
 
@@ -433,9 +488,9 @@ function loadLeads(root) {
                     esc(phone) + '</span>' +
                     '</div>' + leadStatusBadge(l.status, true) + '</div>';
             } },
-            { title: '类型', render: function (l) { return esc(leadTypeText(l)); }, nowrap: true },
-            { title: '来源', render: function (l) { return esc(leadSourceText(l)); }, nowrap: true },
-            { title: '地区', render: function (l) { return esc(l.location || '—'); } },
+            { title: '类型', sortKey: 'type', render: function (l) { return esc(leadTypeText(l)); }, nowrap: true },
+            { title: '来源', sortKey: 'source', render: function (l) { return esc(leadSourceText(l)); }, nowrap: true },
+            { title: '地区', sortKey: 'location', render: function (l) { return esc(l.location || '—'); } },
             { title: '微信号', render: function (l) {
                 var wechat = l.wechat || '—';
                 return '<span class="lead-cell-ellipsis" title="' + esc(wechat) + '">' + esc(wechat) + '</span>';
@@ -443,11 +498,11 @@ function loadLeads(root) {
             { title: '标签', render: function (l) {
                 return leadTagSummaryHtml(l.tags);
             } },
-            { title: '意向', render: function (l) { return leadIntentBadge(l.intent_level); }, nowrap: true },
-            { title: '上次跟进', nowrap: true, render: function (l) {
+            { title: '意向', sortKey: 'intent', render: function (l) { return leadIntentBadge(l.intent_level); }, nowrap: true },
+            { title: '上次跟进', sortKey: 'last_follow', nowrap: true, render: function (l) {
                 return l.last_follow_at ? fmtDateTime(l.last_follow_at).slice(5, 16) : '—';
             } },
-            { title: '创建时间', nowrap: true, render: function (l) {
+            { title: '创建时间', sortKey: 'created_at', nowrap: true, render: function (l) {
                 return fmtDateTime(l.created_at).slice(0, 10);
             } },
             { title: '操作', nowrap: true, render: function (l) {
@@ -462,15 +517,10 @@ function loadLeads(root) {
                 return opButtons(ops);
             } }
         ], items, st.q || st.status ? '没有匹配的线索，换个条件试试'
-            : '还没有线索，点右上「新增线索」开始', 'lead-table', 'lead-table-wrap');
+            : '还没有线索，点右上「新增线索」开始', 'lead-table', 'lead-table-wrap',
+            { key: list.sort, order: list.order });
 
-        pagerEl.innerHTML = pagerHtml(res);
-        pagerEl.onclick = function (ev) {
-            var btn = ev.target.closest('button[data-page]');
-            if (!btn || btn.disabled) { return; }
-            st.page = Number(btn.getAttribute('data-page')) || 1;
-            loadLeads(root);
-        };
+        pagerEl.innerHTML = listPagerHtml(res);
 
         bindOps(root, {
             edit: function (id) { return openLeadEdit(id, root); },

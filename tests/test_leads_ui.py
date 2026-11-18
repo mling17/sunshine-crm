@@ -165,5 +165,85 @@ class LeadsUiStructureTest(unittest.TestCase):
             self.assertIn(selector, self.css)
 
 
+
+
+class LeadsListShellUiTest(unittest.TestCase):
+    """Ticket #9：共享列表外壳（三态排序表头 + 页码按钮 + 每页条数）在线索页落地。"""
+
+    def setUp(self):
+        self.js = (ROOT / "static/views/leads.js").read_text(encoding="utf-8")
+        self.shared = (ROOT / "static/views/shared.js").read_text(encoding="utf-8")
+        self.css = (ROOT / "static/app.css").read_text(encoding="utf-8")
+
+    def test_shared_shell_exports(self):
+        for marker in (
+            "function listPagerHtml",
+            "function bindListShell",
+            "function cycleSortOrder",
+            "var LIST_PAGE_SIZES = [10, 20, 50, 100, 500]",
+            "data-sort=\"",
+            "data-size-select",
+            "aria-sort",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.shared)
+
+    def test_three_state_sort_cycle_asc_desc_default(self):
+        self.assertIn("currentOrder === 'asc') { return 'desc';", self.shared)
+        self.assertIn("currentOrder === 'desc') { return '';", self.shared)
+
+    def test_data_table_renders_sortable_headers_only_with_sortkey(self):
+        start = self.shared.index("function dataTable")
+        head = self.shared[start:self.shared.index("var body", start)]
+        for marker in ("c.sortKey", "sortState", "aria-sort", "data-order"):
+            self.assertIn(marker, head)
+        self.assertIn("esc(c.title)", head, "非排序列仍走普通表头")
+
+    def test_leads_six_columns_sortable_and_tags_wechat_ops_not(self):
+        for key in ("'type'", "'source'", "'location'", "'intent'", "'last_follow'", "'created_at'"):
+            with self.subTest(key=key):
+                self.assertIn("sortKey: " + key, self.js)
+        for col in ("{ title: '标签'", "{ title: '微信号'", "{ title: '操作'"):
+            with self.subTest(col=col):
+                start = self.js.index(col)
+                seg = self.js[start:self.js.index("},", start)]
+                self.assertNotIn("sortKey", seg)
+
+    def test_list_state_kept_in_hash_url(self):
+        for marker in (
+            "query.get('page')",
+            "query.get('size')",
+            "query.get('sort')",
+            "query.get('order')",
+            "history.replaceState",
+            "p.set('sort'",
+            "p.set('order'",
+            "#/leads?",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.js)
+
+    def test_sort_or_size_change_resets_page_to_1(self):
+        self.assertIn("patch.size !== undefined || patch.sort !== undefined", self.js)
+        self.assertIn("next.page = 1;", self.js)
+
+    def test_leads_uses_shell_pager_and_binding(self):
+        self.assertIn("listPagerHtml(res)", self.js)
+        self.assertIn("bindListShell($('#leadShell', root)", self.js)
+        self.assertNotIn("pagerHtml(res)", self.js)
+        self.assertNotIn("pagerEl.onclick", self.js)
+
+    def test_sortable_header_and_pager_styles(self):
+        for selector in (
+            "th.sortable",
+            ".sort-arrow",
+            ".list-pager",
+            ".list-pager-pages",
+            ".pager-page.active",
+            ".list-pager-size",
+        ):
+            with self.subTest(selector=selector):
+                self.assertIn(selector, self.css)
+
 if __name__ == "__main__":
     unittest.main()

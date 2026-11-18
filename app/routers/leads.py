@@ -38,6 +38,27 @@ from app.services import convert_lead, read_images
 
 _FALLBACK_SOURCES = ("wechat", "phone", "referral", "existing", "stock", "other")
 
+# 列表分页/排序白名单（Ticket #9）：size 只接受这几个档位，sort 只接受映射表里的 key。
+# 排序 SQL 一律来自这里的白名单映射，绝不拼接前端传来的原始列名。
+LIST_PAGE_SIZES: tuple[int, ...] = (10, 20, 50, 100, 500)
+
+_LEAD_SORT_SQL: dict[str, str] = {
+    "type": "l.lead_type",
+    "source": "l.source",
+    "location": "l.location",
+    "intent": "l.intent_level",
+    # 与 SELECT 里的 last_follow_at 同一个派生表达式（Ticket #9 明确要求复用）
+    "last_follow": (
+        "(SELECT MAX(f.created_at) FROM follow_ups f"
+        " WHERE f.object_type='lead' AND f.object_id=l.id"
+        " AND f.kind='follow' AND f.is_delete=0)"
+    ),
+    "created_at": "l.created_at",
+}
+
+# 可为 NULL 的排序列：无论升降序都让其沉底（(expr IS NULL) ASC），否则升序时大量空值堆在最前面。
+_LEAD_SORT_NULLABLE = frozenset({"type", "source", "location", "intent", "last_follow"})
+
 
 def _normalize_phone(raw: str | None) -> str:
     return "".join(ch for ch in str(raw or "") if ch not in " -()").strip()
@@ -121,14 +142,53 @@ def list_leads(
     source: str | None = Query(default=None),
     intent_level: str | None = Query(default=None),
     search: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
-    size: int = Query(default=20, ge=1, le=100),
+    page: int = Query(default=1),
+    size: int = Query(default=20),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
     include_converted: bool = Query(
         default=False,
         description="默认不看已转化线索（转化后档案在客户页）；传 true 或明确传 status=converted 才返回",
     ),
 ) -> LeadListOut:
-    """线索列表。"""
+    """线索列表。
+
+    分页/排序（Ticket #9）：size 白名单 [10,20,50,100,500]，sort 白名单见
+    ``_LEAD_SORT_SQL``；非法 page/size/sort/order 一律 400，排序 SQL 只走白名单映射。
+    不传 sort 时维持默认口径：无效线索沉底，再按创建时间倒序、id 倒序。
+    """
+    if page < 1:
+        raise ApiError(status_code=400, code="invalid_page", message="page 必须 >= 1")
+    if size not in LIST_PAGE_SIZES:
+        raise ApiError(
+            status_code=400,
+            code="invalid_page_size",
+            message=f"size 必须是 {'/'.join(str(s) for s in LIST_PAGE_SIZES)} 之一",
+        )
+    sort = sort or None  # 显式传空串等同未传，走默认排序
+    if sort is not None and sort not in _LEAD_SORT_SQL:
+        raise ApiError(
+            status_code=400,
+            code="invalid_sort",
+            message=f"sort 只支持 {'/'.join(_LEAD_SORT_SQL)}",
+        )
+    if order not in ("asc", "desc"):
+        raise ApiError(status_code=400, code="invalid_order", message="order 只支持 asc/desc")
+
+    if sort:
+        expr = _LEAD_SORT_SQL[sort]
+        dir_sql = "ASC" if order == "asc" else "DESC"
+        # 显式排序：稳定次键固定 id DESC；可空列先排 NULL 沉底。
+        if sort in _LEAD_SORT_NULLABLE:
+            order_sql = f"({expr} IS NULL) ASC, {expr} {dir_sql}, l.id DESC"
+        else:
+            order_sql = f"{expr} {dir_sql}, l.id DESC"
+    else:
+        order_sql = (
+            "CASE WHEN l.status = 'invalid' THEN 1 ELSE 0 END,"
+            " l.created_at DESC, l.id DESC"
+        )
+
     where_parts: list[str] = ["l.is_delete = 0"]
     params: list[object] = []
     
@@ -185,8 +245,7 @@ def list_leads(
                        AND f.kind='follow' AND f.is_delete=0
                      ORDER BY datetime(f.created_at) DESC, f.id DESC LIMIT 1) AS next_date
             FROM leads l {where_sql}
-            ORDER BY CASE WHEN l.status = 'invalid' THEN 1 ELSE 0 END,
-                     l.created_at DESC, l.id DESC
+            ORDER BY {order_sql}
             LIMIT ? OFFSET ?
             """,
             params + [size, offset],

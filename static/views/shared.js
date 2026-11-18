@@ -103,8 +103,18 @@ function aftersaleStatusLabel(status, statusLabel) {
  * opButtons + bindOps：表格「操作」列的事件委托（onclick 覆盖式，不叠加监听）
  * infoGrid：详情页信息网格（第 3 个元素 true = 值已是 HTML，不再转义）
  */
-function dataTable(columns, rows, emptyText, tableClass, wrapClass) {
+function dataTable(columns, rows, emptyText, tableClass, wrapClass, sortState) {
   var head = columns.map(function (c) {
+    if (c.sortKey && sortState) {
+      /* 可排序表头（Ticket #9 列表外壳）：三态 asc -> desc -> 默认，由 bindListShell 处理点击 */
+      var active = sortState.key === c.sortKey ? sortState.order : '';
+      return '<th class="sortable' + (active ? ' sorted' : '') + '" data-sort="' + esc(c.sortKey) + '"' +
+        (active ? ' data-order="' + active + '"' +
+          ' aria-sort="' + (active === 'asc' ? 'ascending' : 'descending') + '"' : '') +
+        ' role="button" tabindex="0" title="点击切换排序">' +
+        esc(c.title) + '<span class="sort-arrow">' +
+        (active === 'asc' ? '▲' : (active === 'desc' ? '▼' : '<i>↕</i>')) + '</span></th>';
+    }
     return '<th' + (c.align ? ' style="text-align:' + c.align + '"' : '') + '>' + esc(c.title) + '</th>';
   }).join('');
   var body = rows.length ? rows.map(function (r) {
@@ -145,6 +155,94 @@ function bindOps(root, map) {
       toast('操作失败：' + (e && e.message ? e.message : e), true);
     }
   };
+}
+
+/* ================= 列表外壳（Ticket #9）：三态排序 + 页码按钮 + 每页条数 =================
+ * 与 dataTable(columns, ..., sortState) 配合：列定义带 sortKey，表头即可点击排序。
+ * listPagerHtml(res, opts)  页码按钮（窗口化）+ 上一页/下一页 + 每页条数选择器。
+ * bindListShell(root, handlers)  统一事件委托：onPage/onSize/onSort（含 Enter/空格键）。
+ * 状态写入 URL hash 由各视图自己负责（本函数只管回调）。
+ */
+var LIST_PAGE_SIZES = [10, 20, 50, 100, 500];
+
+/* 三态循环：asc -> desc -> 默认（空串）；点新列直接从 asc 开始 */
+function cycleSortOrder(currentOrder) {
+  if (currentOrder === 'asc') { return 'desc'; }
+  if (currentOrder === 'desc') { return ''; }
+  return 'asc';
+}
+
+function listPagerHtml(res, opts) {
+  opts = opts || {};
+  var sizes = opts.sizes || LIST_PAGE_SIZES;
+  var total = Number(res.total) || 0;
+  if (!total) { return ''; }
+  var size = Number(res.size) || 20;
+  var pages = Math.max(1, Math.ceil(total / size));
+  var page = Math.min(Math.max(1, Number(res.page) || 1), pages);
+
+  /* 窗口化页码：1 … p-2 p-1 p p+1 p+2 … last，去重后拼装 */
+  var wanted = [1, page - 2, page - 1, page, page + 1, page + 2, pages];
+  var nums = [];
+  var last = 0;
+  wanted.forEach(function (n) {
+    if (n < 1 || n > pages || n <= last) { return; }
+    if (last && n - last > 1) { nums.push('…'); }
+    nums.push(String(n));
+    last = n;
+  });
+  var pageBtns = nums.map(function (n) {
+    if (n === '…') { return '<span class="pager-ellipsis">…</span>'; }
+    var cur = Number(n) === page;
+    return '<button type="button" class="btn btn-sm pager-page' + (cur ? ' active' : '') +
+      '"' + (cur ? ' disabled' : '') + ' data-page="' + n + '" aria-label="第 ' + n + ' 页">' + n + '</button>';
+  }).join('');
+
+  var sizeOpts = sizes.map(function (s) {
+    return '<option value="' + s + '"' + (s === size ? ' selected' : '') + '>' + s + '</option>';
+  }).join('');
+
+  return '<div class="list-pager">' +
+    '<div class="list-pager-pages">' +
+      '<button type="button" class="btn btn-sm" data-page="' + (page - 1) + '"' +
+        (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
+      pageBtns +
+      '<button type="button" class="btn btn-sm" data-page="' + (page + 1) + '"' +
+        (page >= pages ? ' disabled' : '') + '>下一页</button>' +
+    '</div>' +
+    '<div class="list-pager-size">' +
+      '<span class="small muted">每页</span>' +
+      '<select data-size-select aria-label="每页条数">' + sizeOpts + '</select>' +
+      '<span class="small muted">共 ' + total + ' 条</span>' +
+    '</div>' +
+  '</div>';
+}
+
+/* 列表外壳统一事件委托。handlers: { onPage(page), onSize(size), onSort(key, order) } */
+function bindListShell(root, handlers) {
+  root.addEventListener('click', function (ev) {
+    var pageBtn = ev.target && ev.target.closest ? ev.target.closest('button[data-page]') : null;
+    if (pageBtn && !pageBtn.disabled) {
+      if (handlers.onPage) { handlers.onPage(Number(pageBtn.getAttribute('data-page')) || 1); }
+      return;
+    }
+    var th = ev.target && ev.target.closest ? ev.target.closest('th[data-sort]') : null;
+    if (th && handlers.onSort) {
+      handlers.onSort(th.getAttribute('data-sort'), th.getAttribute('data-order') || '');
+    }
+  });
+  root.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter' && ev.key !== ' ') { return; }
+    var th = ev.target && ev.target.closest ? ev.target.closest('th[data-sort]') : null;
+    if (th && handlers.onSort) {
+      ev.preventDefault();
+      handlers.onSort(th.getAttribute('data-sort'), th.getAttribute('data-order') || '');
+    }
+  });
+  root.addEventListener('change', function (ev) {
+    var sel = ev.target && ev.target.closest ? ev.target.closest('[data-size-select]') : null;
+    if (sel && handlers.onSize) { handlers.onSize(Number(sel.value) || 20); }
+  });
 }
 
 function infoGrid(pairs) {

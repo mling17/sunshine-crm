@@ -2268,6 +2268,22 @@ table.data-table th { font-weight: 600; color: #6b7280; background: #f9fafb; whi
 table.data-table td.nowrap,
 table.data-table th.nowrap { white-space: nowrap; }
 
+/* 列表外壳（Ticket #9）：可排序表头 + 页码按钮 + 每页条数选择器 */
+table.data-table th.sortable { cursor: pointer; user-select: none; -webkit-user-select: none; }
+table.data-table th.sortable:hover { color: #2563eb; }
+table.data-table th.sortable .sort-arrow { display: inline-block; margin-left: 3px; font-size: 10px; color: #9ca3af; }
+table.data-table th.sortable .sort-arrow i { font-style: normal; opacity: .6; }
+table.data-table th.sortable.sorted,
+table.data-table th.sortable.sorted .sort-arrow { color: #2563eb; }
+
+.list-pager { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  flex-wrap: wrap; padding-top: 10px; }
+.list-pager-pages { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.list-pager-pages .pager-page.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+.list-pager-pages .pager-ellipsis { color: #9ca3af; padding: 0 2px; }
+.list-pager-size { display: flex; gap: 6px; align-items: center; }
+.list-pager-size select { padding: 4px 6px; border: 1px solid var(--line, #d1d5db); border-radius: 6px; background: #fff; }
+
 .op-group { display: flex; gap: 10px; flex-wrap: nowrap; align-items: center; }
 .op-group .btn-link { padding: 0; font-size: 13px; white-space: nowrap; }
 .op-group .btn-link.danger { color: #dc2626; }
