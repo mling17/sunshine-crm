@@ -89,8 +89,9 @@ function viewFollowups(root, route) {
       stageSel.disabled = true;
       stageSel.value = '';
       if (!customerId) { return Promise.resolve(); }
-      return api('/deals?customer_id=' + encodeURIComponent(customerId)).then(function (deals) {
-        dealSel.innerHTML = '<option value="">不关联</option>' + (deals || []).map(function (d) {
+      return api('/deals?customer_id=' + encodeURIComponent(customerId) + '&size=500').then(function (res) {
+        var deals = (res && res.items) || [];
+        dealSel.innerHTML = '<option value="">不关联</option>' + deals.map(function (d) {
           var label = [d.product_type, d.model].filter(Boolean).join(' ') || ('商机 #' + d.id);
           return '<option value="' + d.id + '">' + esc(label) + ' · ' +
             esc(d.stage_label || STAGE_LABEL[d.stage] || d.stage) + ' · ' + money(d.amount) + '</option>';

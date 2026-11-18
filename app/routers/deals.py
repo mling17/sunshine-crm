@@ -31,6 +31,7 @@ from app.errors import ApiError
 from app.models import (
     DealDetailOut,
     DealIn,
+    DealListOut,
     DealItemIn,
     DealItemOut,
     DealItemUpdate,
@@ -42,6 +43,7 @@ from app.models import (
 )
 from app.product_catalog import config_summary, get_product, product_snapshot
 from app.routers.auth import require_auth
+from app.routers.leads import LIST_PAGE_SIZES
 from app.security import now_iso, now_local_iso
 from app.services import next_no, resolve_carrier_contact, upgrade_intent
 from app.timeline import add_entry, change_summary, entries_for
@@ -53,6 +55,22 @@ router = APIRouter(
 )
 
 STAGES = DEAL_STAGE_ORDER
+
+#: 列表排序白名单（Ticket #13）：排序 SQL 一律来自这里的映射，绝不拼接前端传来的原始列名。
+#: customer 走 LEFT JOIN 的 c.name；size 对应列表「尺寸」列（deals.spec）。
+_DEAL_SORT_SQL: dict[str, str] = {
+    "customer": "c.name",
+    "product": "d.product_name_snapshot",
+    "model": "d.model",
+    "drive_type": "d.drive_type",
+    "size": "d.spec",
+    "amount": "d.amount",
+    "stage": "d.stage",
+    "updated_at": "d.updated_at",
+}
+
+# 可为 NULL 的排序列：无论升降序都让其沉底（(expr IS NULL) ASC），否则升序时大量空值堆在最前面。
+_DEAL_SORT_NULLABLE = frozenset({"customer", "product", "model", "drive_type", "size"})
 #: 会写「编辑」履历的字段
 _CHANGE_TRACKED = (
     "product_id", "product_code_snapshot", "product_name_snapshot",
@@ -266,12 +284,51 @@ def _item_values(conn, payload: DealItemIn | DealItemUpdate, old=None) -> dict:
 # ---------------- 列表 / 详情 ----------------
 
 
-@router.get("/deals", response_model=list[DealOut])
+@router.get("/deals", response_model=DealListOut)
 def list_deals(
     customer_id: int | None = Query(default=None, gt=0),
     stage: str | None = Query(default=None, max_length=32),
     q: str | None = Query(default=None, max_length=64),
-) -> list[DealOut]:
+    page: int = Query(default=1),
+    size: int = Query(default=20),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
+) -> DealListOut:
+    """商机列表。
+
+    分页/排序（Ticket #13，复用 Ticket #9/#10 同一套校验口径）：size 白名单
+    ``LIST_PAGE_SIZES``，sort 白名单见 ``_DEAL_SORT_SQL``；非法 page/size/sort/order
+    一律 400，排序 SQL 只走白名单映射。不传 sort 时按更新时间倒序、id 倒序。
+    """
+    if page < 1:
+        raise ApiError(status_code=400, code="invalid_page", message="page 必须 >= 1")
+    if size not in LIST_PAGE_SIZES:
+        raise ApiError(
+            status_code=400,
+            code="invalid_page_size",
+            message=f"size 必须是 {'/'.join(str(s) for s in LIST_PAGE_SIZES)} 之一",
+        )
+    sort = sort or None  # 显式传空串等同未传，走默认排序
+    if sort is not None and sort not in _DEAL_SORT_SQL:
+        raise ApiError(
+            status_code=400,
+            code="invalid_sort",
+            message=f"sort 只支持 {'/'.join(_DEAL_SORT_SQL)}",
+        )
+    if order not in ("asc", "desc"):
+        raise ApiError(status_code=400, code="invalid_order", message="order 只支持 asc/desc")
+
+    if sort:
+        expr = _DEAL_SORT_SQL[sort]
+        dir_sql = "ASC" if order == "asc" else "DESC"
+        # 显式排序：稳定次键固定 id DESC；可空列先排 NULL 沉底（升/降序都沉底）。
+        if sort in _DEAL_SORT_NULLABLE:
+            order_sql = f"({expr} IS NULL) ASC, {expr} {dir_sql}, d.id DESC"
+        else:
+            order_sql = f"{expr} {dir_sql}, d.id DESC"
+    else:
+        order_sql = "d.updated_at DESC, d.id DESC"
+
     where, params = ["d.is_delete = 0", "c.is_delete = 0"], []
     if customer_id is not None:
         where.append("d.customer_id = ?")
@@ -283,15 +340,25 @@ def list_deals(
         where.append("d.stage = ?")
         params.append(value)
     if q:
-        like = f"%{q.strip()}%"
+        kw = q.strip()
+        # 通配符要转义：否则搜 "%" 或 "_" 会命中全部
+        escaped = kw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
         where.append(
-            "(d.model LIKE ? OR d.spec LIKE ? OR c.name LIKE ?"
-            " OR d.product_name_snapshot LIKE ? OR d.product_code_snapshot LIKE ?)"
+            "(d.model LIKE ? ESCAPE '\\' OR d.spec LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\'"
+            " OR d.product_name_snapshot LIKE ? ESCAPE '\\'"
+            " OR d.product_code_snapshot LIKE ? ESCAPE '\\')"
         )
         params.extend([like, like, like, like, like])
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     with db_conn() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM deals d"
+            " LEFT JOIN customers c ON c.id = d.customer_id"
+            f" {where_sql}",
+            params,
+        ).fetchone()["n"]
         rows = conn.execute(
             "SELECT d.*, c.name AS customer_name,"
             " (SELECT COUNT(*) FROM deal_quotes q"
@@ -301,10 +368,15 @@ def list_deals(
             "  ORDER BY q.id DESC LIMIT 1) AS confirmed_quote_no"
             " FROM deals d"
             f" LEFT JOIN customers c ON c.id = d.customer_id {where_sql}"
-            " ORDER BY d.id DESC",
-            params,
+            f" ORDER BY {order_sql} LIMIT ? OFFSET ?",
+            [*params, size, (page - 1) * size],
         ).fetchall()
-    return [_out(row) for row in rows]
+    return DealListOut(
+        items=[_out(row) for row in rows],
+        total=total,
+        page=page,
+        size=size,
+    )
 
 
 @router.get("/deals/{deal_id}", response_model=DealDetailOut)

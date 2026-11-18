@@ -709,60 +709,149 @@ function openQuoteConfirmModal(quote, done) {
 }
 
 /* ---------------- 商机列表（表格） ---------------- */
+/* 列表外壳状态（Ticket #13）：stage 页签 + page/size/sort/order 一起存于 hash URL，
+ * 与线索/客户页同一套口径（Ticket #9/#10）：刷新或分享链接后状态保持；
+ * 改 sort/size/stage 自动回第 1 页；写 URL 用 history.replaceState（不触发 hashchange）。 */
+var DEAL_SORT_KEYS = ['customer', 'product', 'model', 'drive_type', 'size', 'amount', 'stage', 'updated_at'];
+
+function readDealListQuery(query) {
+    var page = parseInt(query.get('page'), 10);
+    var size = parseInt(query.get('size'), 10);
+    var sort = query.get('sort') || '';
+    var order = query.get('order') || '';
+    if (!(page >= 1)) { page = 1; }
+    if (LIST_PAGE_SIZES.indexOf(size) < 0) { size = 20; }
+    if (DEAL_SORT_KEYS.indexOf(sort) < 0) { sort = ''; }
+    if (order !== 'asc' && order !== 'desc') { order = 'desc'; }
+    return { page: page, size: size, sort: sort, order: order };
+}
+
+function dealListHash(list) {
+    var p = new URLSearchParams();
+    if (list.stage) { p.set('stage', list.stage); }
+    p.set('page', String(list.page));
+    p.set('size', String(list.size));
+    if (list.sort) {
+        p.set('sort', list.sort);
+        p.set('order', list.order);
+    }
+    return '#/deals?' + p.toString();
+}
+
+/* 状态变更统一入口：合并 patch 写 hash；改 size/sort/stage 时自动把 page 归 1 */
+function updateDealListState(root, patch) {
+    var cur = readDealListQuery(parseRoute().query);
+    var next = { page: cur.page, size: cur.size, sort: cur.sort, order: cur.order };
+    Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
+    if (patch.page === undefined &&
+        (patch.size !== undefined || patch.sort !== undefined || patch.stage !== undefined)) {
+        next.page = 1;
+    }
+    if (!next.sort) { next.order = 'desc'; }
+    history.replaceState(null, '', dealListHash(next));
+    return next;
+}
+
 function viewDeals(root, route) {
     var stage = (route && route.query.get('stage')) || '';
-    var path = '/deals' + (stage ? '?stage=' + encodeURIComponent(stage) : '');
+    if (stage && STAGES.map(function (s) { return s[0]; }).indexOf(stage) < 0) { stage = ''; }
 
-    return Promise.all([api(path), ensureCustomerIndex()]).then(function (all) {
-        var deals = (all[0] || []).slice().sort(function (a, b) {
-            var ak = a.updated_at || a.created_at || '';
-            var bk = b.updated_at || b.created_at || '';
-            return ak < bk ? 1 : (ak > bk ? -1 : 0);
-        });
-        var index = all[1] || {};
+    var tabs = [['', '全部']].concat(STAGES);
+    var tabHtml = tabs.map(function (t) {
+        return '<button type="button" class="tab-btn' + (stage === t[0] ? ' active' : '') +
+            '" data-stage="' + t[0] + '">' + esc(t[1]) + '</button>';
+    }).join('');
 
-        var tabs = [['', '全部']].concat(STAGES);
-        var tabHtml = tabs.map(function (t) {
-            return '<button type="button" class="tab-btn' + (stage === t[0] ? ' active' : '') +
-                '" data-stage="' + t[0] + '">' + esc(t[1]) + '</button>';
-        }).join('');
+    root.innerHTML =
+        '<div class="card">' +
+        '<div class="card-head"><h2>商机</h2>' +
+        '<span class="small muted">由线索 / 客户转来，不在此新建</span></div>' +
+        '<div class="tabs" id="dealTabs">' + tabHtml + '</div>' +
+        '</div>' +
+        '<div class="card" id="dealShell"><div id="dealList"><p class="loading">加载中…</p></div>' +
+        '<div id="dealPager"></div></div>';
 
-        var rowsHtml = deals.length ? deals.map(function (d) {
-            var customerName = index[d.customer_id] || ('客户 #' + d.customer_id);
-            return '<tr>' +
-                '<td><a href="#/deals/' + d.id + '">' + esc(customerName) + '</a></td>' +
-                '<td>' + esc(d.product_name_snapshot || d.product_type ||
-                    (d.quote_count ? d.quote_count + ' 张报价单' : '—')) + '</td>' +
-                '<td>' + esc(d.product_code_snapshot || d.model || '—') + '</td>' +
-                '<td>' + driveBadge(d) + '</td>' +
-                '<td>' + esc(d.spec || '—') + '</td>' +
-                '<td style="text-align:right;white-space:nowrap">' +
-                (Number(d.amount || 0) > 0 ? money(d.amount) : '—') + '</td>' +
-                '<td>' + dealStageBadge(d.stage, d.stage_label, d.order_id) + '</td>' +
-                '<td style="white-space:nowrap">' + fmtDateTime(d.updated_at || d.created_at).slice(0, 10) + '</td>' +
-                '<td style="white-space:nowrap"><a class="btn btn-sm" href="#/deals/' + d.id + '">' +
-                    (d.order_id ? '查看' : '跟进') + '</a></td>' +
-                '</tr>';
-        }).join('') : '<tr><td colspan="9" class="empty">还没有商机：请进入线索或客户跟进页转商机</td></tr>';
-
-        root.innerHTML =
-            '<div class="card">' +
-            '<div class="card-head"><h2>商机 <span class="badge muted">' + deals.length + '</span></h2>' +
-            '<span class="small muted">由线索 / 客户转来，不在此新建</span></div>' +
-            '<div class="tabs" id="dealTabs">' + tabHtml + '</div>' +
-            '</div>' +
-            '<div class="card"><div class="table-wrap"><table><thead><tr>' +
-            '<th>客户</th><th>产品</th><th>型号</th><th>手动/电动</th><th>尺寸</th>' +
-            '<th style="text-align:right">成交报价</th><th>阶段</th><th>更新时间</th><th>操作</th>' +
-            '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
-
-        $('#dealTabs', root).addEventListener('click', function (ev) {
-            var btn = ev.target.closest('.tab-btn');
-            if (!btn) { return; }
-            var next = btn.getAttribute('data-stage') || '';
-            navigate('#/deals' + (next ? '?stage=' + encodeURIComponent(next) : ''));
-        });
+    bindListShell($('#dealShell', root), {
+        onPage: function (p) { updateDealListState(root, { page: p }); loadDeals(root); },
+        onSize: function (s) { updateDealListState(root, { size: s }); loadDeals(root); },
+        onSort: function (key, order) {
+            var nextOrder = cycleSortOrder(order);
+            if (nextOrder) { updateDealListState(root, { sort: key, order: nextOrder }); }
+            else { updateDealListState(root, { sort: '' }); }
+            loadDeals(root);
+        }
     });
+
+    $('#dealTabs', root).addEventListener('click', function (ev) {
+        var btn = ev.target.closest('.tab-btn');
+        if (!btn) { return; }
+        updateDealListState(root, { stage: btn.getAttribute('data-stage') || '' });
+        $$('#dealTabs .tab-btn', root).forEach(function (b) {
+            b.classList.toggle('active', b === btn);
+        });
+        loadDeals(root);
+    });
+
+    return loadDeals(root);
+}
+
+function loadDeals(root) {
+    var listEl = $('#dealList', root);
+    var pagerEl = $('#dealPager', root);
+    if (!listEl) { return Promise.resolve(); }
+    listEl.innerHTML = '<p class="loading">加载中…</p>';
+
+    var list = readDealListQuery(parseRoute().query);
+    var params = new URLSearchParams();
+    if (list.stage) { params.set('stage', list.stage); }
+    params.set('page', String(list.page));
+    params.set('size', String(list.size));
+    if (list.sort) { params.set('sort', list.sort); params.set('order', list.order); }
+
+    return Promise.all([api('/deals?' + params.toString()), ensureCustomerIndex()])
+        .then(function (all) {
+            var res = all[0] || { items: [], total: 0 };
+            var index = all[1] || {};
+
+            listEl.innerHTML = dataTable([
+                { title: '客户', sortKey: 'customer', render: function (d) {
+                    var customerName = index[d.customer_id] || ('客户 #' + d.customer_id);
+                    return '<a href="#/deals/' + d.id + '">' + esc(customerName) + '</a>';
+                } },
+                { title: '产品', sortKey: 'product', render: function (d) {
+                    return esc(d.product_name_snapshot || d.product_type ||
+                        (d.quote_count ? d.quote_count + ' 张报价单' : '—'));
+                } },
+                { title: '型号', sortKey: 'model', render: function (d) {
+                    return esc(d.product_code_snapshot || d.model || '—');
+                } },
+                { title: '手动/电动', sortKey: 'drive_type', nowrap: true, render: function (d) {
+                    return driveBadge(d);
+                } },
+                { title: '尺寸', sortKey: 'size', render: function (d) {
+                    return esc(d.spec || '—');
+                } },
+                { title: '成交报价', sortKey: 'amount', align: 'right', nowrap: true, render: function (d) {
+                    return Number(d.amount || 0) > 0 ? money(d.amount) : '—';
+                } },
+                { title: '阶段', sortKey: 'stage', nowrap: true, render: function (d) {
+                    return dealStageBadge(d.stage, d.stage_label, d.order_id);
+                } },
+                { title: '更新时间', sortKey: 'updated_at', nowrap: true, render: function (d) {
+                    return fmtDateTime(d.updated_at || d.created_at).slice(0, 10);
+                } },
+                { title: '操作', nowrap: true, render: function (d) {
+                    return '<a class="btn btn-sm" href="#/deals/' + d.id + '">' +
+                        (d.order_id ? '查看' : '跟进') + '</a>';
+                } }
+            ], res.items || [], '还没有商机：请进入线索或客户跟进页转商机',
+            '', '',
+            { key: list.sort, order: list.order });
+
+            pagerEl.innerHTML = listPagerHtml(res);
+        }).catch(function (err) {
+            listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';
+        });
 }
 
 /* ---------------- 商机详情 = 跟进页 ---------------- */

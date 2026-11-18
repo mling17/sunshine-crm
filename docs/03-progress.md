@@ -52,6 +52,7 @@
 | TASK-033 | 外部 API 生产更新脚本、审计与上线验证包 | ✅ 已完成 | `v2_022 -> v2_025` SQLite/MySQL 脚本收敛；preflight/postcheck、Token 模板、上线手册和第三方 API 文档齐备 |
 | TASK-034 | 代码审查整改：外部手机号错误契约与共享校验 | ✅ 已完成 | 非字符串批次项返回 `invalid_phone` 和位置；跟进对象校验、手机号比较键和外部 Token 测试夹具复用 |
 | TASK-035 | 共享列表外壳与线索分页/排序（Ticket #9） | ✅ 已完成 | size 白名单 10/20/50/100/500、sort 白名单服务端 SQL 映射均 400 兜底；线索表头三态排序、页码按钮、每页条数；状态写 `#/leads` hash URL，改排序或条数回第 1 页 |
+| TASK-037 | 商机列表服务端分页与排序（Ticket #13） | ✅ 已完成 | `GET /deals` 改 `{items,total,page,size}`，复用线索/客户白名单口径（8 个可排序列，尺寸=`spec`），默认 `updated_at DESC, id DESC`；商机页接入共享外壳，stage 页签与分页排序同写 hash URL |
 | TASK-036 | 客户列表接入共享外壳与上次跟进列（Ticket #10） | ✅ 已完成 | 客户列表复用同一套分页/排序白名单（含 `name` 列），新增派生 `last_follow`（仅人工跟进）；六个可排序列表头 + 上次跟进列；状态写 `#/customers` hash URL，筛选/排序/条数变更回第 1 页；本地 pagerHtml 已移除 |
 
 ## 3. 已完成任务
@@ -121,6 +122,12 @@
 - `docs/TC-LEADS.md`：92 条线索页手工用例，最近记录为全通过。
 - `docs/TC-DEALS.md`：55 条商机页场景，曾记录 6 项失败；多数缺陷在后续提交中处理，发布仍应以当前代码和最新回归为准。
 - `ops/T9-T10-上线与验收记录.md`：V1 传统部署的历史现场记录。
+
+### 4.5 TASK-037 商机列表分页排序回归
+
+- 定向回归：`Ran 92 tests ... OK`，覆盖商机 API 新契约、订单/字典/跟进既有适配与前端结构测试。
+- 全量回归：`Ran 610 tests ... FAILED (failures=4, skipped=2)`：606 通过、2 跳过；4 项失败为分支既有「附件 10/20 上限」测试口径问题（基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 验证环境：隔离 SQLite 数据库与上传目录；未使用生产库。
 
 ### 4.4 本次商机归档只读回归
 
@@ -287,6 +294,17 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-18 · TASK-037 · 商机列表服务端分页与排序
+
+- 来源：`[用户明确要求]`，GitHub issue #13（父需求 #8 列表页统一分页与可排序表头）。
+- 后端 `GET /api/crm/deals`：响应从全量数组改为 `{items,total,page,size}`；复用 Ticket #9/#10 同一套校验口径（`LIST_PAGE_SIZES` 白名单与 `invalid_page`/`invalid_page_size`/`invalid_sort`/`invalid_order` 400 错误码）；`sort` 白名单 `customer/product/model/drive_type/size/amount/stage/updated_at`（`customer` 走 LEFT JOIN `c.name`，`size` 即列表「尺寸」列 `deals.spec`），排序 SQL 只来自 `_DEAL_SORT_SQL` 服务端映射；可空列升/降序均 NULL 沉底，显式排序稳定次键 `id DESC`，未传 sort 默认 `updated_at DESC, id DESC`；`q` 搜索通配符转义对齐线索/客户页口径，`customer_id`/`stage` 筛选与分页共存。
+- 前端商机页接入共享列表外壳：8 个可排序表头（客户/产品/型号/手动电动/尺寸/成交报价/阶段/更新时间），操作列不可排序；stage 页签与 `page/size/sort/order` 一起写入 `#/deals` hash URL（`history.replaceState`），改排序/条数/页签均回第 1 页；本地整表加载 + 前端排序移除。
+- 连带适配：`followups.js` 跟进弹窗的商机下拉改用 `res.items`（`size=500` 取全量）；`index.html` 商机页与跟进页脚本缓存版本号刷新。
+- 既有测试适配新契约：`test_deals_v2.py`、`test_deal_orders.py`、`test_dicts.py`、`test_followups.py` 中按数组取 `GET /deals` 的断言改取 `items`。
+- 新增 API 测试（分页契约、size/page/sort/order 400 边界、8 个白名单列全方向、默认 `updated_at DESC, id DESC`、显式排序 `id DESC` 次键、金额/阶段排序、JOIN 列客户名排序、可空列 NULL 沉底双向、筛选与分页共存）与前端结构测试 `tests/test_deals_ui.py`（外壳接入、可排序列、hash URL 含 stage+page+size+sort+order、翻页归 1、缓存版本断言）。
+- 定向回归 92 项通过；隔离 SQLite 全量回归 610 项中 606 通过、2 跳过，4 项失败为分支既有「附件 10/20 上限」测试口径问题（基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 未连接真实 MySQL 验证；未做浏览器人工冒烟。
 
 ### 2026-11-18 · TASK-036 · 客户列表外壳与上次跟进列
 

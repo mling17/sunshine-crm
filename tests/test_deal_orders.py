@@ -139,8 +139,9 @@ class DealOrdersTest(ApiTestCase):
         resp = self.client.get("/api/crm/deals")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(len(data), 1)
-        self.assertNotIn("title", data[0])
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertNotIn("title", data["items"][0])
 
     def test_list_deals_with_drive_type_labels(self):
         """测试列表接口返回 drive_type_label"""
@@ -150,9 +151,9 @@ class DealOrdersTest(ApiTestCase):
         resp = self.client.get("/api/crm/deals")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(len(data), 1)
-        self.assertIn("drive_type_label", data[0])
-        self.assertEqual(data[0]["drive_type_label"], "电动")
+        self.assertEqual(len(data["items"]), 1)
+        self.assertIn("drive_type_label", data["items"][0])
+        self.assertEqual(data["items"][0]["drive_type_label"], "电动")
 
     def test_list_deals_locked_field(self):
         """测试列表接口返回 locked 字段"""
@@ -163,17 +164,17 @@ class DealOrdersTest(ApiTestCase):
         resp = self.client.get("/api/crm/deals")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(len(data), 1)
-        self.assertFalse(data[0]["locked"])
+        self.assertEqual(len(data["items"]), 1)
+        self.assertFalse(data["items"][0]["locked"])
         
         # 生成订单后 locked 应为 True
         self.client.post(f"/api/crm/deals/{deal['id']}/win")
         resp = self.client.get("/api/crm/deals")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(len(data), 1)
-        self.assertTrue(data[0]["locked"])
-        self.assertEqual(data[0]["stage_label"], "已生成订单")
+        self.assertEqual(len(data["items"]), 1)
+        self.assertTrue(data["items"][0]["locked"])
+        self.assertEqual(data["items"][0]["stage_label"], "已生成订单")
 
         detail = self.client.get(f"/api/crm/deals/{deal['id']}").json()
         self.assertEqual(detail["stage_label"], "已生成订单")

@@ -192,7 +192,10 @@ class DictHttpTest(ApiTestCase):
         detail = self.client.get(f"/api/crm/deals/{deal['id']}").json()
         self.assertEqual(detail["stage_label"], "等待客户拍板", "字典改名必须作用到出参")
         rows = self.client.get("/api/crm/deals").json()
-        self.assertEqual([r["stage_label"] for r in rows if r["id"] == deal["id"]], ["等待客户拍板"])
+        self.assertEqual(
+            [r["stage_label"] for r in rows["items"] if r["id"] == deal["id"]],
+            ["等待客户拍板"],
+        )
 
     def test_status_and_type_labels_follow_dict(self):
         created = self.client.post(

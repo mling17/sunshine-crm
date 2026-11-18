@@ -491,6 +491,13 @@ class DealOut(BaseModel):
         return self
 
 
+class DealListOut(BaseModel):
+    items: list[DealOut]
+    total: int
+    page: int
+    size: int
+
+
 class DealDetailOut(DealOut):
     """商机详情：+ 客户名 / 订单 / 履历 / 资料汇总（PLANNER-V3 §5.5）。"""
 

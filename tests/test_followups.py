@@ -200,15 +200,15 @@ class FollowUpsTest(ApiTestCase):
         self.assertEqual(body["deal_stage"], "won")
 
         deals = self.client.get(f"/api/crm/deals?customer_id={c['id']}").json()
-        self.assertEqual(deals[0]["stage"], "won")
-        self.assertTrue(deals[0]["closed_at"], "进 won 必须置 closed_at（本月成交口径）")
+        self.assertEqual(deals["items"][0]["stage"], "won")
+        self.assertTrue(deals["items"][0]["closed_at"], "进 won 必须置 closed_at（本月成交口径）")
 
         # 再记一条移出 won → closed_at 清空
         resp = self.post_follow_up(c["id"], deal_id=deal["id"], stage="lost")
         self.assertEqual(resp.status_code, 200, resp.text)
         deals = self.client.get(f"/api/crm/deals?customer_id={c['id']}").json()
-        self.assertEqual(deals[0]["stage"], "lost")
-        self.assertIsNone(deals[0]["closed_at"])
+        self.assertEqual(deals["items"][0]["stage"], "lost")
+        self.assertIsNone(deals["items"][0]["closed_at"])
 
     def test_stage_validated_even_without_deal(self):
         c = self.create_customer(name="张伟")

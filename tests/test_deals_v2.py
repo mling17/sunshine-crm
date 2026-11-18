@@ -8,6 +8,7 @@ from datetime import datetime
 
 from tests._util import ApiTestCase, open_client
 
+from app.db import db_conn
 from app.models import STAGE_LABELS, STAGES
 
 
@@ -137,7 +138,7 @@ class DealsTest(ApiTestCase):
 
         # 非法值不能把库里的阶段改坏
         detail = self.client.get("/api/crm/deals", params={"customer_id": c["id"]}).json()
-        self.assertEqual(detail[0]["stage"], "quote")
+        self.assertEqual(detail["items"][0]["stage"], "quote")
 
     # ---------- 改字段 ----------
     def test_partial_update_keeps_other_fields(self):
@@ -177,18 +178,20 @@ class DealsTest(ApiTestCase):
 
         only_a = self.client.get("/api/crm/deals", params={"customer_id": a["id"]})
         self.assertEqual(only_a.status_code, 200, only_a.text)
-        self.assertEqual({d["id"] for d in only_a.json()}, {d1["id"], d2["id"]})
+        self.assertEqual(
+            {d["id"] for d in only_a.json()["items"]}, {d1["id"], d2["id"]}
+        )
 
         confirm = self.client.get("/api/crm/deals", params={"stage": "confirm"}).json()
-        self.assertEqual([d["id"] for d in confirm], [d3["id"]])
+        self.assertEqual([d["id"] for d in confirm["items"]], [d3["id"]])
 
         combined = self.client.get(
             "/api/crm/deals", params={"customer_id": a["id"], "stage": "won"}
         ).json()
-        self.assertEqual(combined, [])
+        self.assertEqual(combined["items"], [])
 
         all_deals = self.client.get("/api/crm/deals").json()
-        self.assertEqual(len(all_deals), 3)
+        self.assertEqual(all_deals["total"], 3)
 
         bad = self.client.get("/api/crm/deals", params={"stage": "bogus"})
         self.assertEqual(bad.status_code, 400, bad.text)
@@ -207,7 +210,7 @@ class DealsTest(ApiTestCase):
                 d["id"]
                 for d in self.client.get(
                     "/api/crm/deals", params={"customer_id": c["id"]}
-                ).json()
+                ).json()["items"]
             },
             {first["id"], second["id"]},
         )
@@ -380,6 +383,245 @@ class DealsTest(ApiTestCase):
         # ④ 流失后备注仍可改
         note2 = self.client.put(f"/api/crm/deals/{d2['id']}", json={"note": "流失原因跟进"})
         self.assertEqual(note2.status_code, 200, note2.text)
+
+
+class DealsListPaginationTest(ApiTestCase):
+    """Ticket #13：商机列表服务端分页 + 排序（复用线索/客户页同一套校验口径）。"""
+
+    # ---------- 分页契约 ----------
+    def test_pagination_contract(self):
+        c = self.create_customer(name="分页客户")
+        ids = [self.create_deal(c["id"], amount=float(i + 1))["id"] for i in range(25)]
+
+        body = self.client.get("/api/crm/deals", params={"page": 2, "size": 10}).json()
+        self.assertEqual(body["page"], 2)
+        self.assertEqual(body["size"], 10)
+        self.assertEqual(body["total"], 25)
+        self.assertEqual(len(body["items"]), 10)
+        # 默认排序 updated_at DESC, id DESC：第 2 页应是倒数第 11~20 个
+        self.assertEqual(body["items"][0]["id"], ids[14])
+
+        last = self.client.get("/api/crm/deals", params={"page": 3, "size": 10}).json()
+        self.assertEqual(len(last["items"]), 5)
+        beyond = self.client.get("/api/crm/deals", params={"page": 4, "size": 10}).json()
+        self.assertEqual(beyond["items"], [])
+
+    def test_size_whitelist(self):
+        c = self.create_customer(name="白名单客户")
+        for i in range(15):
+            self.create_deal(c["id"], amount=float(i))
+        for size in (10, 20, 50, 100, 500):
+            resp = self.client.get("/api/crm/deals", params={"size": size})
+            self.assertEqual(resp.status_code, 200, resp.text)
+            self.assertEqual(resp.json()["size"], size)
+        for bad in (0, 1, 15, 200, 501, -10):
+            resp = self.client.get("/api/crm/deals", params={"size": bad})
+            self.assertEqual(resp.status_code, 400, f"size={bad}")
+            self.assertEqual(resp.json()["code"], "invalid_page_size")
+
+    def test_page_must_be_positive(self):
+        c = self.create_customer(name="页码客户")
+        self.create_deal(c["id"])
+        for bad in (0, -1):
+            resp = self.client.get("/api/crm/deals", params={"page": bad})
+            self.assertEqual(resp.status_code, 400, f"page={bad}")
+            self.assertEqual(resp.json()["code"], "invalid_page")
+        resp = self.client.get("/api/crm/deals")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["size"], 20)  # 默认 20
+
+    # ---------- sort / order 白名单 ----------
+    def test_invalid_sort_or_order_400(self):
+        c = self.create_customer(name="排序客户")
+        self.create_deal(c["id"])
+        for url in (
+            "/api/crm/deals?sort=amount;DROP TABLE deals",
+            "/api/crm/deals?sort=customer_name",
+            "/api/crm/deals?sort=spec",
+            "/api/crm/deals?sort=amount&order=up",
+            "/api/crm/deals?sort=amount&order=1 desc",
+        ):
+            with self.subTest(url=url):
+                resp = self.client.get(url)
+                self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(
+            self.client.get("/api/crm/deals?sort=customer_name").json()["code"],
+            "invalid_sort",
+        )
+        self.assertEqual(
+            self.client.get("/api/crm/deals?sort=amount&order=up").json()["code"],
+            "invalid_order",
+        )
+
+    def test_all_whitelisted_sort_keys_accepted(self):
+        c = self.create_customer(name="全列客户")
+        self.create_deal(
+            c["id"], model="TM-300", spec="跨度 4m", product_type="天幕",
+            amount=100.0,
+        )
+        for sort in (
+            "customer", "product", "model", "drive_type",
+            "size", "amount", "stage", "updated_at",
+        ):
+            for order in ("asc", "desc"):
+                resp = self.client.get(
+                    "/api/crm/deals", params={"sort": sort, "order": order}
+                )
+                self.assertEqual(resp.status_code, 200, f"{sort}/{order}")
+
+    # ---------- 默认排序 / 稳定次键 ----------
+    def test_default_order_is_updated_at_desc_id_desc(self):
+        c = self.create_customer(name="默认排序客户")
+        ids = [self.create_deal(c["id"])["id"] for _ in range(3)]
+        # 三条 updated_at 压成同一值：默认排序必须有稳定次键 id DESC
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE deals SET updated_at = '2026-11-18T00:00:00Z'"
+                " WHERE id IN (?, ?, ?)",
+                tuple(ids),
+            )
+        body = self.client.get("/api/crm/deals?size=500").json()
+        got = [d["id"] for d in body["items"] if d["id"] in set(ids)]
+        self.assertEqual(got, list(reversed(ids)))
+
+        # updated_at 不同值时：新的排前面
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE deals SET updated_at = '2026-11-01T00:00:00Z' WHERE id = ?",
+                (ids[-1],),
+            )
+        body = self.client.get("/api/crm/deals?size=500").json()
+        got = [d["id"] for d in body["items"] if d["id"] in set(ids)]
+        self.assertEqual(got[-1], ids[-1], "旧的 updated_at 应沉底")
+
+    def test_explicit_sort_uses_id_desc_tiebreak(self):
+        c = self.create_customer(name="稳定次键客户")
+        ids = [self.create_deal(c["id"], amount=500.0)["id"] for _ in range(3)]
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE deals SET amount = 500.0 WHERE id IN (?, ?, ?)", tuple(ids)
+            )
+        body = self.client.get(
+            "/api/crm/deals?sort=amount&order=asc&size=500"
+        ).json()
+        got = [d["id"] for d in body["items"] if d["id"] in set(ids)]
+        self.assertEqual(got, list(reversed(ids)))
+
+    # ---------- 普通列排序 ----------
+    def test_sort_by_amount(self):
+        c = self.create_customer(name="金额客户")
+        a = self.create_deal(c["id"], amount=100.0)["id"]
+        b = self.create_deal(c["id"], amount=300.0)["id"]
+        d = self.create_deal(c["id"], amount=200.0)["id"]
+        body = self.client.get(
+            "/api/crm/deals?sort=amount&order=asc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {a, b, d}]
+        self.assertEqual(got, [a, d, b])
+        body = self.client.get(
+            "/api/crm/deals?sort=amount&order=desc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {a, b, d}]
+        self.assertEqual(got, [b, d, a])
+
+    def test_sort_by_stage(self):
+        c = self.create_customer(name="阶段客户")
+        lost = self.create_deal(c["id"], amount=1.0)["id"]
+        self.client.post(f"/api/crm/deals/{lost}/lose", json={"lost_reason": "price"})
+        confirm = self.create_deal(c["id"], amount=2.0)["id"]
+        moved = self.client.put(f"/api/crm/deals/{confirm}", json={"stage": "confirm"})
+        self.assertEqual(moved.status_code, 200, moved.text)
+        quote = self.create_deal(c["id"], amount=3.0)["id"]
+        body = self.client.get(
+            "/api/crm/deals?sort=stage&order=asc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {lost, confirm, quote}]
+        # SQLite 文本序：confirm < lost < quote
+        self.assertEqual(got, [confirm, lost, quote])
+
+    # ---------- JOIN 列排序 ----------
+    def test_sort_by_customer_join_column(self):
+        ca = self.create_customer(name="张伟")
+        cb = self.create_customer(name="李娜", phone="13900000002")
+        da = self.create_deal(ca["id"], amount=1.0)["id"]
+        db_ = self.create_deal(cb["id"], amount=2.0)["id"]
+        # SQLite 默认 BINARY 排序按 UTF-8 字节序：张(0x5F20) < 李(0x674E)
+        body = self.client.get(
+            "/api/crm/deals?sort=customer&order=asc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {da, db_}]
+        self.assertEqual(got, [da, db_])
+        body = self.client.get(
+            "/api/crm/deals?sort=customer&order=desc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {da, db_}]
+        self.assertEqual(got, [db_, da])
+
+    def test_sort_by_product_name(self):
+        c = self.create_customer(name="产品排序客户")
+        a = self.create_deal(c["id"], product_type="天幕")["id"]
+        b = self.create_deal(c["id"], product_type="天窗")["id"]
+        # 快照列不接受客户端直接写入，测试用 SQL 落库（与真实转商机流程等价）
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE deals SET product_name_snapshot = ? WHERE id = ?",
+                ("智能天幕A", a),
+            )
+            conn.execute(
+                "UPDATE deals SET product_name_snapshot = ? WHERE id = ?",
+                ("电动天窗B", b),
+            )
+        body = self.client.get(
+            "/api/crm/deals?sort=product&order=asc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {a, b}]
+        self.assertEqual(got, [a, b])
+
+    # ---------- 可空列 NULL 沉底 ----------
+    def test_sort_nullable_nulls_last_both_directions(self):
+        c = self.create_customer(name="空值客户")
+        with_model = self.create_deal(
+            c["id"], model="TM-300", spec="跨度 4m", amount=1.0
+        )["id"]
+        without = self.create_deal(c["id"], amount=2.0)["id"]
+
+        body = self.client.get(
+            "/api/crm/deals?sort=model&order=asc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {with_model, without}]
+        self.assertEqual(got, [with_model, without])
+
+        body = self.client.get(
+            "/api/crm/deals?sort=model&order=desc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {with_model, without}]
+        self.assertEqual(got, [with_model, without])
+
+        # 尺寸列（deals.spec）同为可空列
+        body = self.client.get(
+            "/api/crm/deals?sort=size&order=asc&size=500"
+        ).json()
+        got = [x["id"] for x in body["items"] if x["id"] in {with_model, without}]
+        self.assertEqual(got, [with_model, without])
+
+    # ---------- 筛选与分页共存 ----------
+    def test_filters_combine_with_pagination(self):
+        c = self.create_customer(name="筛选客户")
+        other = self.create_customer(name="筛选客户B", phone="13900000003")
+        for i in range(12):
+            self.create_deal(c["id"], amount=float(i))
+        self.create_deal(other["id"], amount=999.0)
+
+        body = self.client.get(
+            "/api/crm/deals", params={"customer_id": c["id"], "page": 2, "size": 10}
+        ).json()
+        self.assertEqual(body["total"], 12)
+        self.assertEqual(len(body["items"]), 2)
+
+        body = self.client.get(
+            "/api/crm/deals", params={"q": "筛选客户", "size": 500}
+        ).json()
+        self.assertEqual(body["total"], 13)
 
 
 if __name__ == "__main__":
