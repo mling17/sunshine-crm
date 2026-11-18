@@ -8,49 +8,138 @@
  */
 
 /* ---------------- 售后列表 ---------------- */
-function viewAftersales(root, route) {
-    var status = (route && route.query.get('status')) || '';
-    var orderId = (route && route.query.get('order_id')) || '';
-    var customerId = (route && route.query.get('customer_id')) || '';
-    var page = Number((route && route.query.get('page')) || 1);
+/* 排序白名单（与服务端 _AFTERSALE_SORT_SQL 一致，Ticket #11） */
+var AFTERSALE_SORT_KEYS = ['aftersale_no', 'type', 'order', 'customer', 'problem', 'status', 'created_at'];
 
+function readAftersaleListQuery(query) {
+    var page = parseInt(query.get('page'), 10);
+    var size = parseInt(query.get('size'), 10);
+    var sort = query.get('sort') || '';
+    var order = query.get('order') || '';
+    if (!(page >= 1)) { page = 1; }
+    if (LIST_PAGE_SIZES.indexOf(size) < 0) { size = 20; }
+    if (AFTERSALE_SORT_KEYS.indexOf(sort) < 0) { sort = ''; }
+    if (order !== 'asc' && order !== 'desc') { order = 'desc'; }
+    return {
+        status: query.get('status') || '',
+        order_id: query.get('order_id') || '',
+        customer_id: query.get('customer_id') || '',
+        page: page, size: size, sort: sort, order: order
+    };
+}
+
+function aftersaleListHash(list) {
+    var p = new URLSearchParams();
+    if (list.status) { p.set('status', list.status); }
+    if (list.order_id) { p.set('order_id', list.order_id); }
+    if (list.customer_id) { p.set('customer_id', list.customer_id); }
+    p.set('page', String(list.page));
+    p.set('size', String(list.size));
+    if (list.sort) {
+        p.set('sort', list.sort);
+        p.set('order', list.order);
+    }
+    return '#/aftersales?' + p.toString();
+}
+
+/* 状态变更统一入口：合并 patch 写 hash；除翻页外任何变更（条数/排序/状态筛选）都回第 1 页 */
+function updateAftersaleListState(root, patch) {
+    var cur = readAftersaleListQuery(parseRoute().query);
+    var next = {
+        status: cur.status, order_id: cur.order_id, customer_id: cur.customer_id,
+        page: cur.page, size: cur.size, sort: cur.sort, order: cur.order
+    };
+    Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
+    if (patch.page === undefined) { next.page = 1; }
+    if (!next.sort) { next.order = 'desc'; }
+    history.replaceState(null, '', aftersaleListHash(next));
+    return next;
+}
+
+function viewAftersales(root) {
+    var list = readAftersaleListQuery(parseRoute().query);
+
+    var tabs = [['', '全部'], ['pending', '待处理'], ['processing', '处理中'],
+        ['done', '已完成']];
+    var tabHtml = tabs.map(function (t) {
+        return '<button type="button" class="tab-btn' + (list.status === t[0] ? ' active' : '') +
+            '" data-status="' + t[0] + '">' + t[1] + '</button>';
+    }).join('');
+
+    root.innerHTML =
+        '<div class="card">' +
+        '<div class="card-head"><h2>售后 <span class="badge muted" id="asTotal"></span></h2>' +
+        '<span class="small muted">售后单从「订单 → 已完成 → 添加售后」生成</span></div>' +
+        '<div class="tabs" id="asTabs">' + tabHtml + '</div>' +
+        '</div>' +
+        '<div class="card"><div id="asShell">' +
+        '<div id="asList"><p class="loading">加载中…</p></div>' +
+        '<div id="asPager"></div>' +
+        '</div></div>';
+
+    $('#asTabs', root).addEventListener('click', function (ev) {
+        var btn = ev.target.closest('.tab-btn');
+        if (!btn) { return; }
+        updateAftersaleListState(root, { status: btn.getAttribute('data-status') || '' });
+        loadAftersales(root);
+    });
+
+    bindListShell($('#asShell', root), {
+        onPage: function (p) { updateAftersaleListState(root, { page: p }); loadAftersales(root); },
+        onSize: function (sz) { updateAftersaleListState(root, { size: sz }); loadAftersales(root); },
+        onSort: function (key, order) {
+            var nextOrder = cycleSortOrder(order);
+            if (nextOrder) { updateAftersaleListState(root, { sort: key, order: nextOrder }); }
+            else { updateAftersaleListState(root, { sort: '' }); }
+            loadAftersales(root);
+        }
+    });
+
+    bindOps(root, { follow: function (id) { navigate('#/aftersales/' + id); } });
+
+    return loadAftersales(root);
+}
+
+function loadAftersales(root) {
+    var listEl = $('#asList', root);
+    var pagerEl = $('#asPager', root);
+    if (!listEl) { return Promise.resolve(); }
+    listEl.innerHTML = '<p class="loading">加载中…</p>';
+
+    var list = readAftersaleListQuery(parseRoute().query);
     var params = new URLSearchParams();
-    params.set('page', String(page));
-    params.set('size', String(PAGE_SIZE));
-    if (status) { params.set('status', status); }
-    if (orderId) { params.set('order_id', orderId); }
-    if (customerId) { params.set('customer_id', customerId); }
+    if (list.status) { params.set('status', list.status); }
+    if (list.order_id) { params.set('order_id', list.order_id); }
+    if (list.customer_id) { params.set('customer_id', list.customer_id); }
+    params.set('page', String(list.page));
+    params.set('size', String(list.size));
+    if (list.sort) { params.set('sort', list.sort); params.set('order', list.order); }
 
     return api('/aftersales?' + params.toString()).then(function (res) {
         var items = (res && res.items) || [];
+        var totalEl = $('#asTotal', root);
+        if (totalEl) { totalEl.textContent = (res && res.total) || items.length; }
 
-        var tabs = [['', '全部'], ['pending', '待处理'], ['processing', '处理中'],
-            ['done', '已完成']];
-        var tabHtml = tabs.map(function (t) {
-            return '<button type="button" class="tab-btn' + (status === t[0] ? ' active' : '') +
-                '" data-status="' + t[0] + '">' + t[1] + '</button>';
-        }).join('');
-
-        var listHtml = dataTable([
-            { title: '售后单号', nowrap: true, render: function (a) {
+        listEl.innerHTML = dataTable([
+            { title: '售后单号', sortKey: 'aftersale_no', nowrap: true, render: function (a) {
                 return '<a href="#/aftersales/' + a.id + '">' + esc(a.no) + '</a>';
             } },
-            { title: '类型', nowrap: true, render: function (a) {
+            { title: '类型', sortKey: 'type', nowrap: true, render: function (a) {
                 return esc(aftersaleTypeLabel(a.type, a.type_other));
             } },
-            { title: '订单', nowrap: true, render: function (a) {
+            { title: '订单', sortKey: 'order', nowrap: true, render: function (a) {
                 return a.order_id
                     ? '<a href="#/orders/' + a.order_id + '">' + esc(a.order_no || ('#' + a.order_id)) + '</a>'
                     : esc(a.order_no || '—');
             } },
-            { title: '客户', render: function (a) { return esc(a.customer_name || '—'); } },
-            { title: '问题', render: function (a) {
+            { title: '客户', sortKey: 'customer', render: function (a) { return esc(a.customer_name || '—'); } },
+            { title: '问题', sortKey: 'problem', render: function (a) {
                 return esc(String(a.description || '').slice(0, 22));
             } },
-            { title: '状态', nowrap: true, render: function (a) {
+            { title: '状态', sortKey: 'status', nowrap: true, render: function (a) {
                 return aftersaleStatusBadge(a.status, a.status_label);
             } },
-            { title: '创建时间', nowrap: true, render: function (a) {
+            { title: '创建时间', sortKey: 'created_at', nowrap: true, render: function (a) {
                 return fmtDateTime(a.created_at).slice(0, 10);
             } },
             { title: '操作', nowrap: true, render: function (a) {
@@ -62,34 +151,12 @@ function viewAftersales(root, route) {
                     tip: a.status === 'done' ? '已完成，不能再跟进（点单号看详情）' : '已拒绝，不能再跟进（点单号看详情）'
                 }]);
             } }
-        ], items, status ? '这个状态下没有售后单' : '还没有售后单：到「已完成」订单里点「添加售后」');
+        ], items, list.status ? '这个状态下没有售后单' : '还没有售后单：到「已完成」订单里点「添加售后」',
+        '', '', { key: list.sort, order: list.order });
 
-        root.innerHTML =
-            '<div class="card">' +
-            '<div class="card-head"><h2>售后 <span class="badge muted">' + ((res && res.total) || items.length) + '</span></h2>' +
-            '<span class="small muted">售后单从「订单 → 已完成 → 添加售后」生成</span></div>' +
-            '<div class="tabs" id="asTabs">' + tabHtml + '</div>' +
-            '</div>' +
-            '<div class="card">' + listHtml + '<div id="asPager">' + pagerHtml(res) + '</div></div>';
-
-        $('#asTabs', root).addEventListener('click', function (ev) {
-            var btn = ev.target.closest('.tab-btn');
-            if (!btn) { return; }
-            var next = btn.getAttribute('data-status') || '';
-            navigate('#/aftersales' + (next ? '?status=' + encodeURIComponent(next) : ''));
-        });
-
-        $('#asPager', root).onclick = function (ev) {
-            var btn = ev.target.closest('button[data-page]');
-            if (!btn || btn.disabled) { return; }
-            var q = [];
-            if (status) { q.push('status=' + encodeURIComponent(status)); }
-            if (orderId) { q.push('order_id=' + encodeURIComponent(orderId)); }
-            q.push('page=' + (Number(btn.getAttribute('data-page')) || 1));
-            navigate('#/aftersales?' + q.join('&'));
-        };
-
-        bindOps(root, { follow: function (id) { navigate('#/aftersales/' + id); } });
+        pagerEl.innerHTML = listPagerHtml(res);
+    }).catch(function (err) {
+        listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';
     });
 }
 

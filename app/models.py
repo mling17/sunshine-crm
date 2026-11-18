@@ -1219,7 +1219,8 @@ class AftersaleOut(BaseModel):
     type: str
     type_label: str | None = None
     type_other: str | None = None
-    description: str
+    # 新建口径必填；早期库/手工数据可能残留 NULL，列表/详情按可空容忍（Ticket #11 排序 NULL 沉底）
+    description: str | None = None
     status: str
     status_label: str | None = None
     reject_reason: str | None = None

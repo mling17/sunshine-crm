@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db import IntegrityError, db_conn
 from app.errors import ApiError
@@ -19,6 +19,7 @@ from app.models import (
     AftersaleListOut,
 )
 from app.routers.auth import require_auth
+from app.routers.leads import LIST_PAGE_SIZES
 from app.services import next_no
 
 router = APIRouter(
@@ -40,6 +41,22 @@ _AFTERSALE_SELECT = """
       LEFT JOIN aftersales ra
         ON ra.id = a.related_aftersale_id AND ra.is_delete = 0
 """
+
+# 列表分页/排序白名单（Ticket #11）：size 复用线索页共享档位，sort 只接受映射表里的 key。
+# 排序 SQL 一律来自这里的白名单映射，绝不拼接前端传来的原始列名。
+_AFTERSALE_SORT_SQL: dict[str, str] = {
+    "aftersale_no": "a.no",            # 售后单号
+    "type": "a.type",                  # 类型
+    "order": "o.order_no",             # 关联订单（JOIN orders）
+    "customer": "c.name",              # 客户名（JOIN customers）
+    "problem": "a.description",        # 问题描述
+    "status": "a.status",              # 状态
+    "created_at": "a.created_at",      # 创建时间
+}
+
+# 可为 NULL 的排序列：无论升降序都让其沉底（(expr IS NULL) ASC）。
+# description 在新建口径里必填，但按可空防御处理（早期库/手工数据可能残留 NULL）。
+_AFTERSALE_SORT_NULLABLE = frozenset({"problem"})
 
 
 def _aftersale_out(row) -> AftersaleOut:
@@ -273,10 +290,45 @@ def list_aftersales(
     order_id: Optional[int] = None,
     customer_id: Optional[int] = None,
     sla_overdue: Optional[bool] = None,
-    page: int = 1,
-    size: int = 20
+    page: int = Query(default=1),
+    size: int = Query(default=20),
+    sort: Optional[str] = Query(default=None),
+    order: str = Query(default="desc"),
 ) -> AftersaleListOut:
-    """获取售后单列表"""
+    """获取售后单列表。
+
+    分页/排序（Ticket #11）：size 白名单 [10,20,50,100,500]，sort 白名单见
+    ``_AFTERSALE_SORT_SQL``；非法 page/size/sort/order 一律 400，排序 SQL 只走白名单映射。
+    不传 sort 时维持默认口径：created_at DESC, id DESC。
+    """
+    if page < 1:
+        raise ApiError(status_code=400, code="invalid_page", message="page 必须 >= 1")
+    if size not in LIST_PAGE_SIZES:
+        raise ApiError(
+            status_code=400,
+            code="invalid_page_size",
+            message=f"size 必须是 {'/'.join(str(v) for v in LIST_PAGE_SIZES)} 之一",
+        )
+    sort = sort or None  # 显式传空串等同未传，走默认排序
+    if sort is not None and sort not in _AFTERSALE_SORT_SQL:
+        raise ApiError(
+            status_code=400,
+            code="invalid_sort",
+            message=f"sort 只支持 {'/'.join(_AFTERSALE_SORT_SQL)}",
+        )
+    if order not in ("asc", "desc"):
+        raise ApiError(status_code=400, code="invalid_order", message="order 只支持 asc/desc")
+
+    if sort:
+        expr = _AFTERSALE_SORT_SQL[sort]
+        dir_sql = "ASC" if order == "asc" else "DESC"
+        # 显式排序：稳定次键固定 id DESC；可空列先排 NULL 沉底。
+        if sort in _AFTERSALE_SORT_NULLABLE:
+            order_sql = f"({expr} IS NULL) ASC, {expr} {dir_sql}, a.id DESC"
+        else:
+            order_sql = f"{expr} {dir_sql}, a.id DESC"
+    else:
+        order_sql = "a.created_at DESC, a.id DESC"
     with db_conn() as conn:
         # 构建查询条件
         conditions = []
@@ -321,7 +373,7 @@ def list_aftersales(
         data_query = (
             _AFTERSALE_SELECT
             + f" {where_clause}"
-            + " ORDER BY a.created_at DESC LIMIT ? OFFSET ?"
+            + f" ORDER BY {order_sql} LIMIT ? OFFSET ?"
         )
         rows = conn.execute(data_query, params + [size, offset]).fetchall()
         

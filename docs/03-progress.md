@@ -55,6 +55,7 @@
 | TASK-037 | 商机列表服务端分页与排序（Ticket #13） | ✅ 已完成 | `GET /deals` 改 `{items,total,page,size}`，复用线索/客户白名单口径（8 个可排序列，尺寸=`spec`），默认 `updated_at DESC, id DESC`；商机页接入共享外壳，stage 页签与分页排序同写 hash URL |
 | TASK-038 | 产品列表服务端分页、排序与筛选（Ticket #14） | ✅ 已完成 | `GET /products` 改 `{items,total,page,size}`，复用线索/客户/商机白名单口径（`product`/`drive_type`/`status` 可排序，`drive_type` NULL 沉底），默认天窗分类优先 → `series` → `code` → `id DESC`；五个筛选条件服务端执行；产品页接入共享外壳，筛选 + 分页排序状态同写 `#/products` hash URL |
 | TASK-036 | 客户列表接入共享外壳与上次跟进列（Ticket #10） | ✅ 已完成 | 客户列表复用同一套分页/排序白名单（含 `name` 列），新增派生 `last_follow`（仅人工跟进）；六个可排序列表头 + 上次跟进列；状态写 `#/customers` hash URL，筛选/排序/条数变更回第 1 页；本地 pagerHtml 已移除 |
+| TASK-039 | 售后列表服务端排序与共享外壳（Ticket #11） | ✅ 已完成 | `GET /aftersales` 复用共享 size 白名单（10/20/50/100/500），新增 `sort/order`（`aftersale_no`/`type`/`order`/`customer`/`problem`/`status`/`created_at`，JOIN 列只走服务端白名单 SQL）；`problem` 可空双向 NULL 沉底；默认 `created_at DESC, id DESC`；状态/订单/客户筛选与排序共存；售后页接入共享外壳，三态页签 + 分页排序同写 `#/aftersales` hash URL |
 
 ## 3. 已完成任务
 
@@ -123,6 +124,12 @@
 - `docs/TC-LEADS.md`：92 条线索页手工用例，最近记录为全通过。
 - `docs/TC-DEALS.md`：55 条商机页场景，曾记录 6 项失败；多数缺陷在后续提交中处理，发布仍应以当前代码和最新回归为准。
 - `ops/T9-T10-上线与验收记录.md`：V1 传统部署的历史现场记录。
+
+### 4.7 TASK-039 售后列表分页排序回归
+
+- 定向回归：售后 API 与前端结构共 37 项通过（`tests.test_aftersales` 26 项 + `tests.test_aftersales_ui` 8 项 + `tests.test_aftersale_history_ui` 3 项），覆盖分页契约、size 白名单 400 边界、默认 `created_at DESC, id DESC`、显式排序稳定次键、JOIN 列（客户名/订单号）双向排序、`problem` NULL 沉底双向、状态/订单/客户筛选与排序组合，以及外壳接入/可排序列/hash URL/翻页归 1/缓存版本断言。
+- 全量回归：`Ran 641 tests in 190.512s ... FAILED (failures=4, skipped=2)`：635 通过、2 跳过；4 项失败为分支既有「附件 10/20 上限」测试口径问题（`test_external_api_assets`、`test_external_followups`、`test_followups`、`test_rollout_package`，基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 验证环境：隔离 SQLite 数据库与上传目录；未使用生产库；本机无常驻后端服务在跑，应用启动经完整测试 lifespan 验证，未做浏览器人工冒烟。
 
 ### 4.6 TASK-038 产品列表分页排序回归
 
@@ -301,6 +308,15 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-18 · TASK-039 · 售后列表服务端排序与共享外壳
+
+- 来源：`[用户明确要求]`，GitHub issue #11（父需求 #8 列表页统一分页与可排序表头）。
+- 后端 `GET /api/crm/aftersales`：已有 page/size 基础上补齐 Ticket #9 同款校验口径（复用 `LIST_PAGE_SIZES` 白名单与 `invalid_page`/`invalid_page_size`/`invalid_sort`/`invalid_order` 400 错误码）；`sort` 白名单 `aftersale_no`（`a.no`）/`type`/`order`（JOIN `orders.order_no`）/`customer`（JOIN `customers.name`）/`problem`（`a.description`）/`status`/`created_at`，排序 SQL 只来自 `_AFTERSALE_SORT_SQL` 服务端映射；`problem` 按可空防御处理（升/降序均 NULL 沉底），显式排序稳定次键 `id DESC`，未传 sort 默认 `created_at DESC, id DESC`；`status`/`order_id`/`customer_id`/`sla_overdue` 筛选全部服务端执行，与分页排序自由组合。
+- 模型：`AftersaleOut.description` 放宽为可空（新建口径仍必填；早期库/手工数据可能残留 NULL，列表/详情按可空容忍，避免排序带出 NULL 行时响应 500）。
+- 前端售后页接入共享列表外壳：售后单号/类型/订单/客户/问题/状态/创建时间 7 个可排序表头（操作列不可排序），页码按钮 + 每页条数；三态状态页签与 `page/size/sort/order` 一起写入 `#/aftersales` hash URL（`history.replaceState`），改排序/条数/页签均回第 1 页；本地 `pagerHtml`/`PAGE_SIZE` 移除（修复售后列表翻页区引用不存在函数的潜在 ReferenceError）。
+- `index.html` 售后页脚本缓存版本刷新为 `20261118aftersale-list-shell1`，`test_aftersale_history_ui.py` 缓存断言同步更新。
+- 新增 API 测试（默认口径、显式排序稳定次键、size/page 400 边界、分页窗口、非法 sort/order 400、JOIN 列双向排序、单号/类型排序、`problem` NULL 沉底双向、筛选 + 排序组合）与前端结构测试 `tests/test_aftersales_ui.py`（外壳接入、可排序列、hash URL 含状态/订单/客户筛选 + page/size/sort/order、翻页归 1、缓存版本断言）。
 
 ### 2026-11-18 · TASK-038 · 产品列表服务端分页、排序与筛选
 
