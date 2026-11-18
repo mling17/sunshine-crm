@@ -99,7 +99,8 @@ class FollowupsHistoryUiTest(unittest.TestCase):
         # 适配新契约的详情页脚本一并刷新
         for name in ("aftersales", "customers", "deals", "leads"):
             with self.subTest(file=name):
-                self.assertIn(f"/crm/views/{name}.js?v=20261119followup-items1", self.index)
+                version = "20261119review-fixes1" if name == "deals" else "20261119followup-items1"
+                self.assertIn(f"/crm/views/{name}.js?v={version}", self.index)
 
     def test_sortable_header_and_pager_styles(self):
         for selector in (

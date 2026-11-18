@@ -46,6 +46,15 @@ class UiPolishTest(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, self.css)
 
+    def test_list_shell_cache_and_deals_carrier_dropdown(self):
+        deals_js = (STATIC / "views" / "deals.js").read_text(encoding="utf-8")
+
+        self.assertIn("/crm/views/shared.js?v=20261119list-shell1", self.index)
+        self.assertNotIn("carrierList = (list || [])", deals_js)
+        self.assertEqual(
+            1, deals_js.count("carrierList = ((res && res.items) || [])")
+        )
+
     def test_polish_layer_does_not_add_script(self):
         self.assertNotIn("<script", self.css.lower())
         self.assertNotIn("javascript:", self.css.lower())

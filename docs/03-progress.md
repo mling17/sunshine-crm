@@ -59,6 +59,7 @@
 | TASK-040 | 订单列表服务端分页与排序（Ticket #12） | ✅ 已完成 | `GET /orders` 改 `{items,total,page,size}`，复用共享白名单口径（7 个可排序列，客户名走 JOIN，可空列双向 NULL 沉底），默认 `id DESC`；订单页接入共享外壳，状态页签与分页排序同写 `#/orders` hash URL，本地未定义的 `pagerHtml` 调用移除 |
 | TASK-041 | 物流公司列表服务端分页、排序与筛选（Ticket #15） | ✅ 已完成 | `GET /carriers` 改 `{items,total,page,size}`，复用共享白名单口径（`name`/`address` 可排序，`address` NULL 沉底），默认被订单关联次数倒序 → `id DESC`；仅看启用、关键词筛选服务端执行；物流页接入共享外壳，筛选 + 分页排序同写 `#/logistics` hash URL；顺带修复 `is_active` 更新从未落库 |
 | TASK-042 | 跟进历史页去除表单并接入分页排序（Ticket #16） | ✅ 已完成 | `GET /follow-ups` 改 `{items,total,page,size}`，复用共享白名单口径（`customer`/`deal_stage`/`content`/`next_date`/`created_at` 可排序，JOIN 列只走服务端 SQL 映射，可空列 NULL 沉底），默认 `created_at DESC, id DESC`；历史页去掉「记一条跟进」表单，改纯跟进流水表格并接入共享外壳，筛选 + 分页排序同写 `#/followups` hash URL；详情页履历调用适配新契约 |
+| TASK-043 | 列表外壳推广代码审查整改（shared.js 缓存、商机出单物流下拉） | ✅ 已完成 | 删除 deals.js 遗留 carrierList 行，shared.js/deals.js 缓存版本刷新，前端结构测试锁定 |
 
 ## 3. 已完成任务
 
@@ -323,6 +324,15 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-19 · TASK-043 · 列表外壳推广代码审查整改
+
+- 来源：`[实现中发现约束]`，分支 `codex/list-pagination-sort`（基线 b02abdb）代码审查发现两处缺陷，一次性修复。
+- 修复商机出单弹层物流公司下拉：`openDealOrderModal` 中遗留一行 `carrierList = (list || []).filter(...)`，`list` 在该回调作用域已不存在，运行期抛 ReferenceError 导致物流公司下拉永远空白；删除遗留行，只保留 `carrierList = ((res && res.items) || [])` 版本。
+- `index.html` shared.js 缓存版本刷新为 `?v=20261119list-shell1`：shared.js 在本分支新增整套列表外壳（`bindListShell`/`listPagerHtml`/`LIST_PAGE_SIZES`/dataTable 排序支持），全部 8 个迁移页依赖它，继续下发旧版本缓存会让回访用户每个列表页都报 `bindListShell is not defined`。
+- 顺带修复同类缓存问题：deals.js 本次内容有变，而现版本 `?v=20261119followup-items1` 已随上述缺陷进入用户缓存，同步刷新为 `?v=20261119review-fixes1`；既有缓存断言测试 `test_customer_360_ui.py`/`test_followup_phrase_ui.py`（shared.js）与 `test_deals_ui.py`/`test_followups_history_ui.py`（deals.js）同步更新。
+- 新增前端结构测试 `tests/test_ui_polish.py::test_list_shell_cache_and_deals_carrier_dropdown`：index.html 含 shared.js 新版本、deals.js 不再有遗留 `carrierList = (list || [])` 行、`carrierList = ((res && res.items) || [])` 在全文件恰好出现一次。
+- 定向 UI 测试与全量回归结果见提交说明；未连接真实 MySQL 验证，未做浏览器人工冒烟。
 
 ### 2026-11-19 · TASK-042 · 跟进历史页去除表单并接入分页排序
 
