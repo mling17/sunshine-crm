@@ -16,13 +16,14 @@ from app.db import db_conn
 from app.models import (
     ORDER_STATUS, ORDER_STATUS_LABELS,
     LOGISTICS_MODE, LOGISTICS_MODE_LABELS,
-    OrderOut, OrderDetailOut, OrderIn, OrderUpdate,
+    OrderListOut, OrderOut, OrderDetailOut, OrderIn, OrderUpdate,
     AttachmentOut, OrderStatusLogOut, OrderTransitionIn, OrderTransitionOut
 )
 from app.routers.auth import require_auth
 from app.timeline import add_entry, change_summary, entries_for
 from app.security import now_iso
 from app.errors import ApiError
+from app.routers.leads import LIST_PAGE_SIZES
 from app.services import order_logistics_updates, read_images
 
 router = APIRouter(
@@ -48,6 +49,23 @@ ORDER_EDITABLE_COLUMNS = (
     "note",
 )
 
+#: 列表排序白名单（Ticket #12）：排序 SQL 一律来自这里的映射，绝不拼接前端传来的原始列名。
+#: customer 走 LEFT JOIN 的 c.name；total 对应列表「总额」列 orders.amount；
+#: product 对应列表「产品」列（订单产品名快照，多产品时取订单主产品口径）。
+_ORDER_SORT_SQL: dict[str, str] = {
+    "order_name": "o.order_name",
+    "customer": "c.name",
+    "product": "o.product_name_snapshot",
+    "total": "o.amount",
+    "logistics": "o.logistics_mode",
+    "status": "o.status",
+    "created_at": "o.created_at",
+}
+
+# 可为 NULL 的排序列：无论升降序都让其沉底（(expr IS NULL) ASC），否则升序时大量空值堆在最前面。
+# customer 也按可空防御（客户被软删后 JOIN 名为 NULL）。
+_ORDER_SORT_NULLABLE = frozenset({"order_name", "customer", "product", "logistics"})
+
 
 def _attachment_out(row) -> AttachmentOut:
     return AttachmentOut(
@@ -56,32 +74,79 @@ def _attachment_out(row) -> AttachmentOut:
     )
 
 
-@router.get("/orders", response_model=list[OrderOut])
+@router.get("/orders", response_model=OrderListOut)
 def list_orders(
     customer_id: int | None = Query(default=None, gt=0),
     status: str | None = Query(default=None, max_length=32),
     deal_id: int | None = Query(default=None, gt=0),
-) -> list[OrderOut]:
-    """列出订单"""
-    where_parts: list[str] = []
+    page: int = Query(default=1),
+    size: int = Query(default=20),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
+) -> OrderListOut:
+    """订单列表。
+
+    分页/排序（Ticket #12，复用 Ticket #9/#13 同一套校验口径）：size 白名单
+    ``LIST_PAGE_SIZES``，sort 白名单见 ``_ORDER_SORT_SQL``；非法 page/size/sort/order
+    一律 400，排序 SQL 只走白名单映射。不传 sort 时按编号倒序（id DESC）。
+    """
+    if page < 1:
+        raise ApiError(status_code=400, code="invalid_page", message="page 必须 >= 1")
+    if size not in LIST_PAGE_SIZES:
+        raise ApiError(
+            status_code=400,
+            code="invalid_page_size",
+            message=f"size 必须是 {'/'.join(str(x) for x in LIST_PAGE_SIZES)} 之一",
+        )
+    sort = sort or None  # 显式传空串等同未传，走默认排序
+    if sort is not None and sort not in _ORDER_SORT_SQL:
+        raise ApiError(
+            status_code=400,
+            code="invalid_sort",
+            message=f"sort 只支持 {'/'.join(_ORDER_SORT_SQL)}",
+        )
+    if order not in ("asc", "desc"):
+        raise ApiError(status_code=400, code="invalid_order", message="order 只支持 asc/desc")
+
+    if sort:
+        expr = _ORDER_SORT_SQL[sort]
+        dir_sql = "ASC" if order == "asc" else "DESC"
+        # 显式排序：稳定次键固定 id DESC；可空列先排 NULL 沉底（升/降序都沉底）。
+        if sort in _ORDER_SORT_NULLABLE:
+            order_sql = f"({expr} IS NULL) ASC, {expr} {dir_sql}, o.id DESC"
+        else:
+            order_sql = f"{expr} {dir_sql}, o.id DESC"
+    else:
+        order_sql = "o.id DESC"
+
+    where_parts: list[str] = ["o.is_delete = 0"]
     params: list[object] = []
 
     if customer_id is not None:
-        where_parts.append("customer_id = ?")
+        where_parts.append("o.customer_id = ?")
         params.append(customer_id)
 
     if status is not None:
-        where_parts.append("status = ?")
+        where_parts.append("o.status = ?")
         params.append(status)
 
     if deal_id is not None:
-        where_parts.append("deal_id = ?")
+        where_parts.append("o.deal_id = ?")
         params.append(deal_id)
 
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+    # LEFT JOIN customers 只为 customer 排序列服务；不过滤 c.is_delete，客户被软删
+    # 订单仍要出现在列表（显示回退客户编号），名字 NULL 排序沉底即可。
+    join_sql = "LEFT JOIN customers c ON c.id = o.customer_id"
     with db_conn() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM orders o {join_sql} {where_sql}",
+            params,
+        ).fetchone()["n"]
         rows = conn.execute(
-            f"SELECT * FROM orders {where_sql} ORDER BY id DESC", params
+            f"SELECT o.* FROM orders o {join_sql} {where_sql}"
+            f" ORDER BY {order_sql} LIMIT ? OFFSET ?",
+            [*params, size, (page - 1) * size],
         ).fetchall()
         result = []
         for row in rows:
@@ -94,7 +159,7 @@ def list_orders(
             data["item_count"] = int(count_row["n"] or 0)
             result.append(OrderOut(**data))
 
-    return result
+    return OrderListOut(items=result, total=total, page=page, size=size)
 
 
 @router.get("/orders/{order_id}", response_model=OrderDetailOut)

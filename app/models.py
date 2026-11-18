@@ -1029,6 +1029,15 @@ class OrderOut(BaseModel):
         return self
 
 
+class OrderListOut(BaseModel):
+    """订单列表分页响应（Ticket #12）：`{items,total,page,size}`，与商机/售后列表同构。"""
+
+    items: list[OrderOut]
+    total: int
+    page: int
+    size: int
+
+
 class OrderDetailOut(BaseModel):
     """订单详情。"""
 

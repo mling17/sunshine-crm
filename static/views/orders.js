@@ -74,97 +74,167 @@ function orderUiStatusCode(status) {
     return status === 'pending_confirmation' ? 'pending_payment' : status;
 }
 
-/* ---------------- 订单列表 ---------------- */
+/* ---------------- 订单列表（Ticket #12：共享列表外壳，状态写 hash URL） ---------------- */
+var ORDER_SORT_KEYS = ['order_name', 'customer', 'product', 'total', 'logistics', 'status', 'created_at'];
+
+function readOrderListQuery(query) {
+    var page = parseInt(query.get('page'), 10);
+    var size = parseInt(query.get('size'), 10);
+    var sort = query.get('sort') || '';
+    var order = query.get('order') || '';
+    if (!(page >= 1)) { page = 1; }
+    if (LIST_PAGE_SIZES.indexOf(size) < 0) { size = 20; }
+    if (ORDER_SORT_KEYS.indexOf(sort) < 0) { sort = ''; }
+    if (order !== 'asc' && order !== 'desc') { order = 'desc'; }
+    return {
+        status: query.get('status') || '',
+        customer_id: query.get('customer_id') || '',
+        page: page, size: size, sort: sort, order: order
+    };
+}
+
+function orderListHash(list) {
+    var p = new URLSearchParams();
+    if (list.status) { p.set('status', list.status); }
+    if (list.customer_id) { p.set('customer_id', list.customer_id); }
+    p.set('page', String(list.page));
+    p.set('size', String(list.size));
+    if (list.sort) {
+        p.set('sort', list.sort);
+        p.set('order', list.order);
+    }
+    return '#/orders?' + p.toString();
+}
+
+/* 状态变更统一入口：合并 patch 写 hash；除翻页外任何变更（条数/排序/状态页签）都回第 1 页 */
+function updateOrderListState(root, patch) {
+    var cur = readOrderListQuery(parseRoute().query);
+    var next = {
+        status: cur.status, customer_id: cur.customer_id,
+        page: cur.page, size: cur.size, sort: cur.sort, order: cur.order
+    };
+    Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
+    if (patch.page === undefined) { next.page = 1; }
+    if (!next.sort) { next.order = 'desc'; }
+    history.replaceState(null, '', orderListHash(next));
+    return next;
+}
+
 function viewOrders(root, route) {
-    var status = (route && route.query.get('status')) || '';
-    var page = Number((route && route.query.get('page')) || 1);
-    var customerId = (route && route.query.get('customer_id')) || '';
+    var list = readOrderListQuery(route && route.query ? route.query : parseRoute().query);
 
-    var params = new URLSearchParams();
-    params.set('page', String(page));
-    params.set('size', String(PAGE_SIZE));
-    if (status) { params.set('status', status); }
-    if (customerId) { params.set('customer_id', customerId); }
+    var tabs = [['', '全部']].concat(orderVisibleStatuses());
+    var tabHtml = tabs.map(function (t) {
+        return '<button type="button" class="tab-btn' + (list.status === t[0] ? ' active' : '') +
+            '" data-status="' + t[0] + '">' + esc(t[1]) + '</button>';
+    }).join('');
 
-    return Promise.all([api('/orders?' + params.toString()), ensureCustomerIndex()]).then(function (all) {
-        var res = all[0];
-        var index = all[1] || {};
-        var orders = Array.isArray(res) ? res : ((res && res.items) || []);
-        var total = Array.isArray(res) ? orders.length : ((res && res.total) || orders.length);
+    root.innerHTML =
+        '<div class="card">' +
+        '<div class="card-head"><h2>订单 <span class="badge muted" id="orderTotal"></span></h2>' +
+        '<span class="small muted">订单由商机「生成订单」产生</span></div>' +
+        '<div class="tabs" id="orderTabs">' + tabHtml + '</div>' +
+        '</div>' +
+        '<div class="card"><div id="orderShell">' +
+        '<div id="orderList"><p class="loading">加载中…</p></div>' +
+        '<div id="orderPager"></div>' +
+        '</div></div>';
 
-        var tabs = [['', '全部']].concat(orderVisibleStatuses());
-        var tabHtml = tabs.map(function (t) {
-            return '<button type="button" class="tab-btn' + (status === t[0] ? ' active' : '') +
-                '" data-status="' + t[0] + '">' + esc(t[1]) + '</button>';
-        }).join('');
-
-        var listHtml = dataTable([
-            { title: '订单名称', nowrap: true, render: function (o) {
-                return '<a href="#/orders/' + o.id + '">' +
-                    esc(o.order_name || o.order_no) + '</a>' +
-                    '<div class="small muted">' + esc(o.order_no) + '</div>';
-            } },
-            { title: '客户', render: function (o) {
-                return esc(o.customer_name || index[o.customer_id] || ('客户 #' + o.customer_id));
-            } },
-            { title: '产品', nowrap: true, render: function (o) {
-                var text = [o.product_name_snapshot, o.product_code_snapshot || o.model]
-                    .filter(Boolean).join(' / ') || [o.product_type, o.model].filter(Boolean).join(' ') || '—';
-                return esc(text) + (Number(o.item_count || 0) > 1
-                    ? '<div class="small muted">共 ' + Number(o.item_count) + ' 项产品</div>' : '');
-            } },
-            { title: '总额', align: 'right', nowrap: true, render: function (o) { return money(o.amount); } },
-            { title: '已收', align: 'right', nowrap: true, render: function (o) {
-                return money(o.paid_amount !== undefined && o.paid_amount !== null
-                    ? o.paid_amount
-                    : (Number(o.deposit_paid) || 0) + (Number(o.balance_paid) || 0));
-            } },
-            { title: '未收', align: 'right', nowrap: true, render: function (o) {
-                var paid = o.paid_amount !== undefined && o.paid_amount !== null
-                    ? Number(o.paid_amount) || 0
-                    : (Number(o.deposit_paid) || 0) + (Number(o.balance_paid) || 0);
-                return money(Math.max(0, Number(o.amount || 0) - paid));
-            } },
-            { title: '物流', nowrap: true, render: function (o) {
-                var mode = o.logistics_mode_label || '';
-                var fee = o.logistics_fee ? '<div class="small muted">运费 ' + money(o.logistics_fee) + '</div>' : '';
-                return (mode ? esc(mode) : '<span class="muted small">—</span>') + fee;
-            } },
-            { title: '状态', nowrap: true, render: function (o) {
-                return orderStatusBadge(o.status, o.status_label);
-            } },
-            { title: '创建时间', nowrap: true, render: function (o) {
-                return fmtDateTime(o.created_at).slice(0, 10);
-            } },
-            { title: '操作', nowrap: true, render: function (o) {
-                return opButtons([{ op: 'view', arg: o.id, label: '详情' }]);
-            } }
-        ], orders, status ? '这个状态下没有订单' : '还没有订单：商机里点「生成订单」才会产生');
-
-        root.innerHTML =
-            '<div class="card">' +
-            '<div class="card-head"><h2>订单 <span class="badge muted">' + total + '</span></h2>' +
-            '<span class="small muted">订单由商机「生成订单」产生</span></div>' +
-            '<div class="tabs" id="orderTabs">' + tabHtml + '</div>' +
-            '</div>' +
-            '<div class="card">' + listHtml + '<div id="orderPager">' + pagerHtml(res) + '</div></div>';
-
-        $('#orderTabs', root).addEventListener('click', function (ev) {
-            var btn = ev.target.closest('.tab-btn');
-            if (!btn) { return; }
-            var next = btn.getAttribute('data-status') || '';
-            navigate('#/orders' + (next ? '?status=' + encodeURIComponent(next) : ''));
-        });
-
-        $('#orderPager', root).onclick = function (ev) {
-            var btn = ev.target.closest('button[data-page]');
-            if (!btn || btn.disabled) { return; }
-            navigate('#/orders?page=' + (Number(btn.getAttribute('data-page')) || 1) +
-                (status ? '&status=' + encodeURIComponent(status) : ''));
-        };
-
-        bindOps(root, { view: function (id) { navigate('#/orders/' + id); } });
+    $('#orderTabs', root).addEventListener('click', function (ev) {
+        var btn = ev.target.closest('.tab-btn');
+        if (!btn) { return; }
+        updateOrderListState(root, { status: btn.getAttribute('data-status') || '' });
+        loadOrders(root);
     });
+
+    bindListShell($('#orderShell', root), {
+        onPage: function (p) { updateOrderListState(root, { page: p }); loadOrders(root); },
+        onSize: function (sz) { updateOrderListState(root, { size: sz }); loadOrders(root); },
+        onSort: function (key, order) {
+            var nextOrder = cycleSortOrder(order);
+            if (nextOrder) { updateOrderListState(root, { sort: key, order: nextOrder }); }
+            else { updateOrderListState(root, { sort: '' }); }
+            loadOrders(root);
+        }
+    });
+
+    bindOps(root, { view: function (id) { navigate('#/orders/' + id); } });
+
+    return loadOrders(root);
+}
+
+function loadOrders(root) {
+    var listEl = $('#orderList', root);
+    var pagerEl = $('#orderPager', root);
+    if (!listEl) { return Promise.resolve(); }
+    listEl.innerHTML = '<p class="loading">加载中…</p>';
+
+    var list = readOrderListQuery(parseRoute().query);
+    var params = new URLSearchParams();
+    if (list.status) { params.set('status', list.status); }
+    if (list.customer_id) { params.set('customer_id', list.customer_id); }
+    params.set('page', String(list.page));
+    params.set('size', String(list.size));
+    if (list.sort) { params.set('sort', list.sort); params.set('order', list.order); }
+
+    return Promise.all([api('/orders?' + params.toString()), ensureCustomerIndex()])
+        .then(function (all) {
+            var res = all[0];
+            var index = all[1] || {};
+            var orders = (res && res.items) || [];
+            var totalEl = $('#orderTotal', root);
+            if (totalEl) { totalEl.textContent = (res && res.total) || orders.length; }
+
+            listEl.innerHTML = dataTable([
+                { title: '订单名称', sortKey: 'order_name', nowrap: true, render: function (o) {
+                    return '<a href="#/orders/' + o.id + '">' +
+                        esc(o.order_name || o.order_no) + '</a>' +
+                        '<div class="small muted">' + esc(o.order_no) + '</div>';
+                } },
+                { title: '客户', sortKey: 'customer', render: function (o) {
+                    return esc(o.customer_name || index[o.customer_id] || ('客户 #' + o.customer_id));
+                } },
+                { title: '产品', sortKey: 'product', nowrap: true, render: function (o) {
+                    var text = [o.product_name_snapshot, o.product_code_snapshot || o.model]
+                        .filter(Boolean).join(' / ') || [o.product_type, o.model].filter(Boolean).join(' ') || '—';
+                    return esc(text) + (Number(o.item_count || 0) > 1
+                        ? '<div class="small muted">共 ' + Number(o.item_count) + ' 项产品</div>' : '');
+                } },
+                { title: '总额', sortKey: 'total', align: 'right', nowrap: true, render: function (o) {
+                    return money(o.amount);
+                } },
+                { title: '已收', align: 'right', nowrap: true, render: function (o) {
+                    return money(o.paid_amount !== undefined && o.paid_amount !== null
+                        ? o.paid_amount
+                        : (Number(o.deposit_paid) || 0) + (Number(o.balance_paid) || 0));
+                } },
+                { title: '未收', align: 'right', nowrap: true, render: function (o) {
+                    var paid = o.paid_amount !== undefined && o.paid_amount !== null
+                        ? Number(o.paid_amount) || 0
+                        : (Number(o.deposit_paid) || 0) + (Number(o.balance_paid) || 0);
+                    return money(Math.max(0, Number(o.amount || 0) - paid));
+                } },
+                { title: '物流', sortKey: 'logistics', nowrap: true, render: function (o) {
+                    var mode = o.logistics_mode_label || '';
+                    var fee = o.logistics_fee ? '<div class="small muted">运费 ' + money(o.logistics_fee) + '</div>' : '';
+                    return (mode ? esc(mode) : '<span class="muted small">—</span>') + fee;
+                } },
+                { title: '状态', sortKey: 'status', nowrap: true, render: function (o) {
+                    return orderStatusBadge(o.status, o.status_label);
+                } },
+                { title: '创建时间', sortKey: 'created_at', nowrap: true, render: function (o) {
+                    return fmtDateTime(o.created_at).slice(0, 10);
+                } },
+                { title: '操作', nowrap: true, render: function (o) {
+                    return opButtons([{ op: 'view', arg: o.id, label: '详情' }]);
+                } }
+            ], orders, list.status ? '这个状态下没有订单' : '还没有订单：商机里点「生成订单」才会产生',
+            '', '', { key: list.sort, order: list.order });
+
+            pagerEl.innerHTML = listPagerHtml(res);
+        }).catch(function (err) {
+            listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';
+        });
 }
 
 /* ---------------- 订单详情 ---------------- */

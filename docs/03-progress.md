@@ -56,6 +56,7 @@
 | TASK-038 | 产品列表服务端分页、排序与筛选（Ticket #14） | ✅ 已完成 | `GET /products` 改 `{items,total,page,size}`，复用线索/客户/商机白名单口径（`product`/`drive_type`/`status` 可排序，`drive_type` NULL 沉底），默认天窗分类优先 → `series` → `code` → `id DESC`；五个筛选条件服务端执行；产品页接入共享外壳，筛选 + 分页排序状态同写 `#/products` hash URL |
 | TASK-036 | 客户列表接入共享外壳与上次跟进列（Ticket #10） | ✅ 已完成 | 客户列表复用同一套分页/排序白名单（含 `name` 列），新增派生 `last_follow`（仅人工跟进）；六个可排序列表头 + 上次跟进列；状态写 `#/customers` hash URL，筛选/排序/条数变更回第 1 页；本地 pagerHtml 已移除 |
 | TASK-039 | 售后列表服务端排序与共享外壳（Ticket #11） | ✅ 已完成 | `GET /aftersales` 复用共享 size 白名单（10/20/50/100/500），新增 `sort/order`（`aftersale_no`/`type`/`order`/`customer`/`problem`/`status`/`created_at`，JOIN 列只走服务端白名单 SQL）；`problem` 可空双向 NULL 沉底；默认 `created_at DESC, id DESC`；状态/订单/客户筛选与排序共存；售后页接入共享外壳，三态页签 + 分页排序同写 `#/aftersales` hash URL |
+| TASK-040 | 订单列表服务端分页与排序（Ticket #12） | ✅ 已完成 | `GET /orders` 改 `{items,total,page,size}`，复用共享白名单口径（7 个可排序列，客户名走 JOIN，可空列双向 NULL 沉底），默认 `id DESC`；订单页接入共享外壳，状态页签与分页排序同写 `#/orders` hash URL，本地未定义的 `pagerHtml` 调用移除 |
 
 ## 3. 已完成任务
 
@@ -124,6 +125,12 @@
 - `docs/TC-LEADS.md`：92 条线索页手工用例，最近记录为全通过。
 - `docs/TC-DEALS.md`：55 条商机页场景，曾记录 6 项失败；多数缺陷在后续提交中处理，发布仍应以当前代码和最新回归为准。
 - `ops/T9-T10-上线与验收记录.md`：V1 传统部署的历史现场记录。
+
+### 4.8 TASK-040 订单列表分页排序回归
+
+- 定向回归：订单 API 与前端结构共 39 项通过（`tests.test_orders` 32 项 + `tests.test_orders_ui` 7 项 + `tests.test_aftersale_history_ui` 缓存断言），覆盖分页契约、size/page/sort/order 400 边界、7 个白名单列全方向、默认 `id DESC`、显式排序 `id DESC` 稳定次键、总额/状态/产品名/订单名称排序、JOIN 列客户名双向排序、`order_name`/`logistics` NULL 沉底双向、customer_id/status/deal_id 筛选与分页组合，以及外壳接入/可排序列（已收/未收/操作不可排序）/hash URL/翻页归 1/缓存版本断言。
+- 全量回归：`Ran 664 tests in 552.111s ... FAILED (failures=4, skipped=2)`：658 通过、2 跳过；4 项失败为分支既有「附件 10/20 上限」测试口径问题（`test_external_api_assets`、`test_external_followups`、`test_followups`、`test_rollout_package`，基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 验证环境：隔离 SQLite 数据库与上传目录；未使用生产库；本机无常驻后端服务在跑，应用启动经完整测试 lifespan 验证，未做浏览器人工冒烟。
 
 ### 4.7 TASK-039 售后列表分页排序回归
 
@@ -308,6 +315,15 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-18 · TASK-040 · 订单列表服务端分页与排序
+
+- 来源：`[用户明确要求]`，GitHub issue #12（父需求 #8 列表页统一分页与可排序表头）。
+- 后端 `GET /api/crm/orders`：响应从全量数组改为 `{items,total,page,size}`；复用 Ticket #9/#13 同一套校验口径（`LIST_PAGE_SIZES` 白名单与 `invalid_page`/`invalid_page_size`/`invalid_sort`/`invalid_order` 400 错误码）；`sort` 白名单 `order_name`/`customer`（LEFT JOIN `customers.name`，客户软删后名字 NULL 沉底、订单仍在列表）/`product`（`product_name_snapshot`）/`total`（`amount`）/`logistics`（`logistics_mode`）/`status`/`created_at`，排序 SQL 只来自 `_ORDER_SORT_SQL` 服务端映射；可空列（`order_name`/`customer`/`product`/`logistics`）升/降序均 NULL 沉底，显式排序稳定次键 `id DESC`，未传 sort 默认编号倒序 `id DESC`；列表补 `is_delete = 0` 过滤对齐项目数据库规则；`customer_id`/`status`/`deal_id` 筛选全部服务端执行，与分页排序自由组合。
+- 前端订单页接入共享列表外壳：订单名称/客户/产品/总额/物流/状态/创建时间 7 个可排序表头（已收/未收为计算列、操作列不可排序），页码按钮 + 每页条数；状态 Tab 与 `page/size/sort/order` 一起写入 `#/orders` hash URL（`history.replaceState`），改排序/条数/页签均回第 1 页；本地 `pagerHtml(res)` 调用移除（该函数对本视图本就未定义，翻页区会 ReferenceError，属顺带修复的潜在缺陷）。
+- `index.html` 订单页脚本缓存版本刷新为 `20261118order-list-shell1`，`test_aftersale_history_ui.py` 缓存断言同步更新。
+- 既有测试适配新契约：`test_orders.py::test_list_orders` 的数组断言改取 `items`/`total`。
+- 新增 API 测试（分页契约、size/page/sort/order 400 边界、7 个白名单列全方向、默认 `id DESC`、显式排序稳定次键、总额/状态排序、JOIN 列客户名双向、产品名/订单名称排序、`order_name`/`logistics` NULL 沉底双向、筛选 + 分页组合）与前端结构测试 `tests/test_orders_ui.py`（外壳接入、可排序列、hash URL 含状态 + page/size/sort/order、翻页归 1、缓存版本断言）。
 
 ### 2026-11-18 · TASK-039 · 售后列表服务端排序与共享外壳
 
