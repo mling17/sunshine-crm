@@ -11,7 +11,7 @@ class MultiProductOrderTest(ApiTestCase):
     def _products(self) -> list[dict]:
         resp = self.client.get("/api/crm/products")
         self.assertEqual(resp.status_code, 200, resp.text)
-        products = resp.json()
+        products = resp.json()["items"]
         self.assertGreaterEqual(len(products), 2)
         return products
 

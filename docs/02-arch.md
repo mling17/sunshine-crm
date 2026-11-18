@@ -180,7 +180,7 @@ HTTP 边界
 - 鉴权：页面 API 使用 Cookie `crm_sid`；外部 API 只使用 `Authorization: Bearer <token>`，两种凭据不能互相替代。
 - 响应：JSON；写接口使用明确的 HTTP 状态码和业务错误码。
 - 分页：列表接口按业务需要返回 `items`、`total`、`page`、`size` 或直接数组。
-- 列表分页/排序（Ticket #9 起）：`page >= 1`；`size` 白名单 `[10,20,50,100,500]`，默认 20；`sort` 只接受服务端白名单 key（映射到白名单 SQL 表达式，禁止拼接前端列名），`order` 限 `asc|desc`；非法一律 400。可空排序列升/降序均 NULL 沉底；显式排序稳定次键 `id DESC`；未传 `sort` 时各列表维持既有默认口径（线索页：无效线索沉底 → `created_at DESC` → `id DESC`；客户页：`id DESC`；商机页（Ticket #13）：`updated_at DESC` → `id DESC`）。
+- 列表分页/排序（Ticket #9 起）：`page >= 1`；`size` 白名单 `[10,20,50,100,500]`，默认 20；`sort` 只接受服务端白名单 key（映射到白名单 SQL 表达式，禁止拼接前端列名），`order` 限 `asc|desc`；非法一律 400。可空排序列升/降序均 NULL 沉底；显式排序稳定次键 `id DESC`；未传 `sort` 时各列表维持既有默认口径（线索页：无效线索沉底 → `created_at DESC` → `id DESC`；客户页：`id DESC`；商机页（Ticket #13）：`updated_at DESC` → `id DESC`；产品页（Ticket #14）：天窗分类优先 → `series` → `code` → `id DESC`）。
 - 日期：业务日期使用本地日期 `YYYY-MM-DD`；审计时间使用 ISO 时间。
 - 金额：数值型字段，服务端统一 `round(value, 2)` 后校验。
 
@@ -527,7 +527,7 @@ pending 待处理 → processing 处理中 → done 已完成
 - 单页应用，hash 路由，避免 nginx 需要为每个路径配置回退。
 - `app.js` 负责登录、会话、导航、全局状态、字典加载和路由分发。
 - `views/*.js` 按页面拆分；公共表格、弹窗、跟进时间线、金额格式化放在 `shared.js`。
-- 共享列表外壳（Ticket #9 起）统一放在 `shared.js`：`dataTable` 的列带 `sortKey` 即渲染三态（asc → desc → 默认）可排序表头，`listPagerHtml` 提供窗口化页码按钮与每页条数选择器，`bindListShell` 统一事件委托；列表页把 `page/size/sort/order` 写入 hash URL（`history.replaceState`，不触发重渲染），改排序或每页条数回第 1 页。线索页（Ticket #9）、客户页（Ticket #10，含派生 `last_follow` 排序列）与商机页（Ticket #13，stage 页签与分页排序同写 hash URL）已接入，其余列表页按 issue #8 逐步迁移。
+- 共享列表外壳（Ticket #9 起）统一放在 `shared.js`：`dataTable` 的列带 `sortKey` 即渲染三态（asc → desc → 默认）可排序表头，`listPagerHtml` 提供窗口化页码按钮与每页条数选择器，`bindListShell` 统一事件委托；列表页把 `page/size/sort/order` 写入 hash URL（`history.replaceState`，不触发重渲染），改排序或每页条数回第 1 页。线索页（Ticket #9）、客户页（Ticket #10，含派生 `last_follow` 排序列）与商机页（Ticket #13，stage 页签与分页排序同写 hash URL）、产品页（Ticket #14，五个筛选条件与分页排序同写 hash URL）已接入，其余列表页按 issue #8 逐步迁移。
 - 页面级样式与共享样式分开，避免修改某页影响全站。
 - 图片查看器当前页弹出，不新开浏览器标签。
 - 金额遮罩只影响显示，不改变 API 数据。

@@ -91,127 +91,198 @@ function productFeatureBadges(product) {
     }).join('') + '</div>';
 }
 
-function filterProducts(products, filters) {
-    var q = String(filters.q || '').trim().toLowerCase();
-    return products.filter(function (p) {
-        if (filters.category && p.category !== filters.category) { return false; }
-        if (filters.series && p.series !== filters.series) { return false; }
-        if (filters.drive && p.drive_type !== filters.drive) { return false; }
-        if (filters.active === '1' && !p.is_active) { return false; }
-        if (filters.active === '0' && p.is_active) { return false; }
-        if (!q) { return true; }
-        return [p.code, p.name, p.category, productCategoryLabel(p.category), p.series, p.structure, p.opening_mode,
-            p.frame_type, p.leaf_type, p.config_summary]
-            .filter(Boolean).join(' ').toLowerCase().indexOf(q) >= 0;
-    });
+/* ---------------- 产品列表（Ticket #14）：服务端分页/排序/筛选 ----------------
+ * 与线索/客户/商机页同一套共享外壳口径（Ticket #9/#10/#13）：
+ * page/size/sort/order 与全部筛选条件（q/category/series/drive/active）一起写入
+ * #/products hash URL（history.replaceState，刷新或分享后状态保持）；
+ * 改排序、每页条数或任一筛选条件都自动回第 1 页；筛选与排序全部在服务端执行。
+ */
+var PRODUCT_SORT_KEYS = ['product', 'drive_type', 'status'];
+
+function readProductListQuery(query) {
+    var page = parseInt(query.get('page'), 10);
+    var size = parseInt(query.get('size'), 10);
+    var sort = query.get('sort') || '';
+    var order = query.get('order') || '';
+    if (!(page >= 1)) { page = 1; }
+    if (LIST_PAGE_SIZES.indexOf(size) < 0) { size = 20; }
+    if (PRODUCT_SORT_KEYS.indexOf(sort) < 0) { sort = ''; }
+    if (order !== 'asc' && order !== 'desc') { order = 'desc'; }
+    return {
+        page: page, size: size, sort: sort, order: order,
+        q: (query.get('q') || '').trim(),
+        category: query.get('category') || '',
+        series: query.get('series') || '',
+        drive: query.get('drive') || '',
+        active: query.get('active') || ''
+    };
 }
 
-function productFiltersHtml() {
+function productListHash(list) {
+    var p = new URLSearchParams();
+    if (list.q) { p.set('q', list.q); }
+    if (list.category) { p.set('category', list.category); }
+    if (list.series) { p.set('series', list.series); }
+    if (list.drive) { p.set('drive', list.drive); }
+    if (list.active) { p.set('active', list.active); }
+    p.set('page', String(list.page));
+    p.set('size', String(list.size));
+    if (list.sort) {
+        p.set('sort', list.sort);
+        p.set('order', list.order);
+    }
+    return '#/products?' + p.toString();
+}
+
+/* 状态变更统一入口：合并 patch 写 hash；除翻页外任何变更（条数/排序/任一筛选）都回第 1 页 */
+function updateProductListState(root, patch) {
+    var cur = readProductListQuery(parseRoute().query);
+    var next = {
+        page: cur.page, size: cur.size, sort: cur.sort, order: cur.order,
+        q: cur.q, category: cur.category, series: cur.series, drive: cur.drive, active: cur.active
+    };
+    Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
+    if (patch.page === undefined) { next.page = 1; }
+    if (!next.sort) { next.order = 'desc'; }
+    history.replaceState(null, '', productListHash(next));
+    return next;
+}
+
+function productFiltersHtml(f) {
+    f = f || { q: '', category: '', series: '', drive: '', active: '' };
+    function sel(cur, val) { return String(cur || '') === val ? ' selected' : ''; }
     return '<div class="product-filters">' +
         '<label class="product-search"><span class="sr-only">搜索产品</span>' +
-        '<input id="productQ" type="search" placeholder="搜索编码、名称、结构或配置"></label>' +
-        '<select id="productCategory">' + productCategoryOptions('', '全部分类') + '</select>' +
-        '<select id="productSeries">' + productOption(PRODUCT_SERIES, '', '全部系列') + '</select>' +
-        '<select id="productDrive"><option value="">全部驱动</option><option value="manual">手动</option>' +
-        '<option value="electric">电动</option></select>' +
-        '<select id="productActive"><option value="">全部状态</option><option value="1">在售</option>' +
-        '<option value="0">已停用</option></select>' +
+        '<input id="productQ" type="search" placeholder="搜索编码、名称、结构或配置" autocomplete="off" value="' +
+            esc(f.q || '') + '"></label>' +
+        '<select id="productCategory">' + productCategoryOptions(f.category || '', '全部分类') + '</select>' +
+        '<select id="productSeries">' + productOption(PRODUCT_SERIES, f.series || '', '全部系列') + '</select>' +
+        '<select id="productDrive"><option value="">全部驱动</option><option value="manual"' +
+            sel(f.drive, 'manual') + '>手动</option>' +
+        '<option value="electric"' + sel(f.drive, 'electric') + '>电动</option></select>' +
+        '<select id="productActive"><option value="">全部状态</option><option value="1"' +
+            sel(f.active, '1') + '>在售</option>' +
+        '<option value="0"' + sel(f.active, '0') + '>已停用</option></select>' +
         '</div>';
 }
 
-function bindProductFilters(root, onChange) {
-    var filters = { q: '', category: '', series: '', drive: '', active: '' };
-    var map = {
-        productQ: 'q',
-        productCategory: 'category',
-        productSeries: 'series',
-        productDrive: 'drive',
-        productActive: 'active'
-    };
-    Object.keys(map).forEach(function (id) {
-        var el = $('#' + id, root);
-        if (!el) { return; }
-        var key = map[id];
-        var eventName = id === 'productQ' ? 'input' : 'change';
-        el.addEventListener(eventName, function () {
-            filters[key] = String(el.value || '').trim();
-            onChange(filters);
-        });
-    });
-    return filters;
-}
-
-function productRowsHtml(products) {
-    return dataTable([
-        { title: '产品', render: function (p) {
-            return '<a href="#/products/' + p.id + '">' + esc(p.name) + '</a>' +
-                '<div class="small muted">' + esc(p.code) + '</div>';
-        } },
-        { title: '分类 / 系列', nowrap: true, render: function (p) {
-            return esc([productCategoryLabel(p.category), p.series].filter(Boolean).join(' / ') || '—');
-        } },
-        { title: '结构 / 开启', nowrap: true, render: function (p) {
-            return esc([p.structure, p.opening_mode].filter(Boolean).join(' / ') || '—');
-        } },
-        { title: '配置', render: function (p) { return productFeatureBadges(p); } },
-        { title: '驱动', nowrap: true, render: function (p) { return productDriveBadge(p); } },
-        { title: '规格范围', nowrap: true, render: function (p) { return esc(productRangeText(p)); } },
-        { title: '引用', align: 'right', nowrap: true, render: function (p) {
-            return '<span title="商机 / 订单">' + p.deal_count + ' / ' + p.order_count + '</span>';
-        } },
-        { title: '状态', nowrap: true, render: function (p) {
-            return '<span class="badge ' + (p.is_active ? 'ok' : 'muted') + '">' +
-                (p.is_active ? '在售' : '停用') + '</span>' +
-                (p.form_available ? '' : ' <span class="badge danger">缺表</span>');
-        } },
-        { title: '操作', nowrap: true, render: function (p) {
-            return '<div class="op-group">' + productFileLinks(p, true) +
-                opButtons([{ op: 'edit', arg: p.id, label: '编辑' }, { op: 'view', arg: p.id, label: '详情' }]) + '</div>';
-        } }
-    ], products, '没有匹配的产品');
-}
-
 function viewProducts(root) {
-    return api('/products').then(function (products) {
-        var all = products || [];
-        var activeCount = all.filter(function (p) { return p.is_active; }).length;
-        root.innerHTML =
-            '<div class="card product-hero">' +
-                '<div class="card-head"><div><h2>产品 <span class="badge muted">' + all.length + '</span></h2>' +
-                '<p class="card-subtitle">一份 Excel 对应一个产品；下单表是产品的必传凭证，商机关联后自动冻结产品快照。</p></div>' +
-                '<div class="product-actions">' +
-                    '<button type="button" class="btn btn-ghost" id="productImport">从下单表生成</button>' +
-                    '<button type="button" class="btn btn-primary" id="productNew">＋ 新增产品</button>' +
-                '</div></div>' +
-                '<div class="product-kpis"><span><b>' + activeCount + '</b> 在售</span>' +
-                '<span><b>' + all.filter(function (p) { return p.category === '天窗'; }).length + '</b> 天窗</span>' +
-                '<span><b>' + all.filter(function (p) { return p.drive_type === 'electric'; }).length + '</b> 电动款</span></div>' +
-            '</div>' +
-            '<div class="card">' + productFiltersHtml() +
-                '<div id="productList">' + productRowsHtml(all) + '</div>' +
-            '</div>';
+    var list = readProductListQuery(parseRoute().query);
+    root.innerHTML =
+        '<div class="card product-hero">' +
+            '<div class="card-head"><div><h2>产品</h2>' +
+            '<p class="card-subtitle">一份 Excel 对应一个产品；下单表是产品的必传凭证，商机关联后自动冻结产品快照。</p></div>' +
+            '<div class="product-actions">' +
+                '<button type="button" class="btn btn-ghost" id="productImport">从下单表生成</button>' +
+                '<button type="button" class="btn btn-primary" id="productNew">＋ 新增产品</button>' +
+            '</div></div>' +
+        '</div>' +
+        '<div class="card">' + productFiltersHtml(list) +
+            '<div id="productShell"><div id="productList"><p class="loading">加载中…</p></div>' +
+            '<div id="productPager"></div></div>' +
+        '</div>';
 
-        function paint(filters) {
-            var hits = filterProducts(all, filters);
-            var box = $('#productList', root);
-            box.innerHTML = '<div class="small muted product-result">显示 ' + hits.length + ' / ' + all.length + ' 个产品</div>' +
-                productRowsHtml(hits);
+    bindListShell($('#productShell', root), {
+        onPage: function (p) { updateProductListState(root, { page: p }); loadProducts(root); },
+        onSize: function (s) { updateProductListState(root, { size: s }); loadProducts(root); },
+        onSort: function (key, order) {
+            var nextOrder = cycleSortOrder(order);
+            if (nextOrder) { updateProductListState(root, { sort: key, order: nextOrder }); }
+            else { updateProductListState(root, { sort: '' }); }
+            loadProducts(root);
         }
-        bindProductFilters(root, paint);
+    });
 
-        $('#productNew', root).addEventListener('click', function () {
-            openProductEdit(null, function () { return render(); });
+    var qEl = $('#productQ', root);
+    var timer = null;
+    function applyFilters() {
+        updateProductListState(root, {
+            q: String(qEl.value || '').trim(),
+            category: String($('#productCategory', root).value || '').trim(),
+            series: String($('#productSeries', root).value || '').trim(),
+            drive: String($('#productDrive', root).value || '').trim(),
+            active: String($('#productActive', root).value || '').trim()
         });
-        $('#productImport', root).addEventListener('click', function () {
-            openProductImport(function () { return render(); });
-        });
-        bindOps(root, {
-            edit: function (id) {
-                var product = all.filter(function (p) { return p.id === id; })[0];
-                if (product) { openProductEdit(product, function () { return render(); }); }
-            },
-            view: function (id) { navigate('#/products/' + id); }
-        });
+        loadProducts(root);
+    }
+    qEl.addEventListener('input', function () {
+        clearTimeout(timer);
+        timer = setTimeout(applyFilters, 300);
+    });
+    ['productCategory', 'productSeries', 'productDrive', 'productActive'].forEach(function (id) {
+        $('#' + id, root).addEventListener('change', applyFilters);
+    });
+
+    $('#productNew', root).addEventListener('click', function () {
+        openProductEdit(null, function () { return render(); });
+    });
+    $('#productImport', root).addEventListener('click', function () {
+        openProductImport(function () { return render(); });
+    });
+    bindOps(root, {
+        edit: function (id) {
+            api('/products/' + id).then(function (product) {
+                openProductEdit(product, function () { return render(); });
+            });
+        },
+        view: function (id) { navigate('#/products/' + id); }
+    });
+
+    return loadProducts(root);
+}
+
+function loadProducts(root) {
+    var listEl = $('#productList', root);
+    var pagerEl = $('#productPager', root);
+    if (!listEl) { return Promise.resolve(); }
+    listEl.innerHTML = '<p class="loading">加载中…</p>';
+
+    var list = readProductListQuery(parseRoute().query);
+    var params = new URLSearchParams();
+    if (list.q) { params.set('q', list.q); }
+    if (list.category) { params.set('category', list.category); }
+    if (list.series) { params.set('series', list.series); }
+    if (list.drive) { params.set('drive_type', list.drive); }
+    if (list.active) { params.set('is_active', list.active); }
+    params.set('page', String(list.page));
+    params.set('size', String(list.size));
+    if (list.sort) { params.set('sort', list.sort); params.set('order', list.order); }
+
+    return api('/products?' + params.toString()).then(function (res) {
+        listEl.innerHTML = dataTable([
+            { title: '产品', sortKey: 'product', render: function (p) {
+                return '<a href="#/products/' + p.id + '">' + esc(p.name) + '</a>' +
+                    '<div class="small muted">' + esc(p.code) + '</div>';
+            } },
+            { title: '分类 / 系列', nowrap: true, render: function (p) {
+                return esc([productCategoryLabel(p.category), p.series].filter(Boolean).join(' / ') || '—');
+            } },
+            { title: '结构 / 开启', nowrap: true, render: function (p) {
+                return esc([p.structure, p.opening_mode].filter(Boolean).join(' / ') || '—');
+            } },
+            { title: '配置', render: function (p) { return productFeatureBadges(p); } },
+            { title: '驱动', sortKey: 'drive_type', nowrap: true, render: function (p) {
+                return productDriveBadge(p);
+            } },
+            { title: '规格范围', nowrap: true, render: function (p) { return esc(productRangeText(p)); } },
+            { title: '引用', align: 'right', nowrap: true, render: function (p) {
+                return '<span title="商机 / 订单">' + p.deal_count + ' / ' + p.order_count + '</span>';
+            } },
+            { title: '状态', sortKey: 'status', nowrap: true, render: function (p) {
+                return '<span class="badge ' + (p.is_active ? 'ok' : 'muted') + '">' +
+                    (p.is_active ? '在售' : '停用') + '</span>' +
+                    (p.form_available ? '' : ' <span class="badge danger">缺表</span>');
+            } },
+            { title: '操作', nowrap: true, render: function (p) {
+                return '<div class="op-group">' + productFileLinks(p, true) +
+                    opButtons([{ op: 'edit', arg: p.id, label: '编辑' }, { op: 'view', arg: p.id, label: '详情' }]) + '</div>';
+            } }
+        ], (res && res.items) || [], '没有匹配的产品', '', '',
+        { key: list.sort, order: list.order });
+
+        pagerEl.innerHTML = listPagerHtml(res);
+    }).catch(function (err) {
+        listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';
     });
 }
 

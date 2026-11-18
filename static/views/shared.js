@@ -1161,8 +1161,9 @@ function loadProductCatalog(force) {
   if (PRODUCT_CATALOG_CACHE && !force) {
     return Promise.resolve(PRODUCT_CATALOG_CACHE);
   }
-  return api('/products').then(function (items) {
-    PRODUCT_CATALOG_CACHE = items || [];
+  // Ticket #14：列表接口改分页契约后，选择器取最大档位 size=500 一次拉全（当前 123 个产品）
+  return api('/products?size=500').then(function (res) {
+    PRODUCT_CATALOG_CACHE = (res && res.items) || [];
     return PRODUCT_CATALOG_CACHE;
   });
 }

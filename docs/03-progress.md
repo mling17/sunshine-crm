@@ -53,6 +53,7 @@
 | TASK-034 | 代码审查整改：外部手机号错误契约与共享校验 | ✅ 已完成 | 非字符串批次项返回 `invalid_phone` 和位置；跟进对象校验、手机号比较键和外部 Token 测试夹具复用 |
 | TASK-035 | 共享列表外壳与线索分页/排序（Ticket #9） | ✅ 已完成 | size 白名单 10/20/50/100/500、sort 白名单服务端 SQL 映射均 400 兜底；线索表头三态排序、页码按钮、每页条数；状态写 `#/leads` hash URL，改排序或条数回第 1 页 |
 | TASK-037 | 商机列表服务端分页与排序（Ticket #13） | ✅ 已完成 | `GET /deals` 改 `{items,total,page,size}`，复用线索/客户白名单口径（8 个可排序列，尺寸=`spec`），默认 `updated_at DESC, id DESC`；商机页接入共享外壳，stage 页签与分页排序同写 hash URL |
+| TASK-038 | 产品列表服务端分页、排序与筛选（Ticket #14） | ✅ 已完成 | `GET /products` 改 `{items,total,page,size}`，复用线索/客户/商机白名单口径（`product`/`drive_type`/`status` 可排序，`drive_type` NULL 沉底），默认天窗分类优先 → `series` → `code` → `id DESC`；五个筛选条件服务端执行；产品页接入共享外壳，筛选 + 分页排序状态同写 `#/products` hash URL |
 | TASK-036 | 客户列表接入共享外壳与上次跟进列（Ticket #10） | ✅ 已完成 | 客户列表复用同一套分页/排序白名单（含 `name` 列），新增派生 `last_follow`（仅人工跟进）；六个可排序列表头 + 上次跟进列；状态写 `#/customers` hash URL，筛选/排序/条数变更回第 1 页；本地 pagerHtml 已移除 |
 
 ## 3. 已完成任务
@@ -122,6 +123,12 @@
 - `docs/TC-LEADS.md`：92 条线索页手工用例，最近记录为全通过。
 - `docs/TC-DEALS.md`：55 条商机页场景，曾记录 6 项失败；多数缺陷在后续提交中处理，发布仍应以当前代码和最新回归为准。
 - `ops/T9-T10-上线与验收记录.md`：V1 传统部署的历史现场记录。
+
+### 4.6 TASK-038 产品列表分页排序回归
+
+- 定向回归：产品 API 与前端结构共 24 项通过（`tests.test_products`、`tests.test_products_ui`），覆盖分页契约、白名单 400 边界、默认天窗优先、显式排序 NULL 沉底、服务端筛选、筛选+分页组合，以及外壳接入/hash URL/翻页归 1/缓存版本断言；连带适配 `test_deal_quotes.py`、`test_multi_product_orders.py`、`test_form_layout.py`、`test_deal_product_consistency.py` 并通过。
+- 全量回归：`Ran 624 tests in 210.861s ... FAILED (failures=4, skipped=2)`：618 通过、2 跳过；4 项失败为分支既有「附件 10/20 上限」测试口径问题（`test_external_api_assets`、`test_external_followups`、`test_followups`、`test_rollout_package`，基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 验证环境：隔离 SQLite 数据库与上传目录；未使用生产库；本机无常驻后端服务在跑，应用启动经完整测试 lifespan 验证，未做浏览器人工冒烟。
 
 ### 4.5 TASK-037 商机列表分页排序回归
 
@@ -294,6 +301,15 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-18 · TASK-038 · 产品列表服务端分页、排序与筛选
+
+- 来源：`[用户明确要求]`，GitHub issue #14（父需求 #8 列表页统一分页与可排序表头）。
+- 后端 `GET /api/crm/products`：响应从全量数组改为 `{items,total,page,size}`；复用 Ticket #9/#13 同一套校验口径（`LIST_PAGE_SIZES` 白名单与 `invalid_page`/`invalid_page_size`/`invalid_sort`/`invalid_order` 400 错误码）；`sort` 白名单 `product`（按名称）/`drive_type`/`status`（即 `is_active`），排序 SQL 只来自 `_PRODUCT_SORT_SQL` 服务端映射；`drive_type` 可空升/降序均 NULL 沉底，显式排序稳定次键 `id DESC`；未传 sort 默认维持产品页既有口径：天窗分类优先 → `series` → `code` → `id DESC`。`q`/`category`/`series`/`drive_type`/`is_active` 筛选全部服务端执行，与分页排序自由组合。
+- 前端产品页接入共享列表外壳：`产品`/`驱动`/`状态` 三个可排序表头（配置/规格范围/引用/操作不可排序），页码按钮 + 每页条数；keyword/分类/系列/驱动/状态五个筛选条件与 `page/size/sort/order` 一起写入 `#/products` hash URL（`history.replaceState`），改排序/条数/任一筛选均回第 1 页；本地整表加载 + `filterProducts` 前端过滤移除；列表「编辑」改为按 id 拉详情后打开编辑弹层。
+- 连带适配：`shared.js` 产品选择器 `loadProductCatalog` 改用 `size=500` 一次拉全并取 `res.items`；`index.html` 产品页脚本缓存版本刷新为 `20261118product-list-shell1`。
+- 既有测试适配新契约：`test_products.py`（种子目录、搜索、停用过滤等数组断言改取 `items`，全量断言改 `size=500`）、`test_deal_quotes.py`、`test_multi_product_orders.py`、`test_form_layout.py`（筛选栏签名变化）。
+- 新增 API 测试（分页契约、五个 size 档位、四类 400 边界、默认天窗优先且类内 series/code 升序、`product`/`status` 双向排序、`drive_type` NULL 沉底双向、分类/系列/驱动/关键字筛选、筛选+分页切片一致、筛选+排序组合）与前端结构测试 `tests/test_products_ui.py`（外壳接入、可排序列、hash URL 含五个筛选 + page/size/sort/order、翻页归 1、缓存版本断言）。
 
 ### 2026-11-18 · TASK-037 · 商机列表服务端分页与排序
 

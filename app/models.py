@@ -294,6 +294,13 @@ class ProductDetailOut(ProductOut):
     deals: list[dict] = Field(default_factory=list)
 
 
+class ProductListOut(BaseModel):
+    items: list[ProductOut]
+    total: int
+    page: int
+    size: int
+
+
 class DealItemIn(BaseModel):
     """商机产品明细：同产品同参数用 quantity，参数不同必须拆行。"""
 

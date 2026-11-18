@@ -86,13 +86,20 @@ class TestProducts(ApiTestCase):
 
         resp = self.client.get("/api/crm/products")
         self.assertEqual(resp.status_code, 200, resp.text)
-        products = resp.json()
-        self.assertEqual(len(products), 123)
+        body = resp.json()
+        self.assertEqual(body["total"], 123)
+        self.assertEqual(body["page"], 1)
+        self.assertEqual(body["size"], 20)
+        products = body["items"]
+        self.assertEqual(len(products), 20)
         self.assertEqual(products[0]["code"], "TS-001")
         self.assertTrue(all(p["form_available"] for p in products))
         self.assertTrue(all(p["form_file_name"].lower().endswith((".xlsx", ".xls")) for p in products))
-        self.assertTrue(any(p["category"] == "天幕" for p in products))
-        self.assertTrue(any(p["category"] == "开合屋面" for p in products))
+        # 分类覆盖等全量断言取最大档位一次拉全（天窗类目超过一页，首页未必含全部类目）
+        all_products = self.client.get("/api/crm/products", params={"size": 500}).json()["items"]
+        self.assertEqual(len(all_products), 123)
+        self.assertTrue(any(p["category"] == "天幕" for p in all_products))
+        self.assertTrue(any(p["category"] == "开合屋面" for p in all_products))
 
         download = self.client.get(f"/api/crm/products/{products[0]['id']}/form-file")
         self.assertEqual(download.status_code, 200, download.text)
@@ -119,7 +126,7 @@ class TestProducts(ApiTestCase):
         self.assertEqual(product["config_summary"].count("电动纱窗"), 1)
         self.assertTrue(product["form_available"])
 
-        hits = self.client.get("/api/crm/products", params={"q": "联排测试"}).json()
+        hits = self.client.get("/api/crm/products", params={"q": "联排测试"}).json()["items"]
         self.assertEqual([p["id"] for p in hits], [product["id"]])
 
         resp = self.client.put(
@@ -130,7 +137,7 @@ class TestProducts(ApiTestCase):
         self.assertEqual(resp.json()["name"], "55型2扇联排测试产品（新版）")
         self.assertFalse(resp.json()["is_active"])
 
-        active = self.client.get("/api/crm/products", params={"is_active": 1}).json()
+        active = self.client.get("/api/crm/products", params={"is_active": 1}).json()["items"]
         self.assertNotIn(product["id"], [p["id"] for p in active])
 
     def test_payload_code_is_ignored_and_invalid_dimensions_are_rejected(self):
@@ -238,7 +245,7 @@ class TestProducts(ApiTestCase):
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         preview = resp.json()
-        products = self.client.get("/api/crm/products").json()
+        products = self.client.get("/api/crm/products", params={"size": 500}).json()["items"]
         existing = next(item for item in products if item["code"] == "TS-001")
         self.assertEqual(preview["duplicate_product_code"], "TS-001")
         self.assertEqual(preview["duplicate_product_id"], existing["id"])
@@ -378,3 +385,174 @@ class TestProducts(ApiTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# Product list server-side pagination / sorting / filtering (Ticket #14).
+from tests._util import ApiTestCase
+
+
+class TestProductListPagination(ApiTestCase):
+    """Ticket #14：GET /products 改 {items,total,page,size}，筛选/排序/分页全部服务端。"""
+
+    def get_items(self, **params) -> dict:
+        resp = self.client.get("/api/crm/products", params=params)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
+
+    def test_pagination_contract_and_size_whitelist(self):
+        body = self.get_items()
+        self.assertEqual(set(body), {"items", "total", "page", "size"})
+        self.assertEqual(body["total"], 123)
+        self.assertEqual(body["page"], 1)
+        self.assertEqual(body["size"], 20)
+        self.assertEqual(len(body["items"]), 20)
+
+        for size in (10, 20, 50, 100, 500):
+            with self.subTest(size=size):
+                page = self.get_items(size=size, page=1)
+                self.assertEqual(page["size"], size)
+                self.assertEqual(len(page["items"]), min(size, 123))
+        page2 = self.get_items(size=10, page=2)
+        self.assertEqual(page2["page"], 2)
+        first_ids = {p["id"] for p in self.get_items(size=10, page=1)["items"]}
+        self.assertFalse(first_ids & {p["id"] for p in page2["items"]}, "翻页不得重复")
+
+    def test_invalid_page_size_sort_order_are_400(self):
+        cases = [
+            ({"page": 0}, "invalid_page"),
+            ({"page": -3}, "invalid_page"),
+            ({"size": 15}, "invalid_page_size"),
+            ({"size": 5000}, "invalid_page_size"),
+            ({"sort": "code"}, "invalid_sort"),
+            ({"sort": "series"}, "invalid_sort"),
+            ({"order": "up"}, "invalid_order"),
+            ({"sort": "product", "order": ""}, "invalid_order"),
+        ]
+        for params, code in cases:
+            with self.subTest(params=params):
+                resp = self.client.get("/api/crm/products", params=params)
+                self.assertEqual(resp.status_code, 400, resp.text)
+                self.assertEqual(resp.json()["code"], code)
+
+    def test_default_order_skylight_first_then_series_then_code(self):
+        items = self.get_items(size=500)["items"]
+        self.assertEqual(len(items), 123)
+        # 天窗整体在最前，其后才是其他分类
+        seen_other = False
+        for product in items:
+            if product["category"] == "天窗":
+                self.assertFalse(seen_other, "天窗必须排在所有其他分类之前")
+            else:
+                seen_other = True
+        self.assertTrue(seen_other, "种子数据应包含非天窗分类")
+        # 每个分类内部：series 升序（SQLite 口径，NULL 在前），同 series 按 code 升序
+        for category in {p["category"] for p in items}:
+            with self.subTest(category=category):
+                group = [p for p in items if p["category"] == category]
+                keys = [(p["series"] or "", p["code"]) for p in group]
+                self.assertEqual(keys, sorted(keys))
+
+    def test_explicit_sort_whitelist_columns(self):
+        asc = self.get_items(size=500, sort="product", order="asc")["items"]
+        names = [p["name"] for p in asc]
+        self.assertEqual(names, sorted(names))
+        desc = self.get_items(size=500, sort="product", order="desc")["items"]
+        self.assertEqual([p["name"] for p in desc], sorted(names, reverse=True))
+
+        # drive_type 可空：升/降序都 NULL 沉底，非空部分有序
+        for order in ("asc", "desc"):
+            with self.subTest(order=order):
+                rows = self.get_items(size=500, sort="drive_type", order=order)["items"]
+                values = [p["drive_type"] for p in rows]
+                seen_null = False
+                non_null = []
+                for value in values:
+                    if value is None:
+                        seen_null = True
+                    else:
+                        self.assertFalse(seen_null, "NULL 必须沉底")
+                        non_null.append(value)
+                self.assertEqual(non_null, sorted(non_null, reverse=(order == "desc")))
+                self.assertGreater(sum(1 for v in values if v is None), 0, "种子数据含未指定驱动")
+
+        # status（在售/停用）：停用(is_active=0)升序在最前；先造一个停用产品
+        created = self.client.post(
+            "/api/crm/products",
+            data={"payload": json.dumps(
+                {"name": "分页排序测试产品", "category": "天窗"},
+                ensure_ascii=False,
+            )},
+            files={
+                "form_file": (
+                    "TS-TEST-001.xlsx",
+                    TestProducts.form_bytes(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        product = created.json()
+        self.client.put(
+            f"/api/crm/products/{product['id']}", json={"is_active": False}
+        )
+        rows = self.get_items(size=500, sort="status", order="asc")["items"]
+        flags = [p["is_active"] for p in rows]
+        self.assertEqual(flags, sorted(flags))
+        self.assertFalse(flags[0], "停用产品应排在最前")
+        self.assertEqual(flags[0], False)
+        # 同列稳定次键 id DESC：两个停用产品（若存在多个）按 id 倒序
+        inactive = [p for p in rows if not p["is_active"]]
+        self.assertEqual(
+            [p["id"] for p in inactive],
+            sorted((p["id"] for p in inactive), reverse=True),
+        )
+
+    def test_server_side_filters(self):
+        skylight = self.get_items(size=500, category="天窗")
+        self.assertTrue(all(p["category"] == "天窗" for p in skylight["items"]))
+        self.assertEqual(skylight["total"], 113)
+        self.assertLess(skylight["total"], 123)
+
+        series_value = skylight["items"][0]["series"]
+        series_hits = self.get_items(size=500, category="天窗", series=series_value)
+        self.assertTrue(
+            all(p["series"] == series_value for p in series_hits["items"])
+        )
+        self.assertLess(series_hits["total"], skylight["total"])
+
+        electric = self.get_items(size=500, drive_type="electric")
+        self.assertTrue(all(p["drive_type"] == "electric" for p in electric["items"]))
+        self.assertGreater(electric["total"], 0)
+
+        hits = self.get_items(q="TS-0")
+        self.assertGreater(hits["total"], 0)
+        for product in hits["items"]:
+            blob = " ".join(
+                str(product.get(k) or "")
+                for k in ("code", "name", "series", "structure")
+            )
+            self.assertIn("TS-0", blob)
+
+        # 无匹配：total 为 0，items 为空数组
+        empty = self.get_items(q="绝对不存在的编号xyz")
+        self.assertEqual(empty["total"], 0)
+        self.assertEqual(empty["items"], [])
+
+    def test_filter_and_pagination_combine(self):
+        base = self.get_items(q="TS-0", size=500)
+        page1 = self.get_items(q="TS-0", size=10, page=1)
+        page2 = self.get_items(q="TS-0", size=10, page=2)
+        self.assertEqual(page1["total"], base["total"])
+        self.assertEqual(page2["total"], base["total"])
+        self.assertEqual(len(page1["items"]), 10)
+        combined = page1["items"] + page2["items"]
+        self.assertEqual(
+            [p["id"] for p in combined],
+            [p["id"] for p in base["items"][:20]],
+            "筛选后的分页切片必须与全量筛选结果一致",
+        )
+        # 筛选 + 显式排序同样服务端生效
+        sorted_hits = self.get_items(q="TS-0", size=500, sort="product", order="asc")
+        names = [p["name"] for p in sorted_hits["items"]]
+        self.assertEqual(names, sorted(names))
+        self.assertEqual(sorted_hits["total"], base["total"])

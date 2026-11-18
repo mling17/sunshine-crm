@@ -67,7 +67,7 @@ class FormLayoutStructureTest(unittest.TestCase):
 
         products_view = self.views["products.js"]
         self.assertIn("dictOptions('product_type', current, emptyLabel)", products_view)
-        self.assertIn("productCategoryOptions('', '全部分类')", products_view)
+        self.assertIn("productCategoryOptions(f.category || '', '全部分类')", products_view)
         self.assertIn("productCategoryOptions(p.category || '天窗', null)", products_view)
 
     def test_customer_and_lead_share_deal_convert_modal(self):

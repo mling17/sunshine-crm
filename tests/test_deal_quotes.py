@@ -57,7 +57,7 @@ class DealQuoteTest(ApiTestCase):
     def _quote_with_item(self) -> tuple[dict, dict, dict]:
         customer, deal = self._deal()
         product = next(
-            p for p in self.client.get("/api/crm/products").json()
+            p for p in self.client.get("/api/crm/products", params={"size": 500}).json()["items"]
             if p["code"] == "TS-003"
         )
         created_quote = self.client.post(
@@ -480,7 +480,7 @@ class DealQuoteTest(ApiTestCase):
         quote = self.client.post(
             f"/api/crm/deals/{deal['id']}/quotes", json={"title": "测试"}
         ).json()
-        product = self.client.get("/api/crm/products").json()[0]
+        product = self.client.get("/api/crm/products").json()["items"][0]
         resp = self.client.post(
             f"/api/crm/quotes/{quote['id']}/items",
             data={"product_id": str(product["id"]), "preview_token": "0" * 64},
@@ -495,7 +495,7 @@ class DealQuoteTest(ApiTestCase):
             f"/api/crm/deals/{deal['id']}/quotes", json={"title": "校验测试"}
         ).json()
         product = next(
-            p for p in self.client.get("/api/crm/products").json()
+            p for p in self.client.get("/api/crm/products", params={"size": 500}).json()["items"]
             if p["code"] == "TS-004"
         )
         resp = self.client.post(

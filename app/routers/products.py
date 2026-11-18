@@ -19,12 +19,14 @@ from app.models import (
     ProductDetailOut,
     ProductImportPreview,
     ProductIn,
+    ProductListOut,
     ProductOut,
     ProductUpdate,
 )
 from app.product_catalog import config_summary, parse_attributes
 from app.product_importer import ProductFormParseError, parse_order_form
 from app.routers.auth import require_auth
+from app.routers.leads import LIST_PAGE_SIZES
 from app.security import now_iso
 from app.storage import (
     DOC_MIME_BY_EXT,
@@ -39,6 +41,17 @@ router = APIRouter(
     tags=["products"],
     dependencies=[Depends(require_auth)],
 )
+
+#: 列表排序白名单（Ticket #14）：排序 SQL 一律来自这里的映射，绝不拼接前端传来的原始列名。
+#: product 即列表「产品」列（按名称排序，编码同列展示）；status 即 is_active（在售/停用）。
+_PRODUCT_SORT_SQL: dict[str, str] = {
+    "product": "p.name",
+    "drive_type": "p.drive_type",
+    "status": "p.is_active",
+}
+
+# 可为 NULL 的排序列：无论升降序都让其沉底（(expr IS NULL) ASC），否则升序时大量空值堆在最前面。
+_PRODUCT_SORT_NULLABLE = frozenset({"drive_type"})
 
 
 def _escape_like(value: str) -> str:
@@ -260,44 +273,94 @@ def _insert_product(
     return int(cur.lastrowid or 0)
 
 
-@router.get("/products", response_model=list[ProductOut])
+@router.get("/products", response_model=ProductListOut)
 def list_products(
     q: str | None = Query(default=None, max_length=80),
     category: str | None = Query(default=None, max_length=32),
     series: str | None = Query(default=None, max_length=32),
     drive_type: str | None = Query(default=None, max_length=16),
     is_active: int | None = Query(default=None, ge=0, le=1),
-) -> list[ProductOut]:
-    where = ["is_delete = 0"]
+    page: int = Query(default=1),
+    size: int = Query(default=20),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
+) -> ProductListOut:
+    """产品列表。
+
+    分页/排序/筛选（Ticket #14，复用 Ticket #9/#13 同一套校验口径）：size 白名单
+    ``LIST_PAGE_SIZES``，sort 白名单见 ``_PRODUCT_SORT_SQL``；非法 page/size/sort/order
+    一律 400，排序 SQL 只走白名单映射。不传 sort 时维持产品页既有默认口径：
+    天窗分类优先 -> series -> code，稳定次键 id DESC。筛选全部服务端执行。
+    """
+    if page < 1:
+        raise ApiError(status_code=400, code="invalid_page", message="page 必须 >= 1")
+    if size not in LIST_PAGE_SIZES:
+        raise ApiError(
+            status_code=400,
+            code="invalid_page_size",
+            message=f"size 必须是 {'/'.join(str(s) for s in LIST_PAGE_SIZES)} 之一",
+        )
+    sort = sort or None  # 显式传空串等同未传，走默认排序
+    if sort is not None and sort not in _PRODUCT_SORT_SQL:
+        raise ApiError(
+            status_code=400,
+            code="invalid_sort",
+            message=f"sort 只支持 {'/'.join(_PRODUCT_SORT_SQL)}",
+        )
+    if order not in ("asc", "desc"):
+        raise ApiError(status_code=400, code="invalid_order", message="order 只支持 asc/desc")
+
+    if sort:
+        expr = _PRODUCT_SORT_SQL[sort]
+        dir_sql = "ASC" if order == "asc" else "DESC"
+        # 显式排序：稳定次键固定 id DESC；可空列先排 NULL 沉底（升/降序都沉底）。
+        if sort in _PRODUCT_SORT_NULLABLE:
+            order_sql = f"({expr} IS NULL) ASC, {expr} {dir_sql}, p.id DESC"
+        else:
+            order_sql = f"{expr} {dir_sql}, p.id DESC"
+    else:
+        order_sql = "CASE WHEN p.category='天窗' THEN 0 ELSE 1 END, p.series, p.code, p.id DESC"
+
+    where = ["p.is_delete = 0"]
     params: list[object] = []
     if q and q.strip():
         like = f"%{_escape_like(q.strip())}%"
         where.append(
-            "(code LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\'"
-            " OR series LIKE ? ESCAPE '\\' OR structure LIKE ? ESCAPE '\\')"
+            "(p.code LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\'"
+            " OR p.series LIKE ? ESCAPE '\\' OR p.structure LIKE ? ESCAPE '\\')"
         )
         params.extend([like, like, like, like])
     if category:
-        where.append("category = ?")
+        where.append("p.category = ?")
         params.append(category.strip())
     if series:
-        where.append("series = ?")
+        where.append("p.series = ?")
         params.append(series.strip())
     if drive_type:
-        where.append("drive_type = ?")
+        where.append("p.drive_type = ?")
         params.append(drive_type.strip())
     if is_active is not None:
-        where.append("is_active = ?")
+        where.append("p.is_active = ?")
         params.append(is_active)
 
+    where_sql = " AND ".join(where)
     with db_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM products WHERE " + " AND ".join(where)
-            + " ORDER BY CASE WHEN category='天窗' THEN 0 ELSE 1 END, series, code, id",
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM products p WHERE {where_sql}",
             params,
+        ).fetchone()["n"]
+        rows = conn.execute(
+            f"SELECT p.* FROM products p WHERE {where_sql}"
+            f" ORDER BY {order_sql} LIMIT ? OFFSET ?",
+            [*params, size, (page - 1) * size],
         ).fetchall()
         deal_counts, order_counts = _usage_maps(conn)
-    return [_out(row, deal_counts, order_counts) for row in rows]
+    return ProductListOut(
+        items=[_out(row, deal_counts, order_counts) for row in rows],
+        total=total,
+        page=page,
+        size=size,
+    )
 
 
 @router.post("/products/import-preview", response_model=ProductImportPreview)
