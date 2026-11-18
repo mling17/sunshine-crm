@@ -867,14 +867,14 @@ function viewDealDetail(root, rawId) {
         ensureCustomerIndex(),
         loadProductCatalog(),
         api('/deals/' + id + '/quotes'),
-        api('/follow-ups?object_type=deal&object_id=' + id + '&include_system=true')
-            .catch(function () { return []; })
+        api('/follow-ups?object_type=deal&object_id=' + id + '&include_system=true&size=500')
+            .catch(function () { return { items: [] }; })
     ]).then(function (all) {
         var d = all[0];
         var index = all[1] || {};
         var products = all[2] || [];
         var quotes = all[3] || [];
-        var records = all[4] || [];
+        var records = (all[4] && all[4].items) || [];
         d.quote_count = quotes.length;
         d.confirmed_quote_no = (quotes.filter(function (q) {
             return q.status === 'confirmed';

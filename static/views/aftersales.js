@@ -176,11 +176,11 @@ function viewAftersaleDetail(root, rawId) {
 
     return Promise.all([
         api('/aftersales/' + id),
-        api('/follow-ups?object_type=aftersale&object_id=' + id + '&include_system=true')
-            .catch(function () { return []; })
+        api('/follow-ups?object_type=aftersale&object_id=' + id + '&include_system=true&size=500')
+            .catch(function () { return { items: [] }; })
     ]).then(function (all) {
         var a = all[0];
-        var records = followupRecordsFromApi(all[1] || []);
+        var records = followupRecordsFromApi((all[1] && all[1].items) || []);
 
         if (!a) {
             root.innerHTML = '<div class="card">售后单不存在，<a href="#/aftersales">回售后列表</a></div>';

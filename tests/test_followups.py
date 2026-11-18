@@ -224,18 +224,18 @@ class FollowUpsTest(ApiTestCase):
             c["id"], content="第二次", deal_id=deal["id"], next_date="2026-11-05"
         ).json()
 
-        all_items = self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}").json()
+        all_items = self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}").json()["items"]
         self.assertEqual(len(all_items), 2)
         self.assertEqual(all_items[0]["id"], second["id"], "按时间倒序（新的在前）")
         by_id = {item["id"]: item for item in all_items}
         self.assertEqual(by_id[first["id"]]["photo_count"], 1)
         self.assertEqual(by_id[second["id"]]["photo_count"], 0)
 
-        only_deal = self.client.get(f"/api/crm/follow-ups?deal_id={deal['id']}").json()
+        only_deal = self.client.get(f"/api/crm/follow-ups?deal_id={deal['id']}").json()["items"]
         self.assertEqual([item["id"] for item in only_deal], [second["id"]])
 
         self.assertEqual(
-            self.client.get("/api/crm/follow-ups?customer_id=9999").json(), []
+            self.client.get("/api/crm/follow-ups?customer_id=9999").json()["items"], []
         )
 
     def test_follow_up_attached_to_deleted_deal_is_gone(self):
@@ -329,6 +329,252 @@ class FollowUpsTest(ApiTestCase):
             401,
         )
         self.assertEqual(anon.delete(f"/api/crm/follow-ups/{body['id']}").status_code, 401)
+
+
+
+class FollowUpListPaginationSortTest(ApiTestCase):
+    """Ticket #16：GET /follow-ups 分页契约 + 排序白名单。
+
+    与线索/客户/商机/订单同一套口径：{items,total,page,size}；size 白名单
+    [10,20,50,100,500]；sort 白名单 customer/deal_stage/content/next_date/created_at；
+    非法 page/size/sort/order 一律 400；默认 created_at DESC, id DESC；
+    可空列（customer/deal_stage/next_date）升/降序都 NULL 沉底；显式排序稳定次键 id DESC。
+    """
+
+    # ---------- 小工具 ----------
+    def post_fu(
+        self,
+        object_type: str,
+        object_id: int,
+        *,
+        content: str = "跟进内容",
+        next_date: str | None = None,
+        deal_id: int | None = None,
+    ) -> dict:
+        data: dict[str, str] = {
+            "object_type": object_type,
+            "object_id": str(object_id),
+            "content": content,
+        }
+        if next_date is not None:
+            data["next_date"] = next_date
+        if deal_id is not None:
+            data["deal_id"] = str(deal_id)
+        resp = self.client.post("/api/crm/follow-ups", data=data)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
+
+    def create_lead(self, *, name: str = "线索甲", phone: str = "13800138000") -> dict:
+        resp = self.client.post(
+            "/api/crm/leads",
+            json={"name": name, "phone": phone, "lead_type": "personal", "source": "wechat"},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
+
+    def ids(self, resp) -> list[int]:
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return [item["id"] for item in resp.json()["items"]]
+
+    # ---------- 契约 ----------
+    def test_pagination_contract(self):
+        """默认 page=1/size=20，返回 {items,total,page,size}；翻页切片正确。"""
+        c = self.create_customer(name="张伟")
+        for i in range(25):
+            self.post_fu("customer", c["id"], content=f"第{i + 1}次跟进")
+
+        resp = self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        data = resp.json()
+        self.assertEqual(data["page"], 1)
+        self.assertEqual(data["size"], 20)
+        self.assertEqual(data["total"], 25)
+        self.assertEqual(len(data["items"]), 20)
+
+        resp = self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}&page=2&size=10")
+        data = resp.json()
+        self.assertEqual(data["page"], 2)
+        self.assertEqual(data["size"], 10)
+        self.assertEqual(data["total"], 25)
+        self.assertEqual(len(data["items"]), 10)
+        first_page = self.client.get(
+            f"/api/crm/follow-ups?customer_id={c['id']}&page=1&size=10"
+        ).json()["items"]
+        self.assertNotEqual(
+            [it["id"] for it in first_page], [it["id"] for it in data["items"]]
+        )
+
+        # 页码越过尾页：items 为空但 total 不变
+        data = self.client.get(
+            f"/api/crm/follow-ups?customer_id={c['id']}&page=9&size=10"
+        ).json()
+        self.assertEqual(data["items"], [])
+        self.assertEqual(data["total"], 25)
+
+    def test_page_size_sort_order_whitelists(self):
+        """非法 page/size/sort/order 一律 400，错误码与 Ticket #9/#13 共享口径一致。"""
+        cases = [
+            ("/api/crm/follow-ups?page=0", "invalid_page"),
+            ("/api/crm/follow-ups?page=-1", "invalid_page"),
+            ("/api/crm/follow-ups?size=15", "invalid_page_size"),
+            ("/api/crm/follow-ups?size=1000", "invalid_page_size"),
+            ("/api/crm/follow-ups?sort=id", "invalid_sort"),
+            ("/api/crm/follow-ups?sort=photo_count", "invalid_sort"),
+            ("/api/crm/follow-ups?sort=content;DROP TABLE", "invalid_sort"),
+            ("/api/crm/follow-ups?sort=content&order=up", "invalid_order"),
+            ("/api/crm/follow-ups?sort=content&order=ASC", "invalid_order"),
+        ]
+        for url, code in cases:
+            with self.subTest(url=url):
+                resp = self.client.get(url)
+                self.assertEqual(resp.status_code, 400, resp.text)
+                self.assertEqual(resp.json()["code"], code)
+
+    # ---------- 排序 ----------
+    def test_default_order_created_at_desc_id_desc(self):
+        """不传 sort：记录时间倒序 + id 倒序（新的在前）。"""
+        c = self.create_customer(name="张伟")
+        first = self.post_fu("customer", c["id"], content="第一次")
+        second = self.post_fu("customer", c["id"], content="第二次")
+        third = self.post_fu("customer", c["id"], content="第三次")
+
+        got = self.ids(self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}"))
+        self.assertEqual(got, [third["id"], second["id"], first["id"]])
+
+    def test_sort_content_with_stable_tiebreak(self):
+        """显式 sort=content：同值按稳定次键 id DESC。"""
+        c = self.create_customer(name="张伟")
+        a = self.post_fu("customer", c["id"], content="aaa")
+        b = self.post_fu("customer", c["id"], content="bbb")
+        d = self.post_fu("customer", c["id"], content="bbb")
+
+        got = self.ids(
+            self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}&sort=content&order=asc")
+        )
+        self.assertEqual(got, [a["id"], d["id"], b["id"]], "bbb 同值按 id DESC（后建的在前）")
+        got = self.ids(
+            self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}&sort=content&order=desc")
+        )
+        self.assertEqual(got, [d["id"], b["id"], a["id"]])
+
+    def test_sort_created_at_explicit(self):
+        """显式 sort=created_at 升序：最早的在前；降序与默认一致。
+
+        created_at 精度到秒，连续两条可能同值；这里直接改库拉开时间差。
+        """
+        c = self.create_customer(name="张伟")
+        first = self.post_fu("customer", c["id"], content="第一次")
+        second = self.post_fu("customer", c["id"], content="第二次")
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE follow_ups SET created_at = '2026-11-01T08:00:00Z' WHERE id = ?",
+                (first["id"],),
+            )
+            conn.execute(
+                "UPDATE follow_ups SET created_at = '2026-11-02T08:00:00Z' WHERE id = ?",
+                (second["id"],),
+            )
+
+        got = self.ids(
+            self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}&sort=created_at&order=asc")
+        )
+        self.assertEqual(got, [first["id"], second["id"]])
+        got = self.ids(
+            self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}&sort=created_at&order=desc")
+        )
+        self.assertEqual(got, [second["id"], first["id"]])
+
+    def test_sort_customer_join_column_and_null_sink(self):
+        """customer 走 JOIN 的 c.name；无线索客户（lead 跟进 customer_id 为空）升/降序都沉底。"""
+        alpha = self.create_customer(name="Alpha 客户")
+        beta = self.create_customer(name="Beta 客户")
+        lead = self.create_lead(name="无线索客户", phone="13900139000")
+        fa = self.post_fu("customer", alpha["id"], content="A 客户跟进")
+        fb = self.post_fu("customer", beta["id"], content="B 客户跟进")
+        fl = self.post_fu("lead", lead["id"], content="线索跟进（无客户）")
+        self.assertIsNone(fl["customer_id"])
+
+        for order, expect in (
+            ("asc", [fa["id"], fb["id"], fl["id"]]),
+            ("desc", [fb["id"], fa["id"], fl["id"]]),
+        ):
+            with self.subTest(order=order):
+                got = self.ids(self.client.get(f"/api/crm/follow-ups?sort=customer&order={order}"))
+                self.assertEqual(got, expect, "客户名为空的线索跟进必须沉底")
+
+    def test_sort_deal_stage_join_column_and_null_sink(self):
+        """deal_stage 走 JOIN 的 d.stage；未关联商机的跟进升/降序都沉底。"""
+        c = self.create_customer(name="张伟")
+        deal = self.create_deal(c["id"])
+        with_deal = self.post_fu("customer", c["id"], content="带商机", deal_id=deal["id"])
+        without_deal = self.post_fu("customer", c["id"], content="不带商机")
+        self.assertEqual(with_deal["deal_stage"], deal["stage"])
+        self.assertIsNone(without_deal["deal_stage"])
+
+        for order in ("asc", "desc"):
+            with self.subTest(order=order):
+                got = self.ids(
+                    self.client.get(f"/api/crm/follow-ups?sort=deal_stage&order={order}")
+                )
+                self.assertEqual(got[0], with_deal["id"])
+                self.assertEqual(got[-1], without_deal["id"])
+
+    def test_sort_next_date_null_sinks_both_directions(self):
+        """next_date 可空：升序、降序都沉底（(expr IS NULL) ASC）。"""
+        c = self.create_customer(name="张伟")
+        with_date = self.post_fu("customer", c["id"], content="有下次", next_date="2026-12-01")
+        without_date = self.post_fu("customer", c["id"], content="没下次")
+
+        for order in ("asc", "desc"):
+            with self.subTest(order=order):
+                got = self.ids(
+                    self.client.get(f"/api/crm/follow-ups?sort=next_date&order={order}")
+                )
+                self.assertEqual(got[0], with_date["id"])
+                self.assertEqual(got[-1], without_date["id"])
+
+    # ---------- 筛选 ----------
+    def test_filters_combined_with_pagination(self):
+        """customer_id/deal_id/object_type/object_id 过滤与分页共存；total 随过滤变化。"""
+        c = self.create_customer(name="张伟")
+        deal = self.create_deal(c["id"])
+        lead = self.create_lead(name="李娜", phone="13900139000")
+        for i in range(3):
+            self.post_fu("customer", c["id"], content=f"客户跟进{i}")
+        self.post_fu("customer", c["id"], content="挂商机的跟进", deal_id=deal["id"])
+        self.post_fu("lead", lead["id"], content="线索跟进")
+
+        data = self.client.get(
+            f"/api/crm/follow-ups?customer_id={c['id']}&page=1&size=10"
+        ).json()
+        self.assertEqual(data["total"], 4)
+        self.assertEqual(len(data["items"]), 4)
+
+        data = self.client.get(f"/api/crm/follow-ups?deal_id={deal['id']}").json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["items"][0]["content"], "挂商机的跟进")
+
+        data = self.client.get(
+            f"/api/crm/follow-ups?object_type=lead&object_id={lead['id']}"
+        ).json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["items"][0]["content"], "线索跟进")
+
+    def test_include_system_still_server_side(self):
+        """默认只回 kind='follow'；include_system=true 连系统履历一起分页返回。"""
+        c = self.create_customer(name="张伟")
+        self.create_deal(c["id"])  # 建商机会写 kind='create' 系统履历（customer_id 回填）
+        self.post_fu("customer", c["id"], content="人工跟进")
+
+        data = self.client.get(f"/api/crm/follow-ups?customer_id={c['id']}").json()
+        self.assertTrue(data["items"])
+        self.assertTrue(all(it["kind"] == "follow" for it in data["items"]))
+
+        full = self.client.get(
+            f"/api/crm/follow-ups?customer_id={c['id']}&include_system=true"
+        ).json()
+        self.assertGreaterEqual(full["total"], data["total"])
+        self.assertTrue(any(it["kind"] != "follow" for it in full["items"]))
 
 
 if __name__ == "__main__":

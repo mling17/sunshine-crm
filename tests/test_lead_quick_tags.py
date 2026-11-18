@@ -23,7 +23,7 @@ class LeadQuickTagsTest(ApiTestCase):
                 "object_id": lead_id,
                 "include_system": "true",
             },
-        ).json()
+        ).json()["items"]
         return [item for item in history if item["kind"] == "change"]
 
     def test_multiple_tags_save_in_one_change_and_removal_keeps_dictionary(self):

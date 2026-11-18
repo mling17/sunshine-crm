@@ -58,6 +58,7 @@
 | TASK-039 | 售后列表服务端排序与共享外壳（Ticket #11） | ✅ 已完成 | `GET /aftersales` 复用共享 size 白名单（10/20/50/100/500），新增 `sort/order`（`aftersale_no`/`type`/`order`/`customer`/`problem`/`status`/`created_at`，JOIN 列只走服务端白名单 SQL）；`problem` 可空双向 NULL 沉底；默认 `created_at DESC, id DESC`；状态/订单/客户筛选与排序共存；售后页接入共享外壳，三态页签 + 分页排序同写 `#/aftersales` hash URL |
 | TASK-040 | 订单列表服务端分页与排序（Ticket #12） | ✅ 已完成 | `GET /orders` 改 `{items,total,page,size}`，复用共享白名单口径（7 个可排序列，客户名走 JOIN，可空列双向 NULL 沉底），默认 `id DESC`；订单页接入共享外壳，状态页签与分页排序同写 `#/orders` hash URL，本地未定义的 `pagerHtml` 调用移除 |
 | TASK-041 | 物流公司列表服务端分页、排序与筛选（Ticket #15） | ✅ 已完成 | `GET /carriers` 改 `{items,total,page,size}`，复用共享白名单口径（`name`/`address` 可排序，`address` NULL 沉底），默认被订单关联次数倒序 → `id DESC`；仅看启用、关键词筛选服务端执行；物流页接入共享外壳，筛选 + 分页排序同写 `#/logistics` hash URL；顺带修复 `is_active` 更新从未落库 |
+| TASK-042 | 跟进历史页去除表单并接入分页排序（Ticket #16） | ✅ 已完成 | `GET /follow-ups` 改 `{items,total,page,size}`，复用共享白名单口径（`customer`/`deal_stage`/`content`/`next_date`/`created_at` 可排序，JOIN 列只走服务端 SQL 映射，可空列 NULL 沉底），默认 `created_at DESC, id DESC`；历史页去掉「记一条跟进」表单，改纯跟进流水表格并接入共享外壳，筛选 + 分页排序同写 `#/followups` hash URL；详情页履历调用适配新契约 |
 
 ## 3. 已完成任务
 
@@ -126,6 +127,12 @@
 - `docs/TC-LEADS.md`：92 条线索页手工用例，最近记录为全通过。
 - `docs/TC-DEALS.md`：55 条商机页场景，曾记录 6 项失败；多数缺陷在后续提交中处理，发布仍应以当前代码和最新回归为准。
 - `ops/T9-T10-上线与验收记录.md`：V1 传统部署的历史现场记录。
+
+### 4.9 TASK-042 跟进历史页分页排序回归
+
+- 定向回归：跟进 API 与前端结构共 19 项新增通过（`tests.test_followups` 分页排序 11 项 + `tests.test_followups_history_ui` 8 项），覆盖分页契约（默认 page=1/size=20、越界页空 items 但 total 不变）、size/page/sort/order 400 边界（含注入样式 sort）、默认 `created_at DESC, id DESC`、显式排序稳定次键 `id DESC`、JOIN 列（客户名/商机阶段）双向排序、`customer`/`deal_stage`/`next_date` NULL 沉底双向、customer_id/deal_id/object_type/object_id 筛选与分页组合、include_system 默认过滤仍在服务端；前端结构覆盖无表单、外壳接入、五个可排序列（附件/操作不可排序）、hash URL 状态、翻页归 1、详情页契约适配、缓存版本断言。连带适配并通过：`tests.test_leads`、`tests.test_csvimport`、`tests.test_aftersales_ui`、`tests.test_aftersale_history_ui`、`tests.test_customer_360_ui`、`tests.test_deal_tag_header_ui`、`tests.test_deals_ui`、`tests.test_followup_modal_ui`、`tests.test_deal_quote_followup_ui`、`tests.test_dashboard_navigation_ui`。
+- 全量回归：`Ran 698 tests in 220.377s ... FAILED (failures=4, skipped=2)`：692 通过、2 跳过；4 项失败为分支既有「附件 10/20 上限」测试口径问题（`test_external_api_assets`、`test_external_followups`、`test_followups`、`test_rollout_package`，基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 验证环境：隔离 SQLite 数据库与上传目录；未使用生产库；本机无常驻后端服务在跑，应用启动经完整测试 lifespan 验证，未做浏览器人工冒烟。
 
 ### 4.8 TASK-040 订单列表分页排序回归
 
@@ -316,6 +323,18 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-19 · TASK-042 · 跟进历史页去除表单并接入分页排序
+
+- 来源：`[用户明确要求]`，GitHub issue #16（父需求 #8 列表页统一分页与可排序表头）。
+- 后端 `GET /api/crm/follow-ups`：响应从全量数组改为 `{items,total,page,size}`；新增 `page`/`size`/`sort`/`order`，复用 Ticket #9/#13 同一套校验口径（`LIST_PAGE_SIZES` 白名单与 `invalid_page`/`invalid_page_size`/`invalid_sort`/`invalid_order` 400 错误码）；`sort` 白名单 `customer`（JOIN `c.name`）/`deal_stage`（JOIN `d.stage`）/`content`/`next_date`/`created_at`，排序 SQL 只来自 `_FOLLOWUP_SORT_SQL` 服务端映射；`customer`/`deal_stage`/`next_date` 可空升/降序均 NULL 沉底，显式排序稳定次键 `id DESC`；未传 sort 维持既有默认 `created_at DESC, id DESC`。`customer_id`/`deal_id`/`object_type`/`object_id`/`include_system` 筛选保留且仍全部服务端执行，与分页排序自由组合；照片明射只对当页数据计算。
+- 前端跟进历史页重构：删除「记一条跟进」表单及 `followupFormHtml`/`followupItemHtml`（“记跟进”统一走各业务对象详情页的 `openFollowModal` 弹层，本次不动）；改为纯跟进流水表格并接入共享列表外壳：客户/商机阶段/跟进内容/下次跟进/记录时间五个可排序表头（附件/操作不可排序），页码按钮 + 每页条数；`customer`/`deal` 深链筛选与 `page/size/sort/order` 一起写入 `#/followups` hash URL（`history.replaceState`），改排序/条数/筛选均回第 1 页；删除操作保留（删完刷新当页）；工作台「查看全部跟进」`链接 `#/followups` 路由不变。
+- 连带适配：售后/客户/商机/线索详情页履历调用改用 `size=500` 取全量并读 `.items`；`index.html` 跟进页与四个详情页脚本缓存版本刷新（`20261119followup-list-shell1` / `20261119followup-items1`），`test_aftersales_ui.py`/`test_aftersale_history_ui.py`/`test_customer_360_ui.py`/`test_deal_tag_header_ui.py`/`test_deals_ui.py` 缓存断言同步更新。
+- 既有测试适配新契约：`test_followups.py`/`test_leads.py`/`test_csvimport.py`/`test_customers.py`/`test_deal_quotes.py`/`test_lead_quick_tags.py` 中 GET /follow-ups 数组断言改取 `["items"]`；`test_form_layout.py` 移除跟进页 `fuForm` 表单断言（表单按 issue #16 删除）。
+- 新增 API 测试 11 项（分页契约、size/page/sort/order 400 边界、默认排序、显式排序稳定次键、JOIN 列双向、NULL 沉底双向、筛选+分页组合、include_system 服务端过滤）与前端结构测试 `tests/test_followups_history_ui.py` 8 项（无表单、外壳接入、可排序列、hash URL、翻页归 1、契约适配、缓存版本）。
+- 定向 `tests/test_followups.py` 与 `tests/test_followups_history_ui.py` 共 35 项通过（含 1 项既有附件上限失败）；隔离 SQLite 全量回归 692 通过、2 跳过（MySQL live 自跳过），4 项失败为分支既有「附件 10/20 上限」测试口径问题（基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 未连接真实 MySQL 验证；未做浏览器人工冒烟。
+
 
 ### 2026-11-19 · TASK-041 · 物流公司列表服务端分页、排序与筛选
 

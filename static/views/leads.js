@@ -734,11 +734,11 @@ function viewLeadDetail(root, rawId) {
 
     return Promise.all([
         api('/leads/' + id),
-        api('/follow-ups?object_type=lead&object_id=' + id + '&include_system=true')
-            .catch(function () { return []; })
+        api('/follow-ups?object_type=lead&object_id=' + id + '&include_system=true&size=500')
+            .catch(function () { return { items: [] }; })
     ]).then(function (all) {
         var l = all[0];
-        var raw = all[1] || [];
+        var raw = (all[1] && all[1].items) || [];
         if (!l) {
             root.innerHTML = '<div class="card">线索不存在，<a href="#/leads">回线索池</a></div>';
             return;

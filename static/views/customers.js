@@ -462,14 +462,14 @@ function viewCustomerDetail(root, rawId) {
 
     return Promise.all([
         api('/customers/' + id),
-        api('/follow-ups?customer_id=' + id + '&include_system=true')
+        api('/follow-ups?customer_id=' + id + '&include_system=true&size=500')
     ]).then(function (all) {
         var c = all[0];
         if (!c) {
             root.innerHTML = '<div class="card">客户不存在，<a href="#/customers">回客户列表</a></div>';
             return;
         }
-        var records = followupRecordsFromApi(all[1] || []);
+        var records = followupRecordsFromApi((all[1] && all[1].items) || []);
         var deals = c.deals || [];
         var tagsHtml = (c.tags || []).length
             ? '<span class="detail-title-tag">' + c.tags.map(function (t) {

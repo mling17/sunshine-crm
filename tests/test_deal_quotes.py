@@ -162,7 +162,7 @@ class DealQuoteTest(ApiTestCase):
         follow_records = self.client.get(
             "/api/crm/follow-ups",
             params={"object_type": "deal", "object_id": deal["id"], "include_system": True},
-        ).json()
+        ).json()["items"]
         follow_upload = next(item for item in follow_records if "上传下单表" in item["content"])
         self.assertEqual(follow_upload["detail"]["event"], "item_created")
 

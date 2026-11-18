@@ -401,7 +401,7 @@ class LeadCsvImportTest(ApiTestCase):
         for lead in leads:
             history = self.client.get(
                 f"/api/crm/follow-ups?object_type=lead&object_id={lead['id']}&include_system=true"
-            ).json()
+            ).json()["items"]
             self.assertTrue(any(row["kind"] == "create" for row in history))
 
     def test_import_leads_reads_dictionary_type_labels(self):

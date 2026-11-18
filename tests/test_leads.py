@@ -406,7 +406,7 @@ class LeadsTest(ApiTestCase):
                 "object_id": lead["id"],
                 "include_system": "true",
             },
-        ).json()
+        ).json()["items"]
         change = next(item for item in history if item["kind"] == "change")
         self.assertEqual(
             change["content"],
@@ -591,7 +591,7 @@ class LeadsTest(ApiTestCase):
         # 验证跟进记录存在
         resp = self.client.get("/api/crm/follow-ups?customer_id=" + str(customer["id"]))
         self.assertEqual(resp.status_code, 200, resp.text)
-        body = resp.json()
+        body = resp.json()["items"]
         self.assertEqual(len(body), 1)
         self.assertEqual(body[0]["customer_id"], customer["id"])
         self.assertEqual(body[0]["deal_id"], deal["id"])
@@ -1076,14 +1076,14 @@ class FollowUpsV2Test(ApiTestCase):
         # 按客户过滤
         resp = self.client.get(f"/api/crm/follow-ups?object_type=customer&object_id={customer['id']}")
         self.assertEqual(resp.status_code, 200)
-        data = resp.json()
+        data = resp.json()["items"]
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["object_type"], "customer")
         
         # 按线索过滤
         resp = self.client.get(f"/api/crm/follow-ups?object_type=lead&object_id={lead['id']}")
         self.assertEqual(resp.status_code, 200)
-        data = resp.json()
+        data = resp.json()["items"]
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["object_type"], "lead")
 

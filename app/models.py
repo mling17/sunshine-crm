@@ -582,6 +582,15 @@ class FollowUpItemOut(FollowUpOut):
     photos: list[AttachmentOut] = Field(default_factory=list)
 
 
+class FollowUpListOut(BaseModel):
+    """跟进列表分页契约（Ticket #16，与商机/订单同一套 {items,total,page,size}）。"""
+
+    items: list[FollowUpItemOut]
+    total: int
+    page: int
+    size: int
+
+
 #: 一条跟进最多几张照片（应用层上限，DDL 里没有 CHECK 约束）
 MAX_PHOTOS = 3
 

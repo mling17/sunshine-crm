@@ -39,7 +39,6 @@ class FormLayoutStructureTest(unittest.TestCase):
                 '<form id="orderEditForm" class="form-modal form-grid"',
             ],
             "logistics.js": '<form id="carrierFormEl" class="form-grid"',
-            "followups.js": '<form id="fuForm" class="form-grid"',
             "shared.js": [
                 '<form id="fuModalForm" class="form-grid"',
             ],

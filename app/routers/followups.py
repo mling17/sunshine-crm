@@ -32,9 +32,11 @@ from app.models import (
     FollowPhraseIn,
     FollowPhraseOut,
     FollowUpItemOut,
+    FollowUpListOut,
     FollowUpOut,
 )
 from app.routers.auth import require_auth
+from app.routers.leads import LIST_PAGE_SIZES
 from app.security import now_iso
 
 router = APIRouter(
@@ -42,6 +44,19 @@ router = APIRouter(
     tags=["follow-ups"],
     dependencies=[Depends(require_auth)],
 )
+
+#: 跟进列表排序白名单（Ticket #16）：排序 SQL 一律来自这里的映射，绝不拼接前端传来的原始列名。
+#: customer 走 LEFT JOIN 的 c.name；deal_stage 走 LEFT JOIN 的 d.stage。
+_FOLLOWUP_SORT_SQL: dict[str, str] = {
+    "customer": "c.name",
+    "deal_stage": "d.stage",
+    "content": "fu.content",
+    "next_date": "fu.next_date",
+    "created_at": "fu.created_at",
+}
+
+# 可为 NULL 的排序列：无论升降序都让其沉底（(expr IS NULL) ASC），否则升序时空值堆在最前面。
+_FOLLOWUP_SORT_NULLABLE = frozenset({"customer", "deal_stage", "next_date"})
 
 
 # ---------------- 入参清洗 ----------------
@@ -246,7 +261,7 @@ async def create_follow_up(
         )
 
 
-@router.get("/follow-ups", response_model=list[FollowUpItemOut])
+@router.get("/follow-ups", response_model=FollowUpListOut)
 def list_follow_ups(
     customer_id: int | None = Query(default=None, gt=0),
     deal_id: int | None = Query(default=None, gt=0),
@@ -255,12 +270,49 @@ def list_follow_ups(
     include_system: bool = Query(
         default=False, description="true = 连系统履历一起返回（创建/编辑/阶段变更/生成订单等）"
     ),
-) -> list[FollowUpItemOut]:
-    """按客户/商机/对象类型/对象ID过滤；不带过滤=全量（新的在前），每条带照片数与照片列表。
+    page: int = Query(default=1),
+    size: int = Query(default=20),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
+) -> FollowUpListOut:
+    """按客户/商机/对象类型/对象ID过滤；不带过滤=全量分页（新的在前），每条带照片数与照片列表。
 
     默认只返回用户记的**真实跟进**（kind='follow'）——与 V1 语义一致；
     跟进页要看完整履历（含系统事件）时传 ``include_system=true``。
+
+    分页/排序（Ticket #16，复用 Ticket #9/#13 同一套校验口径）：size 白名单
+    ``LIST_PAGE_SIZES``，sort 白名单见 ``_FOLLOWUP_SORT_SQL``；非法 page/size/sort/order
+    一律 400，排序 SQL 只走白名单映射。不传 sort 时按记录时间倒序、id 倒序。
     """
+    if page < 1:
+        raise ApiError(status_code=400, code="invalid_page", message="page 必须 >= 1")
+    if size not in LIST_PAGE_SIZES:
+        raise ApiError(
+            status_code=400,
+            code="invalid_page_size",
+            message=f"size 必须是 {'/'.join(str(s) for s in LIST_PAGE_SIZES)} 之一",
+        )
+    sort = sort or None  # 显式传空串等同未传，走默认排序
+    if sort is not None and sort not in _FOLLOWUP_SORT_SQL:
+        raise ApiError(
+            status_code=400,
+            code="invalid_sort",
+            message=f"sort 只支持 {'/'.join(_FOLLOWUP_SORT_SQL)}",
+        )
+    if order not in ("asc", "desc"):
+        raise ApiError(status_code=400, code="invalid_order", message="order 只支持 asc/desc")
+
+    if sort:
+        expr = _FOLLOWUP_SORT_SQL[sort]
+        dir_sql = "ASC" if order == "asc" else "DESC"
+        # 显式排序：稳定次键固定 id DESC；可空列先排 NULL 沉底（升/降序都沉底）。
+        if sort in _FOLLOWUP_SORT_NULLABLE:
+            order_sql = f"({expr} IS NULL) ASC, {expr} {dir_sql}, fu.id DESC"
+        else:
+            order_sql = f"{expr} {dir_sql}, fu.id DESC"
+    else:
+        order_sql = "fu.created_at DESC, fu.id DESC"
+
     where_parts: list[str] = []
     params: list[object] = []
     if not include_system:
@@ -279,7 +331,12 @@ def list_follow_ups(
         where_parts.append("fu.object_id = ?")
         params.append(object_id)
 
+    where_sql = " AND " + " AND ".join(where_parts) if where_parts else ""
     with db_conn() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM follow_ups fu WHERE fu.is_delete = 0{where_sql}",
+            params,
+        ).fetchone()["n"]
         rows = conn.execute(
             f"""
             SELECT fu.id, fu.customer_id, fu.deal_id, fu.quote_id, fu.method, fu.kind, fu.content, fu.next_date,
@@ -290,18 +347,23 @@ def list_follow_ups(
             LEFT JOIN customers c ON c.id = fu.customer_id
             LEFT JOIN deals d ON d.id = fu.deal_id
             LEFT JOIN deal_quotes q ON q.id = fu.quote_id
-            WHERE fu.is_delete = 0
-            {" AND " + " AND ".join(where_parts) if where_parts else ""}
-            ORDER BY fu.created_at DESC, fu.id DESC
+            WHERE fu.is_delete = 0{where_sql}
+            ORDER BY {order_sql}
+            LIMIT ? OFFSET ?
             """,
-            params,
+            [*params, size, (page - 1) * size],
         ).fetchall()
         photos_map = photos_for(conn, [row["id"] for row in rows])
 
-    return [
-        follow_up_to_item(row, photos_map.get(row["id"], []))
-        for row in rows
-    ]
+    return FollowUpListOut(
+        items=[
+            follow_up_to_item(row, photos_map.get(row["id"], []))
+            for row in rows
+        ],
+        total=total,
+        page=page,
+        size=size,
+    )
 
 
 @router.get("/follow-ups/materials")

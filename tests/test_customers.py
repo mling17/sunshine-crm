@@ -160,7 +160,7 @@ class CustomersTest(ApiTestCase):
                 "object_id": c["id"],
                 "include_system": "true",
             },
-        ).json()
+        ).json()["items"]
         change = next(item for item in history if item["kind"] == "change")
         self.assertEqual(
             change["content"],

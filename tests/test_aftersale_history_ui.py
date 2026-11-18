@@ -41,7 +41,7 @@ class AftersaleHistoryUiTest(unittest.TestCase):
 
     def test_script_cache_version_bumped(self):
         self.assertIn("/crm/views/orders.js?v=20261119carrier-items1", self.index)
-        self.assertIn("/crm/views/aftersales.js?v=20261118aftersale-list-shell1", self.index)
+        self.assertIn("/crm/views/aftersales.js?v=20261119followup-items1", self.index)
 
 
 if __name__ == "__main__":
