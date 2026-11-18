@@ -293,7 +293,7 @@ class ApiTestCase(unittest.TestCase):
         body.update(payload)
         resp = self.client.post("/api/crm/carriers", json=body)
         if resp.status_code == 409:
-            for row in self.client.get("/api/crm/carriers").json():
+            for row in self.client.get("/api/crm/carriers?size=500").json()["items"]:
                 if row.get("name") == name:
                     return row
         self.assertEqual(resp.status_code, 200, resp.text)

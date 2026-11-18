@@ -1,6 +1,6 @@
 # 03 · 项目进度
 
-> 最后更新：2026-11-18
+> 最后更新：2026-11-19
 >
 > 当前代码基线：`main@d2324a1`
 >
@@ -57,6 +57,7 @@
 | TASK-036 | 客户列表接入共享外壳与上次跟进列（Ticket #10） | ✅ 已完成 | 客户列表复用同一套分页/排序白名单（含 `name` 列），新增派生 `last_follow`（仅人工跟进）；六个可排序列表头 + 上次跟进列；状态写 `#/customers` hash URL，筛选/排序/条数变更回第 1 页；本地 pagerHtml 已移除 |
 | TASK-039 | 售后列表服务端排序与共享外壳（Ticket #11） | ✅ 已完成 | `GET /aftersales` 复用共享 size 白名单（10/20/50/100/500），新增 `sort/order`（`aftersale_no`/`type`/`order`/`customer`/`problem`/`status`/`created_at`，JOIN 列只走服务端白名单 SQL）；`problem` 可空双向 NULL 沉底；默认 `created_at DESC, id DESC`；状态/订单/客户筛选与排序共存；售后页接入共享外壳，三态页签 + 分页排序同写 `#/aftersales` hash URL |
 | TASK-040 | 订单列表服务端分页与排序（Ticket #12） | ✅ 已完成 | `GET /orders` 改 `{items,total,page,size}`，复用共享白名单口径（7 个可排序列，客户名走 JOIN，可空列双向 NULL 沉底），默认 `id DESC`；订单页接入共享外壳，状态页签与分页排序同写 `#/orders` hash URL，本地未定义的 `pagerHtml` 调用移除 |
+| TASK-041 | 物流公司列表服务端分页、排序与筛选（Ticket #15） | ✅ 已完成 | `GET /carriers` 改 `{items,total,page,size}`，复用共享白名单口径（`name`/`address` 可排序，`address` NULL 沉底），默认被订单关联次数倒序 → `id DESC`；仅看启用、关键词筛选服务端执行；物流页接入共享外壳，筛选 + 分页排序同写 `#/logistics` hash URL；顺带修复 `is_active` 更新从未落库 |
 
 ## 3. 已完成任务
 
@@ -315,6 +316,19 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-19 · TASK-041 · 物流公司列表服务端分页、排序与筛选
+
+- 来源：`[用户明确要求]`，GitHub issue #15（父需求 #8 列表页统一分页与可排序表头）。
+- 后端 `GET /api/crm/carriers`：响应从全量数组改为 `{items,total,page,size}`；复用 Ticket #9/#13 同一套校验口径（`LIST_PAGE_SIZES` 白名单与 `invalid_page`/`invalid_page_size`/`invalid_sort`/`invalid_order` 400 错误码）；`sort` 白名单 `name`（公司名称）/`address`（地址），排序 SQL 只来自 `_CARRIER_SORT_SQL` 服务端映射；`address` 可空升/降序均 NULL 沉底，显式排序稳定次键 `id DESC`；未传 sort 按 issue #8 物流页默认口径：被订单关联次数倒序（`_ORDER_COUNT_SQL` 服务端白名单子查询，绝不接收客户端输入，且不是可排序列）→ `id DESC`。`q` 关键词（公司名/编号/主联系人/电话/地址 + 多联系人姓名/电话，`ESCAPE '\'` 通配符转义）与 `active`（仅看启用）筛选全部服务端执行，与分页排序自由组合。
+- 顺带修复潜在缺陷：`update_carrier` 的 assignments 白名单漏了 `is_active`，停用/启用从未落库（前端停用按钮实际无效）；「仅看启用」筛选服务端化后该字段必须真的可写，补测试覆盖。
+- 前端物流页接入共享列表外壳：公司名称/地址两个可排序表头（联系人/电话/被订单关联/操作不可排序），页码按钮 + 每页条数；仅看启用、关键词筛选与 `page/size/sort/order` 一起写入 `#/logistics` hash URL（`history.replaceState`），改排序/条数/任一筛选均回第 1 页；本地整表加载 + 前端过滤/排序移除；表头计数徽标改由 `res.total` 填充，原「共被订单关联 N 次」全量统计随全量加载一并移除。
+- 连带适配：订单编辑/发货弹层、商机出单弹层的物流公司下拉改用 `/carriers?size=500` + `res.items`；`index.html` 物流/订单/商机脚本缓存版本刷新（`20261119carrier-list-shell1` / `20261119carrier-items1`），`test_orders_ui.py` / `test_deals_ui.py` / `test_aftersale_history_ui.py` 缓存断言同步更新。
+- 既有测试适配新契约：`tests/_util.py::create_carrier` 409 复用分支、`test_addresses_contacts.py` 数组断言改取 `items`（`size=500`）。
+- 新增 API 测试（分页契约、size/page/sort/order 400 边界、默认被订单关联次数倒序 + `id DESC` 次键、计算列不可排序、name/address 双向、address NULL 沉底双向、同值次键 `id DESC`、关键词命中公司名/地址/联系人、LIKE 通配符转义、active=1/0 筛选、筛选+分页/排序组合）与前端结构测试 `tests/test_logistics_ui.py`（外壳接入、可排序列、hash URL 含 active+q+page/size/sort/order、翻页归 1、下拉契约适配、缓存版本断言）。
+- 定向 `tests/test_carriers.py` 14 项、`tests/test_logistics_ui.py` 9 项全部通过；隔离 SQLite 全量回归 675 通过、2 跳过（MySQL live 自跳过），4 项失败为分支既有「附件 10/20 上限」测试口径问题（基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 未连接真实 MySQL 验证；未做浏览器人工冒烟。
+
 
 ### 2026-11-18 · TASK-040 · 订单列表服务端分页与排序
 

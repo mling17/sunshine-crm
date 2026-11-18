@@ -744,9 +744,9 @@ function openOrderEditModal(order) {
     modeEl.addEventListener('change', refreshMode);
     refreshMode();
 
-    api('/carriers').then(function (carriers) {
+    api('/carriers?size=500').then(function (res) {
         populateCarrierContactSelects(
-            carrierEl, contactEl, carriers, order.carrier_id, order.carrier_contact_id
+            carrierEl, contactEl, (res && res.items) || [], order.carrier_id, order.carrier_contact_id
         );
     }).catch(function () {
         toast('物流公司加载失败，请稍后重试', true);
@@ -944,9 +944,9 @@ function showShipModal(order) {
     var carrierEl = form.querySelector('[name="carrier_id"]');
     var contactEl = form.querySelector('[name="carrier_contact_id"]');
 
-    api('/carriers').then(function (carriers) {
+    api('/carriers?size=500').then(function (res) {
         populateCarrierContactSelects(
-            carrierEl, contactEl, carriers, order.carrier_id, order.carrier_contact_id
+            carrierEl, contactEl, (res && res.items) || [], order.carrier_id, order.carrier_contact_id
         );
     }).catch(function () {
         toast('物流公司加载失败，请稍后重试', true);

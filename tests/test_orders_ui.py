@@ -81,8 +81,8 @@ class OrdersListShellUiTest(unittest.TestCase):
         self.assertIsNone(re.search(r"\bPAGE_SIZE\b", self.js))
 
     def test_cache_buster_bumped(self):
-        self.assertIn("/crm/views/orders.js?v=20261118order-list-shell1", self.html)
-        self.assertNotIn("orders.js?v=20261109order-complete1", self.html)
+        self.assertIn("/crm/views/orders.js?v=20261119carrier-items1", self.html)
+        self.assertNotIn("orders.js?v=20261118order-list-shell1", self.html)
 
 
 if __name__ == "__main__":

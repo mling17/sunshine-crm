@@ -13,28 +13,138 @@ function carrierContacts(c) {
     return (c && c.contacts) || [];
 }
 
-/* ---------------- 列表 ---------------- */
-function viewLogistics(root, route) {
-    var activeOnly = (route && route.query.get('active') === '1');
-    var keyword = (route && route.query.get('q')) || '';
+/* ---------------- 列表（Ticket #15）：服务端分页/排序/筛选 ----------------
+ * 与线索/客户/商机/产品页同一套共享外壳口径（Ticket #9/#10/#13/#14）：
+ * page/size/sort/order 与筛选条件（active 仅看启用、q 关键词）一起写入
+ * #/logistics hash URL（history.replaceState，刷新或分享后状态保持）；
+ * 改排序、每页条数或任一筛选条件都自动回第 1 页；筛选与排序全部在服务端执行。
+ * 默认排序（issue #8）：被订单关联次数倒序，由后端维护，不是可排序列。
+ */
+var CARRIER_SORT_KEYS = ['name', 'address'];
 
-    return api('/carriers').then(function (all) {
-        var carriers = (all || []).slice();
-        var totalUsed = carriers.reduce(function (s, c) { return s + (c.order_count || 0); }, 0);
+function readCarrierListQuery(query) {
+    var page = parseInt(query.get('page'), 10);
+    var size = parseInt(query.get('size'), 10);
+    var sort = query.get('sort') || '';
+    var order = query.get('order') || '';
+    if (!(page >= 1)) { page = 1; }
+    if (LIST_PAGE_SIZES.indexOf(size) < 0) { size = 20; }
+    if (CARRIER_SORT_KEYS.indexOf(sort) < 0) { sort = ''; }
+    if (order !== 'asc' && order !== 'desc') { order = 'desc'; }
+    return {
+        page: page, size: size, sort: sort, order: order,
+        active: query.get('active') || '',
+        q: (query.get('q') || '').trim()
+    };
+}
 
-        var list = carriers;
-        if (activeOnly) { list = list.filter(function (c) { return c.is_active; }); }
-        if (keyword) {
-            list = list.filter(function (c) {
-                var hay = [c.name, c.code, c.contact_person, c.phone, c.address].join(' ');
-                carrierContacts(c).forEach(function (p) { hay += ' ' + (p.name || '') + ' ' + (p.phone || ''); });
-                return hay.indexOf(keyword) >= 0;
-            });
+function carrierListHash(list) {
+    var p = new URLSearchParams();
+    if (list.active) { p.set('active', list.active); }
+    if (list.q) { p.set('q', list.q); }
+    p.set('page', String(list.page));
+    p.set('size', String(list.size));
+    if (list.sort) {
+        p.set('sort', list.sort);
+        p.set('order', list.order);
+    }
+    return '#/logistics?' + p.toString();
+}
+
+/* 状态变更统一入口：合并 patch 写 hash；除翻页外任何变更（条数/排序/任一筛选）都回第 1 页 */
+function updateCarrierListState(root, patch) {
+    var cur = readCarrierListQuery(parseRoute().query);
+    var next = {
+        page: cur.page, size: cur.size, sort: cur.sort, order: cur.order,
+        active: cur.active, q: cur.q
+    };
+    Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
+    if (patch.page === undefined) { next.page = 1; }
+    if (!next.sort) { next.order = 'desc'; }
+    history.replaceState(null, '', carrierListHash(next));
+    return next;
+}
+
+function viewLogistics(root) {
+    var list = readCarrierListQuery(parseRoute().query);
+    root.innerHTML =
+        '<div class="card">' +
+        '<div class="card-head"><h2>物流公司 <span class="badge muted" id="carrierTotal"></span></h2>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<input id="carrierSearch" type="search" placeholder="搜公司 / 联系人 / 电话" ' +
+        'value="' + esc(list.q) + '" autocomplete="off" style="width:180px">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="btnNewCarrier">＋ 新增物流公司</button>' +
+        '<button type="button" class="btn btn-sm" id="btnToggleActive">' +
+        (list.active === '1' ? '显示全部' : '只显示启用') + '</button>' +
+        '</div></div>' +
+        '<p class="small muted" style="margin-top:0">被关联过的公司<b>只能停用不能删除</b>；' +
+        '一个公司可维护多个联系人（业务 / 调度 / 结算）；默认按被订单关联次数倒序。</p>' +
+        '</div>' +
+        '<div class="card">' +
+        '<div id="carrierShell"><div id="carrierList"><p class="loading">加载中…</p></div>' +
+        '<div id="carrierPager"></div></div>' +
+        '</div>';
+
+    bindListShell($('#carrierShell', root), {
+        onPage: function (p) { updateCarrierListState(root, { page: p }); loadCarriers(root); },
+        onSize: function (s) { updateCarrierListState(root, { size: s }); loadCarriers(root); },
+        onSort: function (key, order) {
+            var nextOrder = cycleSortOrder(order);
+            if (nextOrder) { updateCarrierListState(root, { sort: key, order: nextOrder }); }
+            else { updateCarrierListState(root, { sort: '' }); }
+            loadCarriers(root);
         }
-        list.sort(function (a, b) { return (b.order_count || 0) - (a.order_count || 0); });
+    });
 
-        var rowsHtml = dataTable([
-            { title: '公司名称', render: function (c) {
+    bindOps(root, {
+        edit: function (id) { return openCarrierForm(id, root); },
+        toggle: function (id) { return toggleCarrier(id, root); },
+        del: function (id) { return deleteCarrier(id, root); }
+    });
+
+    $('#btnNewCarrier', root).addEventListener('click', function () { openCarrierForm(null, root); });
+    $('#btnToggleActive', root).addEventListener('click', function () {
+        updateCarrierListState(root, { active: list.active === '1' ? '' : '1' });
+        loadCarriers(root);
+    });
+    var searchEl = $('#carrierSearch', root);
+    var timer = null;
+    function applyCarrierSearch() {
+        updateCarrierListState(root, { q: String(searchEl.value || '').trim() });
+        loadCarriers(root);
+    }
+    searchEl.addEventListener('input', function () {
+        clearTimeout(timer);
+        timer = setTimeout(applyCarrierSearch, 300);
+    });
+    searchEl.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Enter') { return; }
+        clearTimeout(timer);
+        applyCarrierSearch();
+    });
+
+    return loadCarriers(root);
+}
+
+function loadCarriers(root) {
+    var listEl = $('#carrierList', root);
+    var pagerEl = $('#carrierPager', root);
+    if (!listEl) { return Promise.resolve(); }
+    listEl.innerHTML = '<p class="loading">加载中…</p>';
+
+    var list = readCarrierListQuery(parseRoute().query);
+    var params = new URLSearchParams();
+    if (list.q) { params.set('q', list.q); }
+    if (list.active) { params.set('active', list.active); }
+    params.set('page', String(list.page));
+    params.set('size', String(list.size));
+    if (list.sort) { params.set('sort', list.sort); params.set('order', list.order); }
+
+    return api('/carriers?' + params.toString()).then(function (res) {
+        var totalEl = $('#carrierTotal', root);
+        if (totalEl) { totalEl.textContent = (res && res.total) || 0; }
+        listEl.innerHTML = dataTable([
+            { title: '公司名称', sortKey: 'name', render: function (c) {
                 return '<a href="javascript:void(0)" data-op="edit" data-arg="' + c.id + '">' + esc(c.name) + '</a>' +
                     (c.is_active ? '' : ' <span class="badge muted">已停用</span>') +
                     (c.code ? '<div class="small muted">编号 ' + esc(c.code) + '</div>' : '');
@@ -57,7 +167,7 @@ function viewLogistics(root, route) {
                 var phone = cs.length ? cs[0].phone : c.phone;
                 return phone ? esc(phone) : '<span class="muted">—</span>';
             } },
-            { title: '地址', render: function (c) { return esc(c.address || '—'); } },
+            { title: '地址', sortKey: 'address', render: function (c) { return esc(c.address || '—'); } },
             { title: '被订单关联', align: 'center', nowrap: true, render: function (c) {
                 return (c.order_count || 0) > 0
                     ? '<a href="#/orders"><span class="badge ok">' + c.order_count + ' 次</span></a>'
@@ -73,48 +183,16 @@ function viewLogistics(root, route) {
                         : { op: 'del', arg: c.id, label: '删除', danger: true }
                 ]);
             } }
-        ], list, keyword ? '没有匹配的物流公司' : '还没有物流公司，点右上「新增物流公司」');
+        ], (res && res.items) || [], list.q ? '没有匹配的物流公司' : '还没有物流公司，点右上「新增物流公司」', '', '',
+        { key: list.sort, order: list.order });
 
-        root.innerHTML =
-            '<div class="card">' +
-            '<div class="card-head"><h2>物流公司 <span class="badge muted">' + list.length + '</span></h2>' +
-            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-            '<input id="carrierSearch" type="search" placeholder="搜公司 / 联系人 / 电话" ' +
-            'value="' + esc(keyword) + '" autocomplete="off" style="width:180px">' +
-            '<button type="button" class="btn btn-sm btn-primary" id="btnNewCarrier">＋ 新增物流公司</button>' +
-            '<button type="button" class="btn btn-sm" id="btnToggleActive">' +
-            (activeOnly ? '显示全部' : '只显示启用') + '</button>' +
-            '</div></div>' +
-            '<p class="small muted" style="margin-top:0">共被订单关联 <b>' + totalUsed + '</b> 次；' +
-            '被关联过的公司<b>只能停用不能删除</b>。一个公司可维护多个联系人（业务 / 调度 / 结算）。</p>' +
-            '</div>' +
-            '<div class="card">' + rowsHtml + '</div>';
-
-        bindOps(root, {
-            edit: function (id) { return openCarrierForm(id, root); },
-            toggle: function (id) { return toggleCarrier(id, root); },
-            del: function (id) { return deleteCarrier(id, root); }
-        });
-
-        $('#btnNewCarrier', root).addEventListener('click', function () { openCarrierForm(null, root); });
-        $('#btnToggleActive', root).addEventListener('click', function () {
-            var q = [];
-            if (!activeOnly) { q.push('active=1'); }
-            if (keyword) { q.push('q=' + encodeURIComponent(keyword)); }
-            navigate('#/logistics' + (q.length ? '?' + q.join('&') : ''));
-        });
-        var searchEl = $('#carrierSearch', root);
-        searchEl.addEventListener('keydown', function (ev) {
-            if (ev.key !== 'Enter') { return; }
-            var q = [];
-            if (activeOnly) { q.push('active=1'); }
-            var v = String(searchEl.value || '').trim();
-            if (v) { q.push('q=' + encodeURIComponent(v)); }
-            navigate('#/logistics' + (q.length ? '?' + q.join('&') : ''));
-        });
+        pagerEl.innerHTML = listPagerHtml(res);
+    }).catch(function (err) {
+        listEl.innerHTML = '<p class="err">' + esc(err.message) + '</p>';
     });
 }
 
+/* ---------------- 新增 / 编辑（多联系人） ---------------- */
 /* ---------------- 新增 / 编辑（多联系人） ---------------- */
 function openCarrierForm(id, root) {
     var loader = id ? api('/carriers/' + id) : Promise.resolve(null);

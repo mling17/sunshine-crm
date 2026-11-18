@@ -1550,8 +1550,8 @@ function openDealOrderModal(deal, customerName, items, quote) {
               '</option>';
         carrierContactEl.disabled = !carrier;
     }
-    carrierEl.addEventListener('change', refreshCarrierContacts);
-    api('/carriers').then(function (list) {
+    api('/carriers?size=500').then(function (res) {
+        carrierList = ((res && res.items) || []).filter(function (c) { return c.is_active; });
         carrierList = (list || []).filter(function (c) { return c.is_active; });
         var active = carrierList;
         carrierEl.innerHTML = '<option value="">请选择</option>' + active.map(function (c) {

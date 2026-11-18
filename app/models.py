@@ -1194,6 +1194,15 @@ class CarrierOut(BaseModel):
     #: 被订单关联次数（实时算，不落库）
     order_count: int = 0
 
+
+class CarrierListOut(BaseModel):
+    """物流公司列表分页出参（Ticket #15）：与线索/客户/商机/产品/订单同一契约。"""
+
+    items: list[CarrierOut]
+    total: int
+    page: int
+    size: int
+
 # ---------------- 售后 ----------------
 
 

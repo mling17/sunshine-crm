@@ -76,8 +76,8 @@ class DealsListShellUiTest(unittest.TestCase):
                 self.assertIn(marker, seg)
 
     def test_cache_buster_bumped(self):
-        self.assertIn("/crm/views/deals.js?v=20261118deal-list-shell1", self.html)
-        self.assertNotIn("deals.js?v=20261109quote-recipient1", self.html)
+        self.assertIn("/crm/views/deals.js?v=20261119carrier-items1", self.html)
+        self.assertNotIn("deals.js?v=20261118deal-list-shell1", self.html)
 
     def test_sortable_header_and_pager_styles(self):
         for selector in (

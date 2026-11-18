@@ -136,7 +136,7 @@ class CarrierContactTest(ApiTestCase):
         )
         self.assertEqual(resp.status_code, 200, resp.text)
 
-        rows = self.client.get("/api/crm/carriers").json()
+        rows = self.client.get("/api/crm/carriers?size=500").json()["items"]
         self.assertEqual([r["order_count"] for r in rows if r["id"] == carrier["id"]][0], 1)
 
         blocked = self.client.delete(f"/api/crm/carriers/{carrier['id']}")
