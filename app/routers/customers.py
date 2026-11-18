@@ -25,6 +25,7 @@ from app.models import (
     FollowUpOut,
 )
 from app.routers.auth import require_auth
+from app.routers.leads import LIST_PAGE_SIZES
 from app.security import now_iso
 from app.timeline import add_entry, change_summary
 
@@ -42,9 +43,30 @@ SELECT c.id, c.name, c.phone, c.wechat, c.location, c.note,
        (SELECT COUNT(*) FROM deals d WHERE d.customer_id = c.id AND d.is_delete = 0) AS deals_total,
        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id AND o.is_delete = 0) AS orders_total,
        (SELECT COALESCE(SUM(d.amount), 0) FROM deals d
-         WHERE d.customer_id = c.id AND d.stage = 'won' AND d.is_delete = 0) AS total_closed_amount
+         WHERE d.customer_id = c.id AND d.stage = 'won' AND d.is_delete = 0) AS total_closed_amount,
+       (SELECT MAX(f.created_at) FROM follow_ups f
+         WHERE f.object_type='customer' AND f.object_id=c.id
+           AND f.kind='follow' AND f.is_delete=0) AS last_follow
 FROM customers c
 """
+
+#: 列表排序白名单（Ticket #10）：排序 SQL 一律来自这里的映射，绝不拼接前端传来的原始列名。
+_CUSTOMER_SORT_SQL: dict[str, str] = {
+    "name": "c.name",
+    "type": "c.customer_type",
+    "location": "c.location",
+    "intent": "c.intent_level",
+    # 与 _CUSTOMER_SELECT 里的 last_follow 同一个派生表达式（与线索页 Ticket #9 同口径）
+    "last_follow": (
+        "(SELECT MAX(f.created_at) FROM follow_ups f"
+        " WHERE f.object_type='customer' AND f.object_id=c.id"
+        " AND f.kind='follow' AND f.is_delete=0)"
+    ),
+    "created_at": "c.created_at",
+}
+
+# 可为 NULL 的排序列：无论升降序都让其沉底（(expr IS NULL) ASC），否则升序时大量空值堆在最前面。
+_CUSTOMER_SORT_NULLABLE = frozenset({"type", "location", "intent", "last_follow"})
 
 #: 按标签筛选时追加的 JOIN（UNIQUE(customer_id, tag_id) 保证不会重复出行）
 _TAG_JOIN = (
@@ -137,9 +159,46 @@ def _to_out(row, tags: list[str] | None = None) -> CustomerOut:
 def list_customers(
     search: str | None = Query(default=None, max_length=64, description="名称/电话/地区模糊匹配"),
     tag: str | None = Query(default=None, max_length=32, description="按标签名精确筛选"),
-    page: int = Query(default=1, ge=1),
-    size: int = Query(default=20, ge=1, le=100),
+    page: int = Query(default=1),
+    size: int = Query(default=20),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
 ) -> CustomerListOut:
+    """客户列表。
+
+    分页/排序（Ticket #10，复用 Ticket #9 线索页同一套校验口径）：size 白名单
+    ``LIST_PAGE_SIZES``，sort 白名单见 ``_CUSTOMER_SORT_SQL``；非法 page/size/sort/order
+    一律 400，排序 SQL 只走白名单映射。不传 sort 时按 id 倒序（最新建档在前）。
+    """
+    if page < 1:
+        raise ApiError(status_code=400, code="invalid_page", message="page 必须 >= 1")
+    if size not in LIST_PAGE_SIZES:
+        raise ApiError(
+            status_code=400,
+            code="invalid_page_size",
+            message=f"size 必须是 {'/'.join(str(s) for s in LIST_PAGE_SIZES)} 之一",
+        )
+    sort = sort or None  # 显式传空串等同未传，走默认排序
+    if sort is not None and sort not in _CUSTOMER_SORT_SQL:
+        raise ApiError(
+            status_code=400,
+            code="invalid_sort",
+            message=f"sort 只支持 {'/'.join(_CUSTOMER_SORT_SQL)}",
+        )
+    if order not in ("asc", "desc"):
+        raise ApiError(status_code=400, code="invalid_order", message="order 只支持 asc/desc")
+
+    if sort:
+        expr = _CUSTOMER_SORT_SQL[sort]
+        dir_sql = "ASC" if order == "asc" else "DESC"
+        # 显式排序：稳定次键固定 id DESC；可空列先排 NULL 沉底（升/降序都沉底）。
+        if sort in _CUSTOMER_SORT_NULLABLE:
+            order_sql = f"({expr} IS NULL) ASC, {expr} {dir_sql}, c.id DESC"
+        else:
+            order_sql = f"{expr} {dir_sql}, c.id DESC"
+    else:
+        order_sql = "c.id DESC"
+
     where_parts: list[str] = ["c.is_delete = 0"]
     params: list[object] = []
     join_sql = ""
@@ -170,7 +229,7 @@ def list_customers(
             f"SELECT COUNT(*) AS n FROM customers c{join_sql} {where_sql}", params
         ).fetchone()["n"]
         rows = conn.execute(
-            f"{_CUSTOMER_SELECT}{join_sql} {where_sql} ORDER BY c.id DESC LIMIT ? OFFSET ?",
+            f"{_CUSTOMER_SELECT}{join_sql} {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
             [*params, size, offset],
         ).fetchall()
         tags_map = _tags_for(conn, [row["id"] for row in rows])

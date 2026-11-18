@@ -29,6 +29,49 @@ function customerNameCellHtml(c) {
         '</div>';
 }
 
+/* ---------------- 列表外壳状态（Ticket #10）：page/size/sort/order 存于 hash URL ----------------
+ * 与线索页同一套口径（Ticket #9）：刷新或分享链接后状态保持；改 sort/size 自动回第 1 页；
+ * 状态写入用 history.replaceState（不触发 hashchange，避免重渲染打断搜索框焦点）。
+ * 搜索/标签筛选仍留在 state.filters，变更时把 page 归 1 并同步进 URL。
+ */
+var CUST_SORT_KEYS = ['name', 'type', 'location', 'intent', 'last_follow', 'created_at'];
+
+function readCustomerListQuery(query) {
+    var page = parseInt(query.get('page'), 10);
+    var size = parseInt(query.get('size'), 10);
+    var sort = query.get('sort') || '';
+    var order = query.get('order') || '';
+    if (!(page >= 1)) { page = 1; }
+    if (LIST_PAGE_SIZES.indexOf(size) < 0) { size = 20; }
+    if (CUST_SORT_KEYS.indexOf(sort) < 0) { sort = ''; }
+    if (order !== 'asc' && order !== 'desc') { order = 'desc'; }
+    return { page: page, size: size, sort: sort, order: order };
+}
+
+function customerListHash(list) {
+    var p = new URLSearchParams();
+    p.set('page', String(list.page));
+    p.set('size', String(list.size));
+    if (list.sort) {
+        p.set('sort', list.sort);
+        p.set('order', list.order);
+    }
+    return '#/customers?' + p.toString();
+}
+
+/* 状态变更统一入口：合并 patch 写 hash；改 size/sort 时自动把 page 归 1 */
+function updateCustomerListState(root, patch) {
+    var cur = readCustomerListQuery(parseRoute().query);
+    var next = { page: cur.page, size: cur.size, sort: cur.sort, order: cur.order };
+    Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
+    if (patch.page === undefined && (patch.size !== undefined || patch.sort !== undefined)) {
+        next.page = 1;
+    }
+    if (!next.sort) { next.order = 'desc'; }
+    history.replaceState(null, '', customerListHash(next));
+    return next;
+}
+
 function viewCustomers(root) {
     var st = state.filters;
     return api('/tags?limit=8').catch(function () { return []; }).then(function (tags) {
@@ -42,13 +85,24 @@ function viewCustomers(root) {
             '</div>' +
             '<div class=\"chips\" id=\"tagChips\">' + chipHtml(tags, st.tag) + '</div>' +
             '</div>' +
-            '<div class=\"card\"><div id=\"custList\"><p class=\"loading\">加载中…</p></div><div id=\"custPager\"></div></div>';
+            '<div class=\"card\" id=\"custShell\"><div id=\"custList\"><p class=\"loading\">加载中…</p></div><div id=\"custPager\"></div></div>';
+
+        bindListShell($('#custShell', root), {
+            onPage: function (p) { updateCustomerListState(root, { page: p }); loadCustomers(root); },
+            onSize: function (s) { updateCustomerListState(root, { size: s }); loadCustomers(root); },
+            onSort: function (key, order) {
+                var nextOrder = cycleSortOrder(order);
+                if (nextOrder) { updateCustomerListState(root, { sort: key, order: nextOrder }); }
+                else { updateCustomerListState(root, { sort: '' }); }
+                loadCustomers(root);
+            }
+        });
 
         var searchEl = $('#custSearch', root);
         var timer = null;
         function applySearch() {
             st.q = String(searchEl.value || '').trim();
-            st.page = 1;
+            updateCustomerListState(root, { page: 1 });
             loadCustomers(root);
         }
         searchEl.addEventListener('input', function () {
@@ -64,7 +118,7 @@ function viewCustomers(root) {
             var btn = ev.target.closest('button[data-tag]');
             if (!btn) { return; }
             st.tag = btn.getAttribute('data-tag') || '';
-            st.page = 1;
+            updateCustomerListState(root, { page: 1 });
             $$('#tagChips .chip', root).forEach(function (chip) {
                 chip.classList.toggle('active', (chip.getAttribute('data-tag') || '') === st.tag);
             });
@@ -82,31 +136,36 @@ function loadCustomers(root) {
     if (!listEl) { return Promise.resolve(); }
     listEl.innerHTML = '<p class=\"loading\">加载中…</p>';
 
+    var list = readCustomerListQuery(parseRoute().query);
     var params = new URLSearchParams();
-    params.set('page', String(st.page));
-    params.set('size', String(PAGE_SIZE));
+    params.set('page', String(list.page));
+    params.set('size', String(list.size));
+    if (list.sort) { params.set('sort', list.sort); params.set('order', list.order); }
     if (st.q) { params.set('search', st.q); }
     if (st.tag) { params.set('tag', st.tag); }
 
     return api('/customers?' + params.toString()).then(function (res) {
         var items = res.items || [];
         listEl.innerHTML = dataTable([
-            { title: '名称', render: function (c) {
+            { title: '名称', sortKey: 'name', render: function (c) {
                 return customerNameCellHtml(c);
             } },
-            { title: '类型', nowrap: true, render: function (c) {
+            { title: '类型', sortKey: 'type', nowrap: true, render: function (c) {
                 return dictLabel('customer_type', c.customer_type, c.customer_type || '—');
             } },
-            { title: '地区', render: function (c) { return esc(c.location || '—'); } },
+            { title: '地区', sortKey: 'location', render: function (c) { return esc(c.location || '—'); } },
             { title: '微信号', nowrap: true, render: function (c) { return esc(c.wechat || '—'); } },
             { title: '标签', render: function (c) {
                 return leadTagSummaryHtml(c.tags);
             } },
-            { title: '意向', nowrap: true, render: function (c) { return leadIntentBadge(c.intent_level); } },
+            { title: '意向', sortKey: 'intent', nowrap: true, render: function (c) { return leadIntentBadge(c.intent_level); } },
+            { title: '上次跟进', sortKey: 'last_follow', nowrap: true, render: function (c) {
+                return c.last_follow ? fmtDateTime(c.last_follow).slice(5, 16) : '—';
+            } },
             { title: '商机', align: 'center', nowrap: true, render: function (c) { return (c.deals_total || 0) + ' 个'; } },
             { title: '订单', align: 'center', nowrap: true, render: function (c) { return (c.orders_total || 0) + ' 个'; } },
             { title: '累计成交', align: 'right', nowrap: true, render: function (c) { return money(c.total_closed_amount); } },
-            { title: '创建时间', nowrap: true, render: function (c) { return fmtDateTime(c.created_at).slice(0, 10); } },
+            { title: '创建时间', sortKey: 'created_at', nowrap: true, render: function (c) { return fmtDateTime(c.created_at).slice(0, 10); } },
             { title: '操作', nowrap: true, render: function (c) {
                 return opButtons([
                     { op: 'edit', arg: c.id, label: '编辑' },
@@ -115,15 +174,10 @@ function loadCustomers(root) {
             } }
         ], items, st.q || st.tag ? '没有匹配的客户，换个条件试试'
             : '还没有客户：客户由线索转化产生，请先到「线索」把线索转成客户',
-        'customer-table', 'customer-table-wrap');
+        'customer-table', 'customer-table-wrap',
+        { key: list.sort, order: list.order });
 
-        pagerEl.innerHTML = pagerHtml(res);
-        pagerEl.onclick = function (ev) {
-            var btn = ev.target.closest('button[data-page]');
-            if (!btn || btn.disabled) { return; }
-            st.page = Number(btn.getAttribute('data-page')) || 1;
-            loadCustomers(root);
-        };
+        pagerEl.innerHTML = listPagerHtml(res);
 
         bindOps(root, {
             edit: function (id) { return openCustomerEdit(id, root); },
@@ -246,19 +300,6 @@ function chipHtml(tags, active) {
     }).join('');
 }
 
-function pagerHtml(res) {
-    var pages = Math.max(1, Math.ceil((res.total || 0) / (res.size || PAGE_SIZE)));
-    if (!res.total) { return ''; }
-    return '<div class=\"form-actions\" style=\"justify-content:space-between;align-items:center\">' +
-        '<button type=\"button\" class=\"btn btn-sm\" data-page=\"' + (res.page - 1) + '\"' +
-        (res.page <= 1 ? ' disabled' : '') + '>上一页</button>' +
-        '<span class=\"small muted\">第 ' + res.page + ' / ' + pages + ' 页 · 共 ' + res.total + ' 位</span>' +
-        '<button type=\"button\" class=\"btn btn-sm\" data-page=\"' + (res.page + 1) + '\"' +
-        (res.page >= pages ? ' disabled' : '') + '>下一页</button>' +
-    '</div>';
-}
-
-/* 客户详情页面逻辑 */
 function customer360Stage(c) {
     var deals = c.deals || [];
     var orders = c.orders || [];

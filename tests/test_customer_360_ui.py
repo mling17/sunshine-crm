@@ -116,7 +116,7 @@ class Customer360UiTest(unittest.TestCase):
 
     def test_customer_360_assets_are_cache_busted(self):
         self.assertIn("/crm/customer-360.css?v=20261105customer-ui4", self.index)
-        self.assertIn("/crm/views/customers.js?v=20261114customer-phone1", self.index)
+        self.assertIn("/crm/views/customers.js?v=20261118customer-list-shell1", self.index)
         self.assertIn("/crm/views/shared.js?v=20261116followup-attachments1", self.index)
         self.assertIn("/crm/customer-360.css", self.sw)
         self.assertIn("crm-shell-v87", self.sw)

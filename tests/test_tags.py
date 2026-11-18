@@ -95,14 +95,15 @@ class TagsTest(ApiTestCase):
         self.assertEqual({c["name"] for c in body["items"]}, {"张伟", "李娜"})
 
     def test_tag_filter_paginates(self):
-        for i in range(5):
+        # Ticket #10：size 走白名单 [10,20,50,100,500]，最小档 10
+        for i in range(15):
             self.create_customer(name=f"重点客户{i}", tags=["重点"])
         self.create_customer(name="普通客户", tags=["普通"])
         body = self.client.get(
-            "/api/crm/customers", params={"tag": "重点", "page": 2, "size": 2}
+            "/api/crm/customers", params={"tag": "重点", "page": 2, "size": 10}
         ).json()
-        self.assertEqual(body["total"], 5)
-        self.assertEqual(len(body["items"]), 2)
+        self.assertEqual(body["total"], 15)
+        self.assertEqual(len(body["items"]), 5)
 
     # ---------- 改标签：先清后插 ----------
     def test_update_replaces_tag_links(self):

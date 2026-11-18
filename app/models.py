@@ -144,6 +144,8 @@ class CustomerOut(BaseModel):
     owner: str | None = None
     created_at: str
     updated_at: str
+    #: 最近一次人工跟进时间（object_type='customer' 且 kind='follow' 的最新 created_at），无则 null
+    last_follow: str | None = None
     tags: list[str] = Field(default_factory=list)
     # 复购口径（只展示，不自动写标签）
     deals_total: int = 0

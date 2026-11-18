@@ -52,6 +52,7 @@
 | TASK-033 | 外部 API 生产更新脚本、审计与上线验证包 | ✅ 已完成 | `v2_022 -> v2_025` SQLite/MySQL 脚本收敛；preflight/postcheck、Token 模板、上线手册和第三方 API 文档齐备 |
 | TASK-034 | 代码审查整改：外部手机号错误契约与共享校验 | ✅ 已完成 | 非字符串批次项返回 `invalid_phone` 和位置；跟进对象校验、手机号比较键和外部 Token 测试夹具复用 |
 | TASK-035 | 共享列表外壳与线索分页/排序（Ticket #9） | ✅ 已完成 | size 白名单 10/20/50/100/500、sort 白名单服务端 SQL 映射均 400 兜底；线索表头三态排序、页码按钮、每页条数；状态写 `#/leads` hash URL，改排序或条数回第 1 页 |
+| TASK-036 | 客户列表接入共享外壳与上次跟进列（Ticket #10） | ✅ 已完成 | 客户列表复用同一套分页/排序白名单（含 `name` 列），新增派生 `last_follow`（仅人工跟进）；六个可排序列表头 + 上次跟进列；状态写 `#/customers` hash URL，筛选/排序/条数变更回第 1 页；本地 pagerHtml 已移除 |
 
 ## 3. 已完成任务
 
@@ -255,6 +256,14 @@
 - 后端验证：使用隔离 SQLite 数据库和上传目录启动新 uvicorn 进程，`GET /health` 返回 `200` 与 `status=ok`，验证后停止该临时进程。
 - 本次未连接真实 MySQL、未执行生产迁移或部署；上线前仍需按 `ops/ROLLOUT-EXTERNAL-API.md` 执行生产验证。
 
+
+### 4.18 本次客户列表外壳与上次跟进列回归
+
+- 定向回归：`Ran 125 tests ... OK`，覆盖客户/标签/线索 API 与列表外壳前端结构断言。
+- 全量回归：`Ran 589 tests in 227.776s ... FAILED (failures=4, skipped=2)`；4 项失败均为分支既有「附件 10/20 上限」口径问题（`test_external_api_assets`、`test_external_followups`、`test_followups`、`test_rollout_package`，基线 e912464 同样失败），与本任务无关。
+- 验证环境：隔离 SQLite 数据库与上传目录；未使用生产库，未连接真实 MySQL。
+- 前端 `node --check static/views/customers.js` 语法检查通过；未做浏览器人工冒烟。
+
 ## 5. 遗留问题与风险
 
 | ID | 问题 | 状态 | 影响 | 下一步 |
@@ -278,6 +287,18 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-18 · TASK-036 · 客户列表外壳与上次跟进列
+
+- 来源：`[用户明确要求]`，GitHub issue #10（父需求 #8 列表页统一分页与可排序表头）。
+- 后端 `GET /api/crm/customers`：复用 Ticket #9 同一套校验口径（`LIST_PAGE_SIZES` 白名单与 400 错误码），`sort` 白名单 `name/type/location/intent/last_follow/created_at`，排序 SQL 只来自 `_CUSTOMER_SORT_SQL` 服务端映射；可空列升/降序均 NULL 沉底，显式排序稳定次键 `id DESC`，未传 sort 默认 `id DESC`。
+- 响应新增派生字段 `last_follow`：`follow_ups` 中 `object_type='customer'` 且 `kind='follow'` 的最新 `created_at`，无人工跟进为 `null`；系统履历（如编辑档案产生的 `change` 记录）不计入。
+- 前端客户页接入共享列表外壳：六个可排序表头（名称/类型/地区/意向/上次跟进/创建时间），标签/微信/商机/订单/累计成交/操作列不可排序；新增「上次跟进」列；`page/size/sort/order` 写入 `#/customers` hash URL（`history.replaceState`），改排序/条数/搜索/标签筛选均回第 1 页且不整页重渲染；客户页本地 `pagerHtml` 移除，分页只走共享外壳。
+- `index.html` 客户页脚本缓存版本号刷新（`v=20261118customer-list-shell1`），避免浏览器缓存旧视图脚本导致版本不一致。
+- 既有测试适配白名单口径：`test_customers.py::test_pagination` 与 `test_tags.py::test_tag_filter_paginates` 的 `size=2` 改为白名单档位；`test_customer_360_ui.py` 缓存版本断言同步更新。
+- 新增 API 测试（size/page/sort/order 400 边界、默认 id DESC、显式排序 id DESC 次键、name/location/last_follow 排序、NULL 沉底双向、last_follow 派生与 kind 过滤）与前端结构测试 `tests/test_customers_ui.py`。
+- 定向回归 125 项通过；隔离 SQLite 全量回归 589 项中 585 通过、2 跳过，4 项失败为分支既有「附件 10/20 上限」测试口径问题（基线 e912464 上同样失败），与本任务无关，单独报告不修。
+- 未连接真实 MySQL 验证；未做浏览器人工冒烟。
 
 ### 2026-11-18 · TASK-035 · 共享列表外壳与线索分页/排序
 
