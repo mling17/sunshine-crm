@@ -1,6 +1,6 @@
 # 02 · 软件架构文档
 
-> 最后更新：2026-11-19（TASK-042 跟进历史页分页排序，Ticket #16；TASK-043 列表外壳推广代码审查整改）
+> 最后更新：2026-11-19（TASK-043 列表外壳推广代码审查整改；TASK-044 历史 Excel 下单表导入）
 >
 > 文档状态：✅ 已建立，后续随结构、依赖、接口和数据模型变化增量维护
 >
@@ -157,7 +157,7 @@ HTTP 边界
 | 外部 API | `routers/external_leads.py`、`routers/external_followups.py`、`external_auth.py` | Bearer Token 鉴权、外部新增线索、跟进和批量手机号校验 | Cookie 回退、Token 管理界面 |
 | 跟进服务 | `followup_service.py`、`routers/followups.py` | 页面/外部共用的校验、目标守卫、状态流转、附件原子写入 | 外部下载鉴权 |
 | 线索 | `routers/leads.py`、`lead_tags.py` | 线索 CRUD、状态、转化检查、标签 | 客户 360 |
-| 导入 | `routers/csvimport.py` | 模板、字段映射、预览、整批导入线索 | Excel 直接导入、客户导入 |
+| 导入 | `routers/csvimport.py`、`legacy_order_import.py` | 线索 CSV 导入；历史 Excel 下单表 dry-run、完整业务链导入、错误归档和 manifest 幂等 | UI 上传历史订单、客户导入 |
 | 客户 | `routers/customers.py`、`addresses.py` | 客户、联系人、地址簿、360 查询 | 脱离线索的常规新建 |
 | 产品 | `routers/products.py`、`product_*` | 产品主档、下单表、识别 | 具体客户报价 |
 | 商机 | `routers/deals.py` | 商机、产品工作清单、标签、阶段派生、生成订单后归档只读 | Excel 报价明细 |
@@ -643,6 +643,12 @@ pending 待处理 → processing 处理中 → done 已完成
 - 背景：8 个列表页要统一分页与可排序表头（issue #8/#9）；排序若拼接前端传来的列名会有注入和隐式耦合风险，纯前端排序在 500 条/页下也不可接受。
 - 决策：排序 key 由后端白名单映射为固定 SQL 表达式（线索页含派生 `last_follow_at`），`size` 限白名单档位，`order` 限 `asc|desc`，非法一律 400；可空列统一 NULL 沉底，显式排序固定 `id DESC` 次键。前端列表状态（`page/size/sort/order`）写入 hash URL 以支持刷新/分享保持，用 `history.replaceState` 同步避免打断输入焦点。
 - 取舍：URL 中的列表状态与搜索词/标签页状态分离（后者仍在内存 `state.filters`），深链只能还原分页排序；每个列表页默认排序仍由各自后端维护。
+
+### ADR-017 · 历史订单采用独立脚本与外部 manifest 导入
+
+- 背景：旧下单表来自外部目录，模板字段位置和错误类型不稳定；导入需要 dry-run、问题文件归档和可重复执行，但暂不需要新增页面或数据库表。
+- 决策：使用 `app/legacy_order_import.py` + `scripts/legacy_order_import.py`，按单文件事务创建完整客户/商机/报价/订单链；成功文件 SHA-256 写入用户指定 manifest，重复文件复制到独立错误批次；默认 dry-run，显式 `--commit` 才写库。
+- 取舍：manifest 与数据库不是同一事务，极端崩溃窗口仍需人工复查；换来不新增迁移表、可离线批处理和更低的页面耦合。
 
 ### ADR-015 · 外部 API Token 明文保存且不限制来源 IP
 

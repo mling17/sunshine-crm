@@ -37,5 +37,10 @@ crm.db.bak-*
 ops/.private/
 
 .agents/
+!.agents/
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/legacy-order-import/
+!.agents/skills/legacy-order-import/**
 .codegraph/
 

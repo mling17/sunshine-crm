@@ -24,6 +24,7 @@
 | 统一跟进 | ✅ 已完成 | 五类对象、任意附件、常用短语、系统履历 |
 | 工作台与统计 | ✅ 已完成 | 今日工作、销售/订单聚合、图表口径 |
 | 数据字典 | ✅ 已完成 | 12 类字典、A/B/C/D 分级维护 |
+| 历史订单导入 | ✅ 已完成 | Excel 下单表 dry-run、完整业务链导入、SHA 幂等、问题文件归档和项目技能 |
 | SQLite | ✅ 已完成 | 默认运行库、迁移、备份恢复 |
 | MySQL | 🚧 部分验证 | 结构、方言与迁移工具已具备；本次未连接真实 MySQL |
 | Docker | ✅ 已完成 | 单镜像可同时提供前端和 API |
@@ -60,6 +61,7 @@
 | TASK-041 | 物流公司列表服务端分页、排序与筛选（Ticket #15） | ✅ 已完成 | `GET /carriers` 改 `{items,total,page,size}`，复用共享白名单口径（`name`/`address` 可排序，`address` NULL 沉底），默认被订单关联次数倒序 → `id DESC`；仅看启用、关键词筛选服务端执行；物流页接入共享外壳，筛选 + 分页排序同写 `#/logistics` hash URL；顺带修复 `is_active` 更新从未落库 |
 | TASK-042 | 跟进历史页去除表单并接入分页排序（Ticket #16） | ✅ 已完成 | `GET /follow-ups` 改 `{items,total,page,size}`，复用共享白名单口径（`customer`/`deal_stage`/`content`/`next_date`/`created_at` 可排序，JOIN 列只走服务端 SQL 映射，可空列 NULL 沉底），默认 `created_at DESC, id DESC`；历史页去掉「记一条跟进」表单，改纯跟进流水表格并接入共享外壳，筛选 + 分页排序同写 `#/followups` hash URL；详情页履历调用适配新契约 |
 | TASK-043 | 列表外壳推广代码审查整改（shared.js 缓存、商机出单物流下拉） | ✅ 已完成 | 删除 deals.js 遗留 carrierList 行，shared.js/deals.js 缓存版本刷新，前端结构测试锁定 |
+| TASK-044 | 历史 Excel 下单表 dry-run、导入、错误归档与项目技能 | ✅ 已完成 | 157 个 xlsx dry-run：22 可导入、135 问题文件；隔离 SQLite 正式导入 22 张完成订单，链路/附件/标签/幂等测试通过 |
 
 ## 3. 已完成任务
 
@@ -324,6 +326,15 @@
 6. 将旧文档中已经失效的口径标注废弃，但保留历史，不做静默删除。
 
 ## 7. 变更日志
+
+### 2026-11-19 · TASK-044 · 历史 Excel 下单表导入与项目技能
+
+- 来源：`[用户明确要求]`，使用 `E:\xwechat_files\mling17_65e2\msg\file\2026-11\2025年销售表单` 作为数据目录。
+- 新增 `app/legacy_order_import.py` 与 `scripts/legacy_order_import.py`：只读 `.xlsx`/Sheet1，`A1` 精确匹配未删除产品，默认 dry-run，显式 `--commit` 按单文件事务创建完整业务链。
+- 导入规则：订单统一完成且全额已收；订单备注为空；商机写“历史订单导入”标签；原始 Excel 同时作为报价明细来源和订单确认附件；重复 SHA、产品不匹配、损坏文件等复制到独立错误批次。
+- 新增项目技能 `.agents/skills/legacy-order-import/SKILL.md`，记录隔离库、备份、dry-run、正式提交和验收流程。
+- dry-run 扫描 157 个 xlsx：22 个可导入、135 个进入问题目录；隔离 SQLite 正式导入 22 张完成订单，订单金额合计 44,058 元，22 个商机标签和 22 份原 Excel 附件链路通过。
+- 定向回归 `tests.test_legacy_order_import` 4 项通过；技能 `quick_validate.py` 通过。
 
 ### 2026-11-19 · TASK-043 · 列表外壳推广代码审查整改
 
