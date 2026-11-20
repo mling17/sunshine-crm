@@ -7,7 +7,7 @@ uploads/
 backups/
 logs/
 .local/
-
+.workbuddy/
 # ---- 密钥 / 环境 ----
 .env
 ops/backup.env
