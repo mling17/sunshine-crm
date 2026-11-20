@@ -131,17 +131,18 @@ class DealOrdersTest(ApiTestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["spec"], "1200*2400")
 
-    def test_list_deals_exclude_title(self):
-        """测试列表接口不返回 title 字段"""
+    def test_list_deals_include_generated_title(self):
+        """商机列表返回自动生成的商机名称（客户名）"""
         c = self.create_customer(name="张伟")
         deal = self.create_deal(c["id"], amount=100.0, drive_type="electric")
-        
+
         resp = self.client.get("/api/crm/deals")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["total"], 1)
         self.assertEqual(len(data["items"]), 1)
-        self.assertNotIn("title", data["items"][0])
+        self.assertIn("title", data["items"][0])
+        self.assertIn("张伟", data["items"][0]["title"])
 
     def test_list_deals_with_drive_type_labels(self):
         """测试列表接口返回 drive_type_label"""
@@ -192,8 +193,9 @@ class DealOrdersTest(ApiTestCase):
         self.assertIsInstance(data["timeline"], list)
         self.assertIn("order", data)
         self.assertIn("locked", data)
-        # 不应该包含 title 字段
-        self.assertNotIn("title", data)
+        # 商机名称随详情一并返回
+        self.assertIn("title", data)
+        self.assertIn("张伟", data["title"])
 
     # ---------- 商机修改（锁定矩阵）----------
     def test_update_deal_locked_fields_fails(self):

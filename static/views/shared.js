@@ -752,7 +752,7 @@ function openFollowModal(opts) {
     '<span class="switch"><input type="checkbox" id="fuNextOn" checked><span>下次跟进时间</span></span></label>' +
     '<input type="date" name="next_date" id="fuNextDate" value="' + (opts.defaultNext || followDayAfter(3)) + '">' +
     '<div class="small muted" id="fuNextHint">关掉表示这次不用再跟进</div></div>' +
-    '<div class="field followup-attachment-field"><label>附件（图片 / 文档 / HTML / DWG / 音视频 / ZIP，最多 10 个、单个 ≤20MB）</label>' +
+    '<div class="field followup-attachment-field"><label>附件（图片 / 文档 / HTML / DWG / 音视频 / ZIP，最多 20 个、单个 ≤20MB）</label>' +
     '<input type="file" name="photos" multiple></div>' +
     '<div id="fuThumbs" class="attach-strip"></div>' +
     '<div class="form-actions">' +
@@ -774,7 +774,7 @@ function openFollowModal(opts) {
 
   var input = modal.querySelector('[name="photos"]');
   var box = modal.querySelector('#fuThumbs');
-  var MAX_FILES = 10;
+  var MAX_FILES = 20;
   var MAX_MB = 20;
 
   function renderPicked() {
@@ -1445,6 +1445,10 @@ function dealConvertFormHtml(formId, products, sourceName, sourceType) {
         ? '<div class="deal-convert-confirm-copy">将从当前客户创建一条新商机，之后可继续添加报价单。</div>'
         : '<div class="deal-convert-warning"><b>线索将移出线索池</b>' +
           '<span>创建商机后，这条记录不再在线索中显示，请到客户档案中继续跟进。</span></div>') +
+      '<div class="field field-wide deal-convert-title-field"><label>商机名称（选填）</label>' +
+        '<input name="title" maxlength="100" placeholder="留空则自动用「' + esc(sourceName) + '」生成">' +
+        '<span class="hint">用于在商机列表中区分不同轮次的沟通；创建后也可在商机页修改。</span>' +
+      '</div>' +
     '</section>' +
     '<p class="deal-convert-footnote">' +
       (isCustomer
@@ -1463,7 +1467,10 @@ function bindDealConvertForm(form, products, onSubmit) {
 
   form.addEventListener('submit', function (ev) {
     ev.preventDefault();
+    var titleEl = form.querySelector('[name="title"]');
+    var title = titleEl ? String(titleEl.value || '').trim() : '';
     var payload = { note: null };
+    if (title) { payload.title = title; }
     submitButton.disabled = true;
     var request = onSubmit(payload);
     if (request && typeof request.catch === 'function') {
@@ -1518,6 +1525,7 @@ function openDealConvertModal(source, sourceType) {
           method: 'POST',
           body: {
             customer_id: sourceId,
+            title: deal.title || null,
             note: null
           }
         })

@@ -46,7 +46,7 @@ EXT_BY_MIME: dict[str, str] = {
     "image/heif": ".heif",
 }
 
-#: 单个附件上限（PLANNER-V3 §6.5：20MB；一条跟进最多 10 个）
+#: 单个附件上限（PLANNER-V3 §6.5：20MB；一条跟进最多 20 个）
 MAX_PHOTO_BYTES = 20 * 1024 * 1024
 MAX_FILE_BYTES = 20 * 1024 * 1024
 #: 一条跟进最多挂几个附件

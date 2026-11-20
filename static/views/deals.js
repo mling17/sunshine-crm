@@ -1,7 +1,7 @@
 /* 商机页面（2026-10-31 对齐 demo 定稿）
  *
  * 定稿口径（与 static/demo/views/deals.js 一致，差别只在数据源换成真实 API）：
- *   · 列表用表格；列：客户 / 产品 / 型号 / 手动电动 / 尺寸 / 金额 / 阶段 / 更新时间 / 操作(跟进)
+ *   · 列表用表格；列：商机名称（客户名为副标题）/ 产品 / 型号 / 手动电动 / 尺寸 / 金额 / 阶段 / 更新时间 / 操作(跟进)
  *   · 商机只能由线索或客户「转商机」产生 —— 页面上不再有「新增商机」表单卡片
  *   · 详情页 = 顶部信息卡 + 跟进履历（含系统自动履历）+ 操作（编辑 / 生成订单 / 判流失）
  *   · 产品类型、型号、阶段、流失原因全部取数据字典（dictOptions / dictLabel），不许硬编码
@@ -314,8 +314,10 @@ function dealOverviewHtml(deal, customerName, quotes) {
         '<div class="deal-overview-head">' +
             '<div class="deal-overview-identity">' +
                 '<span class="deal-overview-crumb"><a href="#/deals">‹ 商机</a> /</span>' +
-                '<a class="deal-overview-name" href="#/customers/' + deal.customer_id + '">' +
-                    esc(customerName) + '</a>' +
+                '<strong class="deal-overview-title">' +
+                    esc(deal.title || customerName) + '</strong>' +
+                (deal.title ? '<a class="deal-overview-customer" href="#/customers/' +
+                    deal.customer_id + '">' + esc(customerName) + '</a>' : '') +
                 dealTagsHtml(deal, quotes) +
             '</div>' +
             '<div class="deal-overview-status"><span>商机状态</span>' +
@@ -712,7 +714,7 @@ function openQuoteConfirmModal(quote, done) {
 /* 列表外壳状态（Ticket #13）：stage 页签 + page/size/sort/order 一起存于 hash URL，
  * 与线索/客户页同一套口径（Ticket #9/#10）：刷新或分享链接后状态保持；
  * 改 sort/size/stage 自动回第 1 页；写 URL 用 history.replaceState（不触发 hashchange）。 */
-var DEAL_SORT_KEYS = ['customer', 'product', 'model', 'drive_type', 'size', 'amount', 'stage', 'updated_at'];
+var DEAL_SORT_KEYS = ['title', 'customer', 'product', 'model', 'drive_type', 'size', 'amount', 'stage', 'updated_at'];
 
 function readDealListQuery(query) {
     var page = parseInt(query.get('page'), 10);
@@ -814,9 +816,11 @@ function loadDeals(root) {
             var index = all[1] || {};
 
             listEl.innerHTML = dataTable([
-                { title: '客户', sortKey: 'customer', render: function (d) {
+                { title: '商机名称', sortKey: 'title', render: function (d) {
                     var customerName = index[d.customer_id] || ('客户 #' + d.customer_id);
-                    return '<a href="#/deals/' + d.id + '">' + esc(customerName) + '</a>';
+                    var name = d.title || customerName;
+                    return '<a href="#/deals/' + d.id + '">' + esc(name) + '</a>' +
+                        '<small class="deal-list-customer">' + esc(customerName) + '</small>';
                 } },
                 { title: '产品', sortKey: 'product', render: function (d) {
                     return esc(d.product_name_snapshot || d.product_type ||
@@ -914,7 +918,10 @@ function viewDealDetail(root, rawId) {
             backHash: '#/deals',
             backLabel: '商机',
             objectType: 'deal',
-            title: customerName,
+            title: d.title || customerName,
+            titleHtml: '<div class="entity-title-main"><h2><a class="crumb" href="#/deals">‹ 商机</a> / ' +
+                esc(d.title || customerName) + '</h2>' +
+                (d.title ? '<p class="entity-title-sub">客户：' + esc(customerName) + '</p>' : '') + '</div>',
             hideEntityCard: true,
             placeholder: '这次沟通聊了什么？客户对报价和参数是什么态度？下一步做什么？',
             canFollow: canFollow,
@@ -1105,6 +1112,9 @@ function openDealEdit(deal, products, done) {
         '<button type="button" class="btn btn-link modal-close" aria-label="关闭">×</button></div>' +
         '<div class="modal-body">' +
         '<form id="dealEditForm" class="form-grid" autocomplete="off">' +
+        '<div class="field field-wide"><label>商机名称 *</label>' +
+        '<input name="title" maxlength="100" required placeholder="给这轮商机起个名字" ' +
+        'value="' + esc(deal.title || '') + '"></div>' +
         '<div class="field field-wide"><label>关联产品 <span class="deal-inline-badge">可更换</span></label>' +
         '<div class="deal-product-switch-note">' +
         '<b>产品可随沟通阶段调整</b>' +
@@ -1197,7 +1207,10 @@ function openDealEdit(deal, products, done) {
             var el = form.querySelector('[name="' + name + '"]');
             return el ? String(el.value || '').trim() : '';
         }
+        var title = val('title');
+        if (!title) { toast('请填写商机名称', true); return; }
         var payload = {
+            title: title,
             product_type: val('product_type') || null,
             model: val('model') || null,
             drive_type: (productPicker.getProduct() && productPicker.getProduct().drive_type) ||
@@ -1316,6 +1329,7 @@ function viewDealNew(root, route) {
                     method: 'POST',
                     body: {
                         customer_id: custId,
+                        title: deal.title || null,
                         note: null
                     }
                 });
@@ -1548,8 +1562,10 @@ function openDealOrderModal(deal, customerName, items, quote) {
             : '<option value="">' +
               esc(carrier ? '该物流公司尚未设置联络人，请先到物流页维护' : '请先选择物流公司') +
               '</option>';
-        carrierContactEl.disabled = !carrier;
+        carrierContactEl.disabled = !carrier || !contacts.length;
     }
+    /* 选物流公司后必须联动刷新联络人，否则联络人下拉一直停在占位项且被禁用 */
+    carrierEl.addEventListener('change', refreshCarrierContacts);
     api('/carriers?size=500').then(function (res) {
         carrierList = ((res && res.items) || []).filter(function (c) { return c.is_active; });
         var active = carrierList;

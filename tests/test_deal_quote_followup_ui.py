@@ -289,7 +289,8 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
             self.deals.index("function bindQuoteActions")
         ]
         self.assertIn('class="deal-overview-head"', overview)
-        self.assertIn('class="deal-overview-name"', overview)
+        self.assertIn('class="deal-overview-title"', overview)
+        self.assertIn('class="deal-overview-customer"', overview)
         self.assertIn('class="deal-overview-status"', overview)
         self.assertIn("dealTagsHtml(deal, quotes)", overview)
         self.assertNotIn("(noteText ?", overview)
@@ -379,6 +380,16 @@ class DealQuoteAndFollowupUiTest(unittest.TestCase):
         self.assertIn("var tabs = [['', '全部']].concat(STAGES);", self.deals)
         products = (ROOT / "static" / "views" / "products.js").read_text(encoding="utf-8")
         self.assertIn("dealStageBadge(d.stage, d.stage_label, d.order_id)", products)
+
+    def test_order_modal_refreshes_carrier_contacts_on_change(self):
+        """生成订单弹层：选物流公司后必须联动刷新联络人，否则包邮场景联络人无法选择。"""
+        modal = self.deals[
+            self.deals.index("function openDealOrderModal"):
+        ]
+        self.assertIn("function refreshCarrierContacts()", modal)
+        self.assertIn("carrierEl.addEventListener('change', refreshCarrierContacts)", modal)
+        # 没有联络人时禁用下拉，避免「能点却无选项」
+        self.assertIn("carrierContactEl.disabled = !carrier || !contacts.length", modal)
 
 
 if __name__ == "__main__":

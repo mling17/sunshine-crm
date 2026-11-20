@@ -99,7 +99,7 @@ class ExternalApiAssetsTest(unittest.TestCase):
             "ambiguous_phone",
             "phone_not_found",
             "lead_closed",
-            "10 个",
+            "20 个",
             "20MB",
             "created_by",
         ):

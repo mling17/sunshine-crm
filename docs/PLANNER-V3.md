@@ -94,7 +94,7 @@
 
 **carriers（物流公司）**：`name`·`note`·`is_active`·**`contacts[]`（多联系人：`name`/`phone`/`tags[]`，v2.3 去掉「职务」改标签）**·`order_count`（被订单关联次数，派生）。被引用 >0 **只能停用不能删除**。
 
-**follow_ups（统一跟进/履历）**：`object_type`·`object_id`·`kind`·`method`·`content`·`next_date`（可为空 = 本次不需要跟进）·`files[]`（任意类型，≤10 个/条，单个 ≤20MB）·`created_at`。
+**follow_ups（统一跟进/履历）**：`object_type`·`object_id`·`kind`·`method`·`content`·`next_date`（可为空 = 本次不需要跟进）·`files[]`（任意类型，≤20 个/条，单个 ≤20MB）·`created_at`。
 **next_date 口径**：同一对象以**最近一条 `kind='follow'`** 的 next_date 为准（一天记多次只认最后一次）。
 
 **attachments（附件）**：`file_name`·`mime_type`·`size`·`storage_key`·`object_type`（`follow_up`/`order_payment`/`aftersale`）·`is_image`（派生，决定前端出缩略图还是文件条）。
@@ -154,7 +154,7 @@
 | **G-06** | 物流方式 = 包邮 / 代办 / 自提 | `app/enums.py:102` `LOGISTICS_MODE = carrier/self` | 改 `free/agent/self`；迁移把 `carrier→agent`、`self→self` |
 | **G-07** | 订单要存运费、收货人、地址簿关联 | `orders` 只有 `carrier_id/tracking_no`，无收货字段 | 加 5 列（§3.3） |
 | **G-08** | 订单详情要「押金/尾款」计划值（收款五个数字） | 只有 `deposit_paid/balance_paid`（已收），无计划押金 | 加 `deposit_amount`/`balance_amount`，生成订单时由押金算出尾款 |
-| **G-09** | 跟进可传**任意类型**附件，≤10 个/条、单个 ≤20MB | `app/services.py:62 read_images` 只收图片，`:94` 硬限 **3 张**；`app/storage.py:50` 20MB | 新 `read_files`（白名单 pdf/xls/xlsx/doc/docx/dwg/dxf/zip/图片 + MIME 嗅探）；上限 10；`MAX_PHOTOS=3` 全量改 10 |
+| **G-09** | 跟进可传**任意类型**附件，≤20 个/条、单个 ≤20MB | `app/services.py:62 read_images` 只收图片，`:94` 硬限 **3 张**；`app/storage.py:50` 20MB | 新 `read_files`（白名单 pdf/xls/xlsx/doc/docx/dwg/dxf/zip/图片 + MIME 嗅探）；上限 20；`MAX_PHOTOS=3` 全量改 20 |
 | **G-10** | 商机履历含「创建/编辑/阶段变更/生成订单」，订单履历含 6 类事件 | `follow_ups` 只存真实跟进；`order_status_log` 只有 from/to/金额/截图 | `follow_ups` 加 `kind`+`detail`；`order_status_log` 加 `event_type`+`detail`（§3.5） |
 | **G-11** | 工作台待跟进 = 按客户取**最近一条**跟进的 next_date 判断 | `app/routers/dashboard.py:35` SQL 是「所有历史记录 next_date ≤ 今天」，旧记录永不消失 | 改成窗口函数取每客户最新 `kind='follow'` 一条（§6.1） |
 | **G-12** | 数据字典 12 张可维护 | 无字典表、无接口；`enums.py` 里 `Literal` 硬校验，前端 `app.js` 又硬编码一份 | 新增 `dict_items` 表 + `app/dicts.py` 注册表 + `app/routers/dicts.py`（§3.6、§4） |
@@ -511,7 +511,7 @@ DICT_REGISTRY = {
 
 | 方法 | 路径 | 变更 |
 |---|---|---|
-| POST | `/follow-ups` | ★ multipart：`files` 任意类型 **≤10 个、单个 ≤20MB**；`next_date` 可空（开关关 = 不传）；`method` 只收 `wechat/phone`（默认 `wechat`）；创建成功写 `kind='follow'`；对象是售后且状态 `done` → 409 `aftersale_closed`；对象是售后且 `pending` → 自动置 `processing` + 状态日志 |
+| POST | `/follow-ups` | ★ multipart：`files` 任意类型 **≤20 个、单个 ≤20MB**；`next_date` 可空（开关关 = 不传）；`method` 只收 `wechat/phone`（默认 `wechat`）；创建成功写 `kind='follow'`；对象是售后且状态 `done` → 409 `aftersale_closed`；对象是售后且 `pending` → 自动置 `processing` + 状态日志 |
 | GET | `/follow-ups?object_type=&object_id=&deal_id=&customer_id=` | ★ 出参 `type`/`type_label`/`detail`/`files[]`（含 `is_image`/`url`/`size`/`name`）；时间倒序（DB 列仍是 `kind`，出参统一叫 `type`） |
 | DELETE | `/follow-ups/{id}` | 只允许删 `kind='follow'` 且本人 1 小时内（沿用现有规则）；系统履历不可删（409 `system_entry`） |
 | GET | `/follow-ups/materials?object_type=&object_id=&deep=true` | ★ **新增**（资料汇总卡）：该对象所有 `kind='follow'` 的附件；`deep=true`（客户）额外包含其商机/售后的跟进附件；按时间倒序 |
@@ -869,7 +869,7 @@ env -u PYTHONPATH -u VIRTUAL_ENV /usr/bin/python3 -m unittest discover -s tests 
 | A07 | `deposit=20000, amount=12000` → 400；正常单 `balance_amount = amount - deposit` | G-08 |
 | A08 | `logistics_mode` 只接受 `free/agent/self`；`carrier` → 400 | G-06 |
 | A09 | 生成订单只用 `address_id` 时，`receiver_*` 被快照；随后改地址簿，订单详情的收货信息**不变** | G-07/G-15 |
-| A10 | 一条跟进传 11 个附件 → 前 10 个入库，返回 `skipped` 1 条 | G-09 |
+| A10 | 一条跟进传 21 个附件 → 前 20 个入库，返回 `skipped` 1 条 | G-09 |
 | A11 | 传 `.xlsx` / `.pdf` 成功；传 `.html` → 400 | G-09 |
 | A12 | 下载非图片响应头含 `Content-Disposition: attachment` 与 `X-Content-Type-Options: nosniff` | G-09 |
 | A13 | 商机详情 `timeline` 含 `create/change/stage/order` 四类（造一条全流程数据） | G-10 |
@@ -926,7 +926,7 @@ T2 迁移 v2_002  ──┘   T4 订单/物流/地址簿 ─┘   T6 售后
 | **T2** | `v2_002` 迁移 + 种子 + 值域 UPDATE + 索引；副本库实测 | 迁移脚本 + 实测输出 | 1 人日 | T1（种子依赖注册表） |
 | **T3** | 商机字段/阶段/锁定 + `POST /deals/{id}/orders` + 履历写入 + 订单号修复 | 契约 §5.5 | 2 人日 | T1,T2 |
 | **T4** | 订单扩列/收款拆项/时间线 + 地址簿 + 物流多联系人 + 运费/收货 | 契约 §5.6、§5.8 | 2 人日 | T2 |
-| **T5** | 任意类型附件（≤10/20MB/嗅探/防内联）+ `kind` 履历 + 资料汇总卡 + 售后自动处理中 | 契约 §5.7 | 2 人日 | T3 |
+| **T5** | 任意类型附件（≤20/20MB/嗅探/防内联）+ `kind` 履历 + 资料汇总卡 + 售后自动处理中 | 契约 §5.7 | 2 人日 | T3 |
 | **T6** | 售后 3 态收口：下线 start/reject、finish、done 锁定 | 契约 §5.8、§6.4 | 0.5 人日 | T5 |
 | **T7** | 工作台改造（5 卡 + 动态 + 逾期口径）+ `/stats` 8 块 + 线索列表派生字段 | 契约 §5.2、§5.9、§5.3 | 1.5 人日 | T2 |
 | **T8** | 正式前端接管：覆盖 10 个视图 + **93 处 `window.DEMO` 直读改接口** + 假写改真写 + 字典驱动下拉 + 金额遮罩 + `sw.js` 升版 | `/crm/` 与 demo 视觉一致且数据来自后端 | 4 人日 | T3–T7 |
@@ -979,7 +979,7 @@ T2 迁移 v2_002  ──┘   T4 订单/物流/地址簿 ─┘   T6 售后
 | 商机录入 | 定金/尾款在商机里填 | 商机只填金额，押金在生成订单时填 |
 | 生成订单 | 商机「赢单」即生成，无入参 | `成交` 阶段 + payload（押金/物流/运费/地址） |
 | 物流方式 | `carrier` / `self` | `free` 包邮 / `agent` 代办 / `self` 自提 |
-| 附件 | 仅图片、≤3 张 | 任意类型、≤10 个、单个 ≤20MB |
+| 附件 | 仅图片、≤3 张 | 任意类型、≤20 个、单个 ≤20MB |
 | 跟进方式 | 电话/微信/到面/线上 | 只有微信/电话 |
 | 售后 | 3 段可「开始处理」「拒绝」 | 记跟进自动处理中；无拒绝；完成后锁定 |
 | 下拉选项 | 硬编码（前后端各一份） | 12 张数据字典，A/B/C/D 分级 |

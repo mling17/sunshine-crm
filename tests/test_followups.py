@@ -112,26 +112,26 @@ class FollowUpsTest(ApiTestCase):
             got.headers.get("content-type"),
         )
 
-    def test_ten_files_allowed_eleven_rejected(self):
-        """定稿 v2.6：一条跟进最多 10 个附件（原来是 3 张照片）"""
+    def test_twenty_files_allowed_twentyone_rejected(self):
+        """定稿：一条跟进最多 20 个附件（原来是 3 张照片）"""
         c = self.create_customer(name="李娜")
-        ten = [("photos", (f"{i}_site.png", b"\x89PNG" + b"0" * 10, "image/png")) for i in range(10)]
+        twenty = [("photos", (f"{i}_site.png", b"\x89PNG" + b"0" * 10, "image/png")) for i in range(20)]
         ok = self.client.post(
             "/api/crm/follow-ups",
-            data={"customer_id": str(c["id"]), "content": "十张图"},
-            files=ten,
+            data={"customer_id": str(c["id"]), "content": "二十张图"},
+            files=twenty,
         )
         self.assertEqual(ok.status_code, 200, ok.text)
-        self.assertEqual(ok.json()["photo_count"], 10)
+        self.assertEqual(ok.json()["photo_count"], 20)
 
-        eleven = [("photos", (f"{i}_x.png", b"\x89PNG" + b"0" * 10, "image/png")) for i in range(11)]
+        twentyone = [("photos", (f"{i}_x.png", b"\x89PNG" + b"0" * 10, "image/png")) for i in range(21)]
         bad = self.client.post(
             "/api/crm/follow-ups",
-            data={"customer_id": str(c["id"]), "content": "十一个"},
-            files=eleven,
+            data={"customer_id": str(c["id"]), "content": "二十一个"},
+            files=twentyone,
         )
         self.assertEqual(bad.status_code, 400, bad.text)
-        self.assertIn("10", bad.json()["detail"])
+        self.assertIn("20", bad.json()["detail"])
 
     def test_non_image_and_html_allowed(self):
         """跟进附件支持文档/图纸/HTML；下载侧仍强制 attachment，避免 HTML 被执行"""

@@ -201,7 +201,7 @@ class ExternalFollowUpApiTest(ApiTestCase):
 
         many = [
             ("attachments", (f"{i}.txt", b"x", "text/plain"))
-            for i in range(11)
+            for i in range(21)
         ]
         over_limit = self.client.post(
             "/api/external/v1/follow-ups",
@@ -210,7 +210,7 @@ class ExternalFollowUpApiTest(ApiTestCase):
             files=many,
         )
         self.assertEqual(over_limit.status_code, 400, over_limit.text)
-        self.assertIn("10", over_limit.json()["detail"])
+        self.assertIn("20", over_limit.json()["detail"])
 
         with db_conn() as conn:
             count = conn.execute(

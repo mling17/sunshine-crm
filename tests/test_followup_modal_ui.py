@@ -37,7 +37,7 @@ class FollowupModalUiTest(unittest.TestCase):
 
     def test_followup_attachment_copy_covers_new_formats(self):
         self.assertIn(
-            "附件（图片 / 文档 / HTML / DWG / 音视频 / ZIP，最多 10 个、单个 ≤20MB）",
+            "附件（图片 / 文档 / HTML / DWG / 音视频 / ZIP，最多 20 个、单个 ≤20MB）",
             self.modal,
         )
         self.assertIn('<input type="file" name="photos" multiple>', self.modal)

@@ -623,6 +623,54 @@ class DealsListPaginationTest(ApiTestCase):
         ).json()
         self.assertEqual(body["total"], 13)
 
+    # ---------- 商机名称 ----------
+    def test_deal_title_defaults_to_customer_name(self):
+        """未给名称时按客户名生成默认商机名。"""
+        c = self.create_customer(name="赵敏")
+        deal = self.create_deal(c["id"], amount=100.0)
+        self.assertIn("赵敏", deal["title"])
+        self.assertEqual(deal["title"], "赵敏的商机")
+
+    def test_deal_title_explicit_and_update(self):
+        """显式名称生效，且可通过编辑接口改名。"""
+        c = self.create_customer(name="孙悦")
+        deal = self.create_deal(c["id"], title="别墅天幕项目", amount=100.0)
+        self.assertEqual(deal["title"], "别墅天幕项目")
+
+        resp = self.client.put(
+            f"/api/crm/deals/{deal['id']}", json={"title": "别墅天幕二期"}
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["title"], "别墅天幕二期")
+
+    def test_deal_title_dedup_per_customer(self):
+        """同一客户下默认名重复时自动追加序号。"""
+        c = self.create_customer(name="周涛")
+        d1 = self.create_deal(c["id"], amount=100.0)
+        d2 = self.create_deal(c["id"], amount=200.0)
+        d3 = self.create_deal(c["id"], amount=300.0)
+        self.assertEqual(d1["title"], "周涛的商机")
+        self.assertEqual(d2["title"], "周涛的商机 (2)")
+        self.assertEqual(d3["title"], "周涛的商机 (3)")
+
+    def test_deal_title_searchable_and_sortable(self):
+        """商机名可被列表搜索命中，并支持按 title 排序。"""
+        c = self.create_customer(name="吴磊")
+        self.create_deal(c["id"], title="阳光房专项", amount=100.0)
+        self.create_deal(c["id"], title="露台专项", amount=200.0)
+
+        found = self.client.get(
+            "/api/crm/deals", params={"q": "阳光房", "size": 50}
+        ).json()
+        self.assertEqual(found["total"], 1)
+        self.assertEqual(found["items"][0]["title"], "阳光房专项")
+
+        ordered = self.client.get(
+            "/api/crm/deals", params={"sort": "title", "order": "asc", "size": 50}
+        ).json()
+        titles = [item["title"] for item in ordered["items"]]
+        self.assertEqual(titles, sorted(titles))
+
 
 if __name__ == "__main__":
     unittest.main()

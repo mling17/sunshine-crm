@@ -447,6 +447,8 @@ class DealTagOut(BaseModel):
 class DealOut(BaseModel):
     id: int
     customer_id: int
+    #: 商机名称（转化/新建时生成，可编辑；历史数据可能为空，前端回退客户名）
+    title: str | None = None
     product_type: str | None = None
     model: str | None = None
     product_id: int | None = None
@@ -614,6 +616,7 @@ class DealIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     customer_id: int = Field(gt=0)
+    title: OptionalText = Field(default=None, max_length=100)
     product_id: int | None = Field(default=None, gt=0)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)
@@ -630,6 +633,7 @@ class DealUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    title: OptionalText = Field(default=None, max_length=100)
     product_id: int | None = Field(default=None, gt=0)
     product_type: OptionalText = Field(default=None, max_length=32)
     model: OptionalText = Field(default=None, max_length=64)

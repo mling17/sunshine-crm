@@ -144,7 +144,7 @@ function openFollowModal(opts) {
             '<div class="small muted" id="fuNextHint">关掉则表示这次不需要再跟进</div>' +
           '</div>' +
         '</div>' +
-        '<div class="field"><label>附件（图片 / Excel / PDF，可多次添加，最多 10 个、单个 ≤20MB）</label>' +
+        '<div class="field"><label>附件（图片 / Excel / PDF，可多次添加，最多 20 个、单个 ≤20MB）</label>' +
           '<input type="file" name="photos" multiple></div>' +
         '<div id="fuThumbs" class="attach-strip"></div>' +
         '</div>' +
@@ -176,7 +176,7 @@ function openFollowModal(opts) {
     }).join('');
   }
 
-  var MAX_FILES = 10;
+  var MAX_FILES = 20;
   var MAX_MB = 20;
 
   input.addEventListener('change', function () {

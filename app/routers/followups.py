@@ -216,7 +216,7 @@ async def create_follow_up(
     intent_level: str | None = Form(default=None),
     stage: str | None = Form(default=None),
     photos: list[UploadFile] = File(default=[], description="兼容旧前端：图片附件"),
-    files: list[UploadFile] = File(default=[], description="任意类型附件（≤10 个，单个 ≤20MB）"),
+    files: list[UploadFile] = File(default=[], description="任意类型附件（≤20 个，单个 ≤20MB）"),
     username: str = Depends(require_auth),
 ) -> FollowUpItemOut:
     """页面建跟进；校验和写入复用外部 API 的同一服务。"""

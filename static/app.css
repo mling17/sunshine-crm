@@ -4965,3 +4965,31 @@ table.data-table a:hover { text-decoration: underline; }
 .dict-edit-modal .dict-table td { padding: 8px 10px; }
 .dict-edit-modal .dict-input { min-height: 30px; }
 .dict-edit-modal .dict-new .dict-input { flex: 1 1 240px; min-height: 34px; }
+
+/* ============ 商机名称：列表副标题 / 详情主标题 / 转商机名称输入 ============ */
+.deal-list-customer {
+  display: block;
+  color: #8a95a5;
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+.deal-overview-title {
+  color: #10233e;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+.deal-overview-customer {
+  color: #4d6482;
+  font-size: 12px;
+  text-decoration: none;
+}
+.deal-overview-customer:hover { color: #1f5fbf; text-decoration: underline; }
+.entity-title-sub {
+  margin: 2px 0 0;
+  color: #7a8799;
+  font-size: 12px;
+}
+.deal-convert-title-field { margin: 14px 0 2px; }
+.deal-convert-title-field .hint { display: block; margin-top: 4px; }

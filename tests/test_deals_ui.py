@@ -18,8 +18,9 @@ class DealsListShellUiTest(unittest.TestCase):
         self.css = (ROOT / "static/app.css").read_text(encoding="utf-8")
 
     def test_sortable_columns_and_computed_columns_not(self):
+        # 首列「商机名称」已把客户名作为副标题合并展示，客户不再单独成列
         for key in (
-            "'customer'", "'product'", "'model'", "'drive_type'",
+            "'title'", "'product'", "'model'", "'drive_type'",
             "'size'", "'amount'", "'stage'", "'updated_at'",
         ):
             with self.subTest(key=key):
@@ -33,7 +34,7 @@ class DealsListShellUiTest(unittest.TestCase):
     def test_deal_sort_keys_cover_whitelist(self):
         start = self.js.index("var DEAL_SORT_KEYS")
         seg = self.js[start:self.js.index("];", start)]
-        for key in ("customer", "product", "model", "drive_type", "size", "amount", "stage", "updated_at"):
+        for key in ("title", "customer", "product", "model", "drive_type", "size", "amount", "stage", "updated_at"):
             with self.subTest(key=key):
                 self.assertIn("'" + key + "'", seg)
 
@@ -76,8 +77,8 @@ class DealsListShellUiTest(unittest.TestCase):
                 self.assertIn(marker, seg)
 
     def test_cache_buster_bumped(self):
-        self.assertIn("/crm/views/deals.js?v=20261119review-fixes1", self.html)
-        self.assertNotIn("deals.js?v=20261119carrier-items1", self.html)
+        self.assertIn("/crm/views/deals.js?v=20261120deal-title1", self.html)
+        self.assertNotIn("deals.js?v=20261119review-fixes1", self.html)
 
     def test_sortable_header_and_pager_styles(self):
         for selector in (

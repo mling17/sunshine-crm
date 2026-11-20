@@ -45,7 +45,12 @@ from app.product_catalog import config_summary, get_product, product_snapshot
 from app.routers.auth import require_auth
 from app.routers.leads import LIST_PAGE_SIZES
 from app.security import now_iso, now_local_iso
-from app.services import next_no, resolve_carrier_contact, upgrade_intent
+from app.services import (
+    default_deal_title,
+    next_no,
+    resolve_carrier_contact,
+    upgrade_intent,
+)
 from app.timeline import add_entry, change_summary, entries_for
 
 router = APIRouter(
@@ -59,6 +64,7 @@ STAGES = DEAL_STAGE_ORDER
 #: 列表排序白名单（Ticket #13）：排序 SQL 一律来自这里的映射，绝不拼接前端传来的原始列名。
 #: customer 走 LEFT JOIN 的 c.name；size 对应列表「尺寸」列（deals.spec）。
 _DEAL_SORT_SQL: dict[str, str] = {
+    "title": "d.title",
     "customer": "c.name",
     "product": "d.product_name_snapshot",
     "model": "d.model",
@@ -70,10 +76,10 @@ _DEAL_SORT_SQL: dict[str, str] = {
 }
 
 # 可为 NULL 的排序列：无论升降序都让其沉底（(expr IS NULL) ASC），否则升序时大量空值堆在最前面。
-_DEAL_SORT_NULLABLE = frozenset({"customer", "product", "model", "drive_type", "size"})
+_DEAL_SORT_NULLABLE = frozenset({"title", "customer", "product", "model", "drive_type", "size"})
 #: 会写「编辑」履历的字段
 _CHANGE_TRACKED = (
-    "product_id", "product_code_snapshot", "product_name_snapshot",
+    "title", "product_id", "product_code_snapshot", "product_name_snapshot",
     "product_config_snapshot", "product_type", "model", "spec", "drive_type",
     "amount", "note",
 )
@@ -345,11 +351,12 @@ def list_deals(
         escaped = kw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like = f"%{escaped}%"
         where.append(
-            "(d.model LIKE ? ESCAPE '\\' OR d.spec LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\'"
+            "(d.title LIKE ? ESCAPE '\\' OR d.model LIKE ? ESCAPE '\\' OR d.spec LIKE ? ESCAPE '\\'"
+            " OR c.name LIKE ? ESCAPE '\\'"
             " OR d.product_name_snapshot LIKE ? ESCAPE '\\'"
             " OR d.product_code_snapshot LIKE ? ESCAPE '\\')"
         )
-        params.extend([like, like, like, like, like])
+        params.extend([like, like, like, like, like, like])
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     with db_conn() as conn:
@@ -492,13 +499,18 @@ def create_deal(payload: DealIn) -> DealOut:
     amount = round(float(payload.amount), 2)
 
     with db_conn() as conn:
+        deal_title = default_deal_title(
+            conn, payload.customer_id, payload.title,
+            model=model, product_name=snapshot["product_name_snapshot"],
+        )
         cur = conn.execute(
-            "INSERT INTO deals (customer_id, product_id, product_code_snapshot,"
+            "INSERT INTO deals (customer_id, title, product_id, product_code_snapshot,"
             " product_name_snapshot, product_config_snapshot, product_type, model, spec,"
             " amount, deposit, balance, stage, closed_at, created_at, updated_at, drive_type, note)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'quote', NULL, ?, ?, ?, ?)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'quote', NULL, ?, ?, ?, ?)",
             (
                 payload.customer_id,
+                deal_title,
                 snapshot["product_id"],
                 snapshot["product_code_snapshot"],
                 snapshot["product_name_snapshot"],
@@ -732,6 +744,20 @@ def update_deal(deal_id: int, payload: DealUpdate) -> DealOut:
                 updates["drive_type"] = linked_product["drive_type"]
 
         # ③ 再校验取值
+        # 商机名称：显式 null 时按当前客户/型号回填默认名，空白串拒绝
+        if "title" in updates:
+            if updates["title"] is None:
+                updates["title"] = default_deal_title(
+                    conn, old["customer_id"], None,
+                    model=updates.get("model", old["model"]),
+                    product_name=updates.get("product_name_snapshot", old["product_name_snapshot"]),
+                )
+            else:
+                trimmed = str(updates["title"]).strip()
+                if not trimmed:
+                    raise ApiError(status_code=400, code="title_required", message="商机名称不能为空")
+                updates["title"] = trimmed[:100]
+
         if "stage" in updates and updates["stage"] is None:
             raise ApiError(status_code=400, code="stage_required", message="阶段不能为空")
         if updates.get("stage") == "lost":

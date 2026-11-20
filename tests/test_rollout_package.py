@@ -449,7 +449,7 @@ class RolloutMigrationTest(unittest.TestCase):
             "Authorization: Bearer",
             "Idempotency-Key",
             "multipart/form-data",
-            "10 个",
+            "20 个",
             "20MB",
             "invalid_phone",
             "duplicate_contact",

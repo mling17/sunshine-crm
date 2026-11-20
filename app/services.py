@@ -316,6 +316,42 @@ def upgrade_intent(conn: Connection, object_type: str, object_id: int, level: st
         )
 
 
+def default_deal_title(
+    conn: Connection,
+    customer_id: int,
+    explicit: str | None = None,
+    *,
+    model: str | None = None,
+    product_name: str | None = None,
+) -> str:
+    """商机名称：有显式名称直接用，否则生成「客户名 · 型号/产品」并在同客户下去重。
+
+    去重放在 Python 侧完成，避免 SQLite/MySQL 的 LIKE 转义差异；同一事务内调用，
+    新商机尚未插入，因此统计的是已有商机名。
+    """
+    text = (explicit or "").strip()
+    if text:
+        return text[:100]
+    cust = conn.execute("SELECT name FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    customer_name = ((cust["name"] if cust else None) or "客户").strip()
+    detail = (product_name or model or "").strip()
+    base = (f"{customer_name} · {detail}" if detail else f"{customer_name}的商机")[:100]
+    existing = {
+        (row["title"] or "").strip()
+        for row in conn.execute(
+            "SELECT title FROM deals WHERE customer_id = ? AND is_delete = 0",
+            (customer_id,),
+        ).fetchall()
+    }
+    if base not in existing:
+        return base
+    n = 2
+    while f"{base} ({n})" in existing:
+        n += 1
+    suffix = f" ({n})"
+    return base[: 100 - len(suffix)] + suffix
+
+
 def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> LeadConvertOut:
     """线索转化（单事务 8 步）。
 
@@ -509,6 +545,11 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     else:
         resolved_drive = None
     
+    # 商机名称：显式名优先，否则由客户名 + 型号/产品生成并在同客户下去重
+    deal_title = default_deal_title(
+        conn, customer_id, deal_in.title,
+        model=snapshot["model"], product_name=snapshot["product_name_snapshot"],
+    )
     cur = conn.execute(
         """
         INSERT INTO deals
@@ -519,7 +560,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
         """,
         (
             customer_id,
-            deal_in.title,
+            deal_title,
             snapshot["product_id"],
             snapshot["product_code_snapshot"],
             snapshot["product_name_snapshot"],
@@ -607,7 +648,7 @@ def convert_lead(conn: Connection, lead_id: int, convert_in: LeadConvertIn) -> L
     
     # 获取商机详情
     deal_row = conn.execute(
-        "SELECT id, customer_id, product_id, product_code_snapshot,"
+        "SELECT id, customer_id, title, product_id, product_code_snapshot,"
         " product_name_snapshot, product_config_snapshot, product_type, model, spec,"
         " amount, stage, drive_type, closed_at, created_at, updated_at "
         "FROM deals WHERE id = ?",
